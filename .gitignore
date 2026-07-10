@@ -1,0 +1,9 @@
+.venv/
+data/raw/
+*.zip
+__pycache__/
+*.pyc
+.DS_Store
+reference/
+CLAUDE.md
+PROGRESS.md

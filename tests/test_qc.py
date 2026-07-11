@@ -68,7 +68,30 @@ def test_missing_end_station_is_kept_and_flagged_not_dropped():
     assert flags["has_end"]
 
 
-def test_report_summary_documents_asymmetric_treatment():
+def test_missing_start_station_is_kept_and_flagged_not_dropped():
+    trips = pd.DataFrame(
+        [
+            make_trip(
+                "2026-04-01 00:00:00",
+                "2026-04-01 00:10:00",
+                ride_id="no_start",
+                start_station_id=float("nan"),
+                start_station_name=float("nan"),
+            ),
+            make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00", ride_id="has_start"),
+        ]
+    )
+
+    clean, report = run_qc(trips)
+
+    assert report.rows_out == 2  # neither row dropped
+    assert report.missing_start_station == 1
+    flags = clean.set_index("ride_id")["has_valid_departure_station"]
+    assert not flags["no_start"]
+    assert flags["has_start"]
+
+
+def test_report_summary_documents_departure_arrival_imbalance():
     trips = pd.DataFrame([make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00")])
     _, report = run_qc(trips)
     assert "will NOT balance by construction" in report.summary()
@@ -85,6 +108,10 @@ def test_qc_report_matches_known_202604_counts():
     missing-end-station rows are ALSO over-4h trips (a bike ridden for
     hours that also never got redocked) and get removed by the duration
     rule first, so they don't reach the flagging step.
+
+    missing_start_station is 1,930, not the raw 1,939 -- 9 of those rows
+    are also dropped by the duration rule first, same overlap logic as
+    the end-station case above.
     """
     trips = load_trips(RAW_DATA_DIR / "202604-citibike-tripdata.zip")
     clean, report = run_qc(trips)
@@ -93,4 +120,5 @@ def test_qc_report_matches_known_202604_counts():
     assert report.dropped_short == 0
     assert report.dropped_long == 3_611
     assert report.rows_out == report.rows_in - report.dropped_long
+    assert report.missing_start_station == 1_930
     assert report.missing_end_station == 8_750

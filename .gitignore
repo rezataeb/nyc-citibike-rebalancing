@@ -1,6 +1,5 @@
 .venv/
 data/raw/
-data/flows.json
 *.zip
 __pycache__/
 *.pyc

@@ -44,15 +44,26 @@ def download_month(year_month: str, dest_dir: Path = RAW_DATA_DIR) -> Path:
     return dest_path
 
 
+STATION_ID_COLUMNS = {"start_station_id": str, "end_station_id": str}
+
+
 def load_trips(zip_path: Path) -> pd.DataFrame:
-    """Read every CSV inside the monthly zip and concatenate them into one DataFrame."""
+    """Read every CSV inside the monthly zip and concatenate them into one DataFrame.
+
+    Station id columns are forced to str at read time. Left to its own
+    inference, pandas parses them inconsistently across the zip's split
+    part-CSVs -- e.g. some chunks yield "7293.10" (str), others 7293.1
+    (float) for the same physical station -- which silently splits one
+    station into two groups in any later groupby("station_id"). NaN stays
+    NaN either way, so QC's missing-station-id logic is unaffected.
+    """
     with zipfile.ZipFile(zip_path) as zf:
         csv_names = sorted(
             name
             for name in zf.namelist()
             if name.endswith(".csv") and not name.startswith("__MACOSX")
         )
-        frames = [pd.read_csv(zf.open(name)) for name in csv_names]
+        frames = [pd.read_csv(zf.open(name), dtype=STATION_ID_COLUMNS) for name in csv_names]
     return pd.concat(frames, ignore_index=True)
 
 

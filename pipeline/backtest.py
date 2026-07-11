@@ -59,6 +59,39 @@ def build_flat_baseline(train_flows: pd.DataFrame) -> pd.DataFrame:
     return predicted
 
 
+FLOWS_GRAIN = ["station_id", "day_type", "hour"]
+
+
+def _collapse_to_grain(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """Collapse df to one row per (station_id, day_type, hour) -- or whichever
+    of those columns df actually has.
+
+    Fixes accidental duplicate rows from a table spanning more than one
+    `month` label for the same slot (see flows.py's midnight-crossing
+    note: a held-out month's early/late trips can spill into the adjacent
+    calendar month), without discarding real hour/day_type granularity or
+    forcing columns a table never had. This matters because it must NOT
+    collapse to join_cols -- the flat baseline's join_cols is ["station_id"]
+    only, by design, so it can broadcast one prediction across every
+    hour's actual value; collapsing actual_flows down to join_cols there
+    would average away the exact variation the flat baseline is being
+    scored against.
+
+    Weighted by n_days if present (needed when duplicates come from a
+    genuine month split); a plain mean otherwise, which is a no-op for
+    build_naive_forecast/build_flat_baseline's output (already unique).
+    """
+    grain = [col for col in FLOWS_GRAIN if col in df.columns]
+    if "n_days" in df.columns:
+        return (
+            df.groupby(grain, observed=True)
+            .apply(_weighted_average, value_col=value_col, include_groups=False)
+            .rename(value_col)
+            .reset_index()
+        )
+    return df.groupby(grain, observed=True)[value_col].mean().reset_index()
+
+
 def compute_mae(predicted: pd.DataFrame, actual_flows: pd.DataFrame, join_cols: list[str]) -> dict:
     """Join a forecast onto held-out actuals and score it with MAE.
 
@@ -66,18 +99,25 @@ def compute_mae(predicted: pd.DataFrame, actual_flows: pd.DataFrame, join_cols: 
     for the seasonal-naive forecast (one prediction per slot), ["station_id"]
     for the flat baseline (one prediction broadcast across every slot).
 
+    Both sides are collapsed to the natural flows grain first (see
+    _collapse_to_grain) so evaluation is never accidentally split by a
+    month label, while still leaving the flat baseline's coarser join
+    free to broadcast across every hour.
+
     Uses an inner join, so stations/slots present in the test month but
     absent from training (e.g. a station that did not exist in April)
     are dropped, not silently predicted as zero -- coverage reports how
     much of the actual data that affected.
     """
-    merged = actual_flows.merge(predicted, on=join_cols, how="inner")
+    actual = _collapse_to_grain(actual_flows, "net_per_day")
+    pred = _collapse_to_grain(predicted, "predicted_net_per_day")
+    merged = actual.merge(pred, on=join_cols, how="inner")
     merged["abs_error"] = (merged["net_per_day"] - merged["predicted_net_per_day"]).abs()
     return {
         "mae": float(merged["abs_error"].mean()),
         "n_predictions": len(merged),
-        "n_actual_rows": len(actual_flows),
-        "coverage": len(merged) / len(actual_flows),
+        "n_actual_rows": len(actual),
+        "coverage": len(merged) / len(actual),
     }
 
 

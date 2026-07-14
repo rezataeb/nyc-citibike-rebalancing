@@ -90,6 +90,20 @@ const FAKE_PAYLOAD = {
   },
 };
 
+// Fake live_status.json payload -- station A is a normal 50%-full reading
+// (neutral gray under the deviation-from-50 color mapping), B is a normal
+// but low reading (10% full, red end), and C is deliberately ABSENT so it
+// exercises the "no live match" no-data bucket, same convention as a
+// missing historical period.
+const FAKE_LIVE_PAYLOAD = {
+  last_updated: '2026-07-14T04:30:08+00:00',
+  n_dropped: 0,
+  stations: {
+    A: { capacity: 20, bikes_available: 10, docks_available: 10, is_renting: true, is_returning: true },
+    B: { capacity: 20, bikes_available: 2, docks_available: 18, is_renting: true, is_returning: true },
+  },
+};
+
 function makeElementStub(id) {
   const el = {
     id,
@@ -157,8 +171,9 @@ function buildSandbox() {
       },
     },
     L,
-    fetch() {
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(FAKE_PAYLOAD) });
+    fetch(url) {
+      const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD : FAKE_PAYLOAD;
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
     },
     // Synchronous stub: a real browser defers to the next paint, but for a
     // smoke test we only care that the callback eventually runs with the
@@ -205,6 +220,8 @@ async function main() {
   const stateAt8 = dash.getState();
   assert.strictEqual(Object.keys(stateAt8.markers).length, 3, 'expected one marker per fake station');
   assert.strictEqual(stateAt8.currentHour, 8);
+  assert.deepStrictEqual(stateAt8.liveStations, FAKE_LIVE_PAYLOAD.stations, 'live_status.json should be fetched alongside flows.json at load');
+  assert.strictEqual(stateAt8.liveAsOf, FAKE_LIVE_PAYLOAD.last_updated);
 
   for (const id of ['A', 'B', 'C']) {
     const expected = dash.divergingColor(FAKE_PAYLOAD.stations[id].weekday[8], stateAt8.domainMax);
@@ -455,6 +472,104 @@ async function main() {
   assert.strictEqual(stateBackToAll.markers.B._opts.color, '#ffffff', 'station B should revert to the plain default stroke once data exists again');
   assert.strictEqual(elements['status'].textContent, '3 stations');
   assert.ok(!elements['detail-strip'].innerHTML.includes('No data'), 'station A (still selected) has all-period data -- no no-data message should remain');
+
+  // --- Session 15: live GBFS mode. Entering with period='all', dayType='weekend', hour=20, selectedId='A'. ---
+
+  const modeLiveClick = elements['mode-live']._listeners.click;
+  assert.ok(modeLiveClick, 'no click listener registered on the live mode button');
+  modeLiveClick();
+
+  const stateLive = dash.getState();
+  assert.strictEqual(stateLive.mode, 'live');
+  assert.strictEqual(elements['historical-controls'].style.display, 'none', 'historical-only controls should hide in live mode');
+  assert.strictEqual(elements['live-as-of'].style.display, '', 'the live as-of readout should show in live mode');
+  assert.ok(elements['mode-live'].classList.contains('active'));
+  assert.ok(!elements['mode-historical'].classList.contains('active'));
+
+  assert.strictEqual(elements['title-subtitle'].textContent, 'Live dock status');
+  assert.strictEqual(elements['legend-title'].textContent, 'Live dock status (% full)');
+  assert.strictEqual(elements['legend-label-low'].textContent, 'Empty (0% full)');
+  assert.strictEqual(elements['legend-label-mid'].textContent, '50%');
+  assert.strictEqual(elements['legend-label-high'].textContent, 'Full (100% full)');
+  assert.strictEqual(
+    elements['legend-note'].textContent,
+    '50% used as a simple neutral reference point, not a station-specific target inventory level.'
+  );
+  assert.strictEqual(elements['live-as-of'].textContent, `Live as of ${dash.formatAsOf(FAKE_LIVE_PAYLOAD.last_updated)}`);
+
+  // A: 10/20 = 50% full -> neutral gray (deviation 0). B: 2/20 = 10% full -> red end. C: no live match -> hollow.
+  assert.strictEqual(
+    stateLive.markers.A._opts.fillColor, dash.divergingColor(0, 50),
+    'station A is 50% full -> deviation-from-50 of 0 -> neutral gray'
+  );
+  assert.strictEqual(
+    stateLive.markers.B._opts.fillColor, dash.divergingColor(10 - 50, 50),
+    'station B is 10% full -> deviation-from-50 of -40 -> toward the red end'
+  );
+  assert.strictEqual(stateLive.markers.C._opts.fillOpacity, 0, 'station C has no live match -- hollow, not hidden');
+  assert.strictEqual(stateLive.markers.C._opts.color, '#b5b3ad', 'station C should get the plain no-data stroke (not selected)');
+
+  // A is still selected from the historical-mode steps above -- selection survives a mode switch.
+  assert.strictEqual(stateLive.selectedId, 'A');
+  assert.strictEqual(stateLive.markers.A._opts.color, '#2a2a28', 'station A keeps the selection stroke in live mode too');
+  assert.strictEqual(stateLive.markers.A._opts.fillOpacity, 0.85, 'station A has live data -- not hollow, even while selected');
+
+  assert.strictEqual(
+    elements['status'].textContent, '2 of 3 stations have live data',
+    'the status line must state live coverage explicitly, computed from the real fake payload, not hardcoded'
+  );
+
+  // Detail panel should already reflect A's live reading (updateStationDetail runs from renderHour's hook).
+  assert.strictEqual(elements['detail-daylabel'].textContent, `live, as of ${dash.formatAsOf(FAKE_LIVE_PAYLOAD.last_updated)}`);
+  assert.ok(elements['detail-strip'].innerHTML.includes('10 bikes / 10 docks'));
+  assert.ok(elements['detail-strip'].innerHTML.includes('capacity 20'));
+
+  // Hover preview must stay a no-op in live mode, even though A (the selected station) does have live data --
+  // live mode simply has no rhythm strip/crosshair concept at all.
+  dash.clearStripPreview();
+  dash.previewStripHour(5);
+  assert.strictEqual(elements['strip-crosshair'].style.display, 'none', 'previewStripHour must no-op unconditionally in live mode');
+
+  // --- selecting the no-live-match station (C) shows the explicit no-live-data panel state ---
+  const selectCLive = stateLive.markers.C._listeners.click;
+  selectCLive();
+  const stateCLive = dash.getState();
+  assert.strictEqual(stateCLive.selectedId, 'C');
+  assert.ok(elements['detail-strip'].innerHTML.includes('No live data'));
+  assert.strictEqual(stateCLive.markers.C._opts.color, '#2a2a28', 'a selected no-live-data marker still gets the selection stroke');
+  assert.strictEqual(stateCLive.markers.C._opts.fillOpacity, 0, 'and stays hollow while selected');
+  assert.strictEqual(
+    stateCLive.markers.A._opts.color, '#ffffff',
+    'deselecting station A (by selecting C instead) should revert it to the plain default stroke -- it has live data, not the no-data gray'
+  );
+
+  // --- switching back to historical mode restores the historical controls, text, and marker logic ---
+  const modeHistoricalClick = elements['mode-historical']._listeners.click;
+  modeHistoricalClick();
+  const stateBackToHistorical = dash.getState();
+  assert.strictEqual(stateBackToHistorical.mode, 'historical');
+  assert.strictEqual(elements['historical-controls'].style.display, '', 'historical controls should reappear');
+  assert.strictEqual(elements['live-as-of'].style.display, 'none', 'the live as-of readout should hide again');
+  assert.strictEqual(elements['legend-label-low'].textContent, 'Deficit (no bikes)');
+  assert.strictEqual(elements['legend-label-mid'].textContent, '0');
+  assert.strictEqual(elements['legend-label-high'].textContent, 'Surplus (no docks)');
+  assert.strictEqual(
+    elements['title-subtitle'].textContent, 'Net flow at 8:00 PM, weekend (all-period average)',
+    'historical text should reflect whatever hour/dayType/period were already set, unchanged by the live-mode detour'
+  );
+
+  // Station C (no live match, but flows.json always has all-period data) should recolor normally again.
+  assert.strictEqual(
+    stateBackToHistorical.markers.C._opts.fillColor,
+    dash.divergingColor(FAKE_PAYLOAD.stations.C.weekend[20], domainMaxAt8),
+    'station C should recolor from its historical weekend curve again, now that mode is historical'
+  );
+  assert.strictEqual(stateBackToHistorical.markers.C._opts.fillOpacity, 0.85);
+  assert.strictEqual(elements['status'].textContent, '3 stations', 'status line should revert to the plain historical count (period is still "all")');
+  assert.ok(
+    elements['detail-strip'].innerHTML.includes('id="strip-dot"'),
+    'station C (still selected) has all-period historical data -- the rhythm strip should draw normally again'
+  );
 
   console.log('All dashboard slider smoke tests passed.');
 }

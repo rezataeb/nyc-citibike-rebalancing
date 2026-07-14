@@ -19,10 +19,12 @@
   #controls label { color: #52514e; }
   #controls input[type="range"] { width: 200px; }
   #hour-label { font-weight: 600; min-width: 74px; display: inline-block; }
-  #day-toggle { display: flex; gap: 4px; margin-right: 6px; }
+  #historical-controls { display: flex; align-items: center; gap: 10px; }
+  #mode-toggle, #day-toggle { display: flex; gap: 4px; margin-right: 6px; }
   .day-btn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
   .day-btn.active { background: #2a78d6; border-color: #2a78d6; color: #fff; }
   #period-select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-right: 6px; }
+  #live-as-of { color: #52514e; }
   #legend { bottom: 24px; left: 24px; padding: 12px 16px; font-size: 12px; }
   #legend .bar { width: 220px; height: 12px; border-radius: 6px; margin: 6px 0; }
   #legend .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; }
@@ -48,20 +50,27 @@
 </div>
 
 <div id="controls">
-  <div id="day-toggle">
-    <button id="day-weekday" class="day-btn active">Weekday</button>
-    <button id="day-weekend" class="day-btn">Weekend</button>
+  <div id="mode-toggle">
+    <button id="mode-historical" class="day-btn active">Historical flow</button>
+    <button id="mode-live" class="day-btn">Live docks (GBFS)</button>
   </div>
-  <select id="period-select"></select>
-  <label for="hour-slider">Hour of day</label>
-  <input type="range" id="hour-slider" min="0" max="23" step="1" value="8">
-  <span id="hour-label">8:00 AM</span>
+  <div id="historical-controls">
+    <div id="day-toggle">
+      <button id="day-weekday" class="day-btn active">Weekday</button>
+      <button id="day-weekend" class="day-btn">Weekend</button>
+    </div>
+    <select id="period-select"></select>
+    <label for="hour-slider">Hour of day</label>
+    <input type="range" id="hour-slider" min="0" max="23" step="1" value="8">
+    <span id="hour-label">8:00 AM</span>
+  </div>
+  <div id="live-as-of" style="display:none"></div>
 </div>
 
 <div id="legend">
   <div id="legend-title">Net flow at 8:00 AM weekday (bikes/day)</div>
   <div class="bar" id="legend-bar"></div>
-  <div class="labels"><span>Deficit (no bikes)</span><span>0</span><span>Surplus (no docks)</span></div>
+  <div class="labels"><span id="legend-label-low">Deficit (no bikes)</span><span id="legend-label-mid">0</span><span id="legend-label-high">Surplus (no docks)</span></div>
   <div id="legend-note">Color scale is shared across weekday/weekend &mdash; paler weekend markers reflect genuinely smaller imbalance, not a rendering error.</div>
 </div>
 
@@ -80,11 +89,14 @@
 <script>
 // Session 10 built the map skeleton (fixed 8am, no interactivity). Session 11
 // added the 24h time slider. Session 12 added the weekday/weekend toggle.
-// Session 13 added the station click -> detail panel. Session 14 adds the
-// season/month period selector -- each interaction lands as its own commit.
-// Still no equity/route/live-GBFS layers (equity filter is a standing scope
-// exclusion, see CLAUDE.md -- per-station equity context in the detail
-// panel is in scope and unaffected).
+// Session 13 added the station click -> detail panel. Session 14 added the
+// season/month period selector. Session 15 adds the live GBFS docks mode --
+// each interaction lands as its own commit. Still no route layer. Equity
+// filter is a standing scope exclusion, see CLAUDE.md -- per-station equity
+// context in the detail panel is in scope and unaffected. Marker clustering
+// is not built (checked before Session 15 -- there is no computeClusterColor
+// or similar anywhere in this file, reference/dashboard.html, or
+// PROGRESS.md; dropped from Session 15's scope pending clarification).
 
 const DEFAULT_HOUR = 8; // initial slider position; no longer a fixed constant once wired up
 
@@ -213,6 +225,38 @@ function curveForPeriod(station, period, dayType) {
   return bucket ? bucket[dayType] : null;
 }
 
+// Fixed deviation-from-50% domain for live fill level, NOT state.domainMax
+// and NOT pooled -- percent-full is naturally bounded to [0, 100] already,
+// unlike historical flow magnitude, which has no natural ceiling and needs
+// a percentile-based domain. Fed straight into the same divergingColor()
+// the historical view uses: 0% full -> t=-1 (red, same "can't get a bike"
+// meaning as a flow deficit), 100% full -> t=+1 (blue, same "can't return a
+// bike" meaning as a flow surplus), 50% -> t=0 (gray). One consistent
+// visual language across historical and live, not a second color scale.
+const LIVE_FILL_DOMAIN = 50;
+
+// A station has a usable live reading only if it has a crosswalk match,
+// AND a real capacity to divide by (52 real-world stations report
+// capacity: 0), AND is fully operational (is_renting/is_returning both
+// true -- ~96 real-world stations are mid-maintenance or otherwise
+// offline). All three collapse into one no-data bucket, same hollow-marker
+// convention as a missing historical period -- not a second visual
+// language for "why there's no data."
+function hasLiveData(id) {
+  const live = state.liveStations[id];
+  return Boolean(live && live.capacity > 0 && live.is_renting && live.is_returning);
+}
+
+// Deterministic, timezone-free formatting for the feed's own UTC
+// last_updated timestamp (an ISO string like "2026-07-14T04:30:08+00:00")
+// -- deliberately not `new Date(...).toLocaleString()`, which would make
+// the displayed "as of" time depend on the viewer's local timezone/locale
+// and be non-deterministic to test.
+function formatAsOf(isoString) {
+  if (!isoString) return 'unknown';
+  return `${isoString.replace('T', ' ').replace(/[+-]\d{2}:\d{2}$/, '').replace(/Z$/, '')} UTC`;
+}
+
 // Dashboard state, kept in one place (rather than scattered closure
 // variables) so the Node smoke test can inspect it via the test hook below.
 const state = {
@@ -223,6 +267,9 @@ const state = {
   dayType: 'weekday',
   period: 'all', // 'all' | `season:${name}` | `month:${YYYY-MM}`
   selectedId: null, // station id with an open detail panel, or null
+  mode: 'historical', // 'historical' | 'live'
+  liveStations: null, // station_id -> {capacity, bikes_available, docks_available, is_renting, is_returning}, from live_status.json
+  liveAsOf: null, // live_status.json's own last_updated (ISO string), never the viewer's local load time
 };
 
 // Stroke (selection ring) and fill styling, kept as one lookup table so
@@ -235,24 +282,41 @@ const DEFAULT_WEIGHT = 0.75;
 const SELECTED_WEIGHT = 2;
 const NO_DATA_WEIGHT = 1; // slightly heavier than default so a hollow ring reads clearly against the basemap
 
+function noDataStyle(selected) {
+  return {
+    fillColor: '#ffffff',
+    fillOpacity: 0,
+    color: selected ? SELECTED_STROKE : NO_DATA_STROKE,
+    weight: selected ? SELECTED_WEIGHT : NO_DATA_WEIGHT,
+  };
+}
+
 // The single source of truth for one marker's full visual style, given the
-// CURRENT state (period, dayType, currentHour, domainMax, selectedId). A
-// station missing the selected period (see hasPeriodData) renders hollow --
-// fillOpacity 0, gray stroke -- rather than being hidden or showing an
-// invented value; per-project rule, a data gap must stay visible, not
-// silently vanish (same precedent as typology's low-volume exclusion).
+// CURRENT state (mode, period, dayType, currentHour, domainMax,
+// selectedId). A station missing data for whatever's currently selected --
+// a historical period (see hasPeriodData) or a live reading (see
+// hasLiveData) -- renders hollow: fillOpacity 0, gray stroke, rather than
+// being hidden or showing an invented value; per-project rule, a data gap
+// must stay visible, not silently vanish (same precedent as typology's
+// low-volume exclusion).
 function markerStyleFor(id) {
-  const station = state.stations[id];
-  const curve = curveForPeriod(station, state.period, state.dayType);
   const selected = id === state.selectedId;
-  if (curve === null) {
+
+  if (state.mode === 'live') {
+    if (!hasLiveData(id)) return noDataStyle(selected);
+    const live = state.liveStations[id];
+    const pctFull = (live.bikes_available / live.capacity) * 100;
     return {
-      fillColor: '#ffffff',
-      fillOpacity: 0,
-      color: selected ? SELECTED_STROKE : NO_DATA_STROKE,
-      weight: selected ? SELECTED_WEIGHT : NO_DATA_WEIGHT,
+      fillColor: divergingColor(pctFull - 50, LIVE_FILL_DOMAIN),
+      fillOpacity: 0.85,
+      color: selected ? SELECTED_STROKE : DEFAULT_STROKE,
+      weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
     };
   }
+
+  const station = state.stations[id];
+  const curve = curveForPeriod(station, state.period, state.dayType);
+  if (curve === null) return noDataStyle(selected);
   return {
     fillColor: divergingColor(curve[state.currentHour], state.domainMax),
     fillOpacity: 0.85,
@@ -265,26 +329,41 @@ function restyleMarker(id) {
   state.markers[id].setStyle(markerStyleFor(id));
 }
 
-// Recolors/restyles every existing marker for `hour`/`state.dayType`/
-// `state.period` and updates the hour-, day-type-, and period-dependent text
-// (title subtitle, legend title, slider label). Does NOT touch the legend
-// gradient bar or recompute domainMax -- both are fixed once, at load time,
-// by design (see computeDomainMax above).
+// Recolors/restyles every existing marker for the CURRENT state (mode,
+// hour, dayType, period) and updates all the mode-dependent text (title
+// subtitle, legend title+note+labels, slider label). Does NOT touch the
+// legend gradient bar or recompute domainMax -- both are fixed once, at
+// load time, by design (see computeDomainMax above).
 function renderHour(hour) {
   state.currentHour = hour;
   for (const id in state.markers) restyleMarker(id);
 
-  const label = formatHourLabel(hour);
-  const periodLabel = formatPeriodLabel(state.period);
-  document.getElementById('title-subtitle').textContent = `Net flow at ${label}, ${state.dayType} (${periodLabel})`;
-  document.getElementById('legend-title').textContent = `Net flow at ${label} ${state.dayType}, ${periodLabel} (bikes/day)`;
-  document.getElementById('hour-label').textContent = label;
+  if (state.mode === 'live') {
+    document.getElementById('title-subtitle').textContent = 'Live dock status';
+    document.getElementById('legend-title').textContent = 'Live dock status (% full)';
+    document.getElementById('legend-label-low').textContent = 'Empty (0% full)';
+    document.getElementById('legend-label-mid').textContent = '50%';
+    document.getElementById('legend-label-high').textContent = 'Full (100% full)';
+    document.getElementById('legend-note').textContent =
+      '50% used as a simple neutral reference point, not a station-specific target inventory level.';
+    document.getElementById('live-as-of').textContent = `Live as of ${formatAsOf(state.liveAsOf)}`;
+  } else {
+    const label = formatHourLabel(hour);
+    const periodLabel = formatPeriodLabel(state.period);
+    document.getElementById('title-subtitle').textContent = `Net flow at ${label}, ${state.dayType} (${periodLabel})`;
+    document.getElementById('legend-title').textContent = `Net flow at ${label} ${state.dayType}, ${periodLabel} (bikes/day)`;
+    document.getElementById('legend-label-low').textContent = 'Deficit (no bikes)';
+    document.getElementById('legend-label-mid').textContent = '0';
+    document.getElementById('legend-label-high').textContent = 'Surplus (no docks)';
+    document.getElementById('legend-note').textContent =
+      'Color scale is shared across weekday/weekend — paler weekend markers reflect genuinely smaller imbalance, not a rendering error.';
+    document.getElementById('hour-label').textContent = label;
+  }
 
-  // Keeps an open detail panel's strip and persistent-hour dot in sync with
-  // whatever just changed the hour -- the slider (direct call), the
-  // day-type toggle, or the period selector (both call renderHour below).
-  // One hook point covers all three, so there's only one place that can
-  // drift out of sync.
+  // Keeps an open detail panel in sync with whatever just changed -- the
+  // slider, the day-type toggle, the period selector, or the mode toggle
+  // (all call renderHour). One hook point covers all four, so there's only
+  // one place that can drift out of sync.
   if (state.selectedId) updateStationDetail();
 }
 
@@ -312,12 +391,32 @@ function setPeriod(period) {
 function updateStatusMessage() {
   const ids = Object.keys(state.stations);
   const status = document.getElementById('status');
+
+  if (state.mode === 'live') {
+    const withData = ids.filter(hasLiveData).length;
+    status.textContent = `${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have live data`;
+    return;
+  }
   if (state.period === 'all') {
     status.textContent = `${ids.length.toLocaleString()} stations`;
     return;
   }
   const withData = ids.filter(id => hasPeriodData(state.stations[id], state.period)).length;
   status.textContent = `${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have data for ${formatPeriodLabel(state.period)}`;
+}
+
+// Switches historical <-> live and re-renders through the same renderHour
+// path everything else uses. Hides/shows the historical-only controls
+// (hour slider, day-type toggle, period selector -- none apply to a live
+// snapshot) and the live "as of" readout, exactly opposite each other.
+function setMode(mode) {
+  state.mode = mode;
+  document.getElementById('mode-historical').classList.toggle('active', mode === 'historical');
+  document.getElementById('mode-live').classList.toggle('active', mode === 'live');
+  document.getElementById('historical-controls').style.display = mode === 'historical' ? '' : 'none';
+  document.getElementById('live-as-of').style.display = mode === 'live' ? '' : 'none';
+  renderHour(state.currentHour);
+  updateStatusMessage();
 }
 
 // Builds the equity-context lines shown in the detail panel from flows.json's
@@ -422,22 +521,44 @@ function buildStripMarkup(curve, domainMax, currentHour) {
   `;
 }
 
-// Redraws the selected station's strip for the CURRENT state.dayType,
-// state.period, and state.currentHour, and its persistent dot. domainMax is
-// passed straight from state.domainMax -- the same pooled domain (every
+// Builds the live-mode detail panel content: a plain bikes/docks/capacity
+// readout plus the feed's as-of time, rather than branching the historical
+// chart-drawing code (buildStripMarkup/stripX/stripY) to also understand
+// a live reading -- these are different enough datasets that one shared
+// drawing function would need more special-casing than it's worth.
+function buildLiveDetailMarkup(live) {
+  return `
+    <text x="${STRIP_W / 2}" y="28" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="middle">${live.bikes_available} bikes / ${live.docks_available} docks</text>
+    <text x="${STRIP_W / 2}" y="46" font-size="10" fill="#52514e" text-anchor="middle">capacity ${live.capacity}</text>
+  `;
+}
+
+// Redraws the selected station's detail content for the CURRENT state
+// (mode, dayType, period, currentHour). In historical mode this is the
+// rhythm strip, using state.domainMax -- the same pooled domain (every
 // hour x both day types x every period) the map markers use, never
-// recomputed per station or per chart. The panel always agrees with the
-// map's period, same invariant as hour/day-type: if this station has no
-// data for the selected period, that's shown explicitly, never silently
-// falling back to all-period average.
+// recomputed per station or per chart. In live mode it's the bikes/docks
+// readout. Either way, the panel always agrees with the map: if this
+// station has no data for whatever's currently selected, that's shown
+// explicitly, never silently falling back to something else.
 function updateStationDetail() {
   if (!state.selectedId) return;
+  const stripEl = document.getElementById('detail-strip');
+
+  if (state.mode === 'live') {
+    document.getElementById('detail-daylabel').textContent = `live, as of ${formatAsOf(state.liveAsOf)}`;
+    if (!hasLiveData(state.selectedId)) {
+      stripEl.innerHTML = `<text x="${STRIP_W / 2}" y="${STRIP_MID}" font-size="11" fill="#898781" text-anchor="middle">No live data</text>`;
+      return;
+    }
+    stripEl.innerHTML = buildLiveDetailMarkup(state.liveStations[state.selectedId]);
+    return;
+  }
+
   const s = state.stations[state.selectedId];
   const curve = curveForPeriod(s, state.period, state.dayType);
   const periodLabel = formatPeriodLabel(state.period);
   document.getElementById('detail-daylabel').textContent = `${state.dayType}, ${periodLabel}`;
-
-  const stripEl = document.getElementById('detail-strip');
   if (curve === null) {
     stripEl.innerHTML = `<text x="${STRIP_W / 2}" y="${STRIP_MID}" font-size="11" fill="#898781" text-anchor="middle">No data for ${periodLabel}</text>`;
     return;
@@ -452,6 +573,7 @@ function updateStationDetail() {
 // position; this is strictly a local "what if" preview under the pointer.
 function previewStripHour(hour) {
   if (!state.selectedId) return;
+  if (state.mode === 'live') return; // live mode has no rhythm strip at all -- nothing to preview
   const curve = curveForPeriod(state.stations[state.selectedId], state.period, state.dayType);
   if (curve === null) return; // no strip is drawn for a no-data period; nothing to preview
   const x = stripX(hour);
@@ -503,13 +625,22 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 19,
 }).addTo(map);
 
-const ready = fetch('data/flows.json')
-  .then(response => {
-    if (!response.ok) throw new Error(`flows.json fetch failed: HTTP ${response.status}`);
+function fetchJSON(url) {
+  return fetch(url).then(response => {
+    if (!response.ok) throw new Error(`${url} fetch failed: HTTP ${response.status}`);
     return response.json();
-  })
-  .then(payload => {
+  });
+}
+
+// Both files are fetched together at load, same as the rest of this
+// dashboard's "load everything once up front" architecture -- live_status.json
+// is a small local static file (see pipeline/gbfs_logger.py's export_live_status),
+// not a call to the live GBFS feed itself, which CORS blocks from a browser.
+const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_status.json')])
+  .then(([payload, livePayload]) => {
     state.stations = payload.stations;
+    state.liveStations = livePayload.stations;
+    state.liveAsOf = livePayload.last_updated;
     const ids = Object.keys(state.stations);
 
     // Bounding box derived from the real station coordinates in flows.json,
@@ -574,6 +705,9 @@ const ready = fetch('data/flows.json')
 
     periodSelect.addEventListener('change', event => setPeriod(event.target.value));
 
+    document.getElementById('mode-historical').addEventListener('click', () => setMode('historical'));
+    document.getElementById('mode-live').addEventListener('click', () => setMode('live'));
+
     document.getElementById('detail-close').addEventListener('click', closeStation);
 
     // Attached once, directly on the (never-replaced) <svg> element -- its
@@ -603,6 +737,7 @@ if (typeof globalThis !== 'undefined') {
     divergingColor, percentile, computeDomainMax, formatHourLabel, renderHour, setDayType,
     selectStation, closeStation, previewStripHour, clearStripPreview, stripX, stripY,
     setPeriod, formatPeriodLabel, curveForPeriod, hasPeriodData,
+    setMode, hasLiveData, formatAsOf,
     getState: () => state,
     ready,
   };

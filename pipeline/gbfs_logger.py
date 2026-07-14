@@ -22,6 +22,7 @@ separate crosswalk step.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +32,7 @@ import requests
 STATION_STATUS_URL = "https://gbfs.citibikenyc.com/gbfs/en/station_status.json"
 STATION_INFORMATION_URL = "https://gbfs.citibikenyc.com/gbfs/en/station_information.json"
 LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "gbfs_log" / "snapshots.csv"
+LIVE_STATUS_PATH = Path(__file__).resolve().parent.parent / "data" / "live_status.json"
 
 
 @dataclass
@@ -58,16 +60,26 @@ def fetch_station_status() -> dict:
     return response.json()
 
 
+def fetch_station_information() -> list[dict]:
+    """GET the station_information feed's raw station list.
+
+    Each entry carries short_name (see fetch_station_id_crosswalk), plus
+    metadata that changes rarely -- name, lat/lng, and capacity. capacity
+    is not present anywhere in flows.json; this is the only place it comes
+    from (see build_live_status_payload).
+    """
+    response = requests.get(STATION_INFORMATION_URL, timeout=30)
+    response.raise_for_status()
+    return response.json()["data"]["stations"]
+
+
 def fetch_station_id_crosswalk() -> dict[str, str]:
-    """GET station_information and return {gbfs station_id: short_name}.
+    """Return {gbfs station_id: short_name}.
 
     short_name is the "6433.01"-style id used throughout this project;
     station_status never carries it directly (see module docstring).
     """
-    response = requests.get(STATION_INFORMATION_URL, timeout=30)
-    response.raise_for_status()
-    stations = response.json()["data"]["stations"]
-    return {station["station_id"]: station["short_name"] for station in stations}
+    return {station["station_id"]: station["short_name"] for station in fetch_station_information()}
 
 
 def parse_snapshot(status_payload: dict, crosswalk: dict[str, str]) -> SnapshotResult:
@@ -116,8 +128,64 @@ def log_snapshot(log_path: Path = LOG_PATH) -> SnapshotResult:
     return result
 
 
+def build_live_status_payload(status_payload: dict, info_stations: list[dict]) -> dict:
+    """Join station_status with station_information into a flows.json-shaped
+    payload the dashboard can fetch directly, keyed by short_name.
+
+    Every station with a valid crosswalk match is included, regardless of
+    whether it also appears in flows.json -- the dashboard does that join
+    itself at render time (a station in flows.json with no entry here is
+    its own "no live data" case; a station here with no entry in
+    flows.json is simply never drawn, since the map's roster comes from
+    flows.json). capacity comes from station_information -- the one place
+    it's actually available (see fetch_station_information).
+    """
+    info_by_id = {station["station_id"]: station for station in info_stations}
+    timestamp = pd.to_datetime(status_payload["last_updated"], unit="s", utc=True)
+    stations = {}
+    n_dropped = 0
+    for station in status_payload["data"]["stations"]:
+        info = info_by_id.get(station["station_id"])
+        if info is None:
+            n_dropped += 1
+            continue
+        stations[info["short_name"]] = {
+            "capacity": info.get("capacity", 0),
+            "bikes_available": station["num_bikes_available"],
+            "docks_available": station["num_docks_available"],
+            "is_renting": bool(station["is_renting"]),
+            "is_returning": bool(station["is_returning"]),
+        }
+    return {
+        "last_updated": timestamp.isoformat(),
+        "n_dropped": n_dropped,
+        "stations": stations,
+    }
+
+
+def export_live_status(path: Path = LIVE_STATUS_PATH) -> dict:
+    """Fetch the live GBFS feed fresh and write a live_status.json snapshot
+    for the dashboard. Manual/on-demand, unlike log_snapshot's cron job --
+    the dashboard labels this "as of {last_updated}", never claiming to be
+    live-in-the-browser.
+    """
+    status_payload = fetch_station_status()
+    info_stations = fetch_station_information()
+    payload = build_live_status_payload(status_payload, info_stations)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload))
+    return payload
+
+
 if __name__ == "__main__":
-    result = log_snapshot()
-    as_of = result.rows["timestamp"].iloc[0] if len(result.rows) else "n/a"
-    print(f"as of {as_of} -> {LOG_PATH}")
-    print(result.summary())
+    import sys
+
+    if "--live" in sys.argv:
+        payload = export_live_status()
+        print(f"as of {payload['last_updated']} -> {LIVE_STATUS_PATH}")
+        print(f"{len(payload['stations']):,} stations, dropped {payload['n_dropped']:,} (no station_information match)")
+    else:
+        result = log_snapshot()
+        as_of = result.rows["timestamp"].iloc[0] if len(result.rows) else "n/a"
+        print(f"as of {as_of} -> {LOG_PATH}")
+        print(result.summary())

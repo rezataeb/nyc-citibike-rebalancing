@@ -1,9 +1,13 @@
 """Tests for pipeline/gbfs_logger.py."""
 
+import json
+
 import pandas as pd
 
 from pipeline.gbfs_logger import (
     append_snapshot,
+    build_live_status_payload,
+    export_live_status,
     fetch_station_id_crosswalk,
     log_snapshot,
     parse_snapshot,
@@ -129,3 +133,80 @@ def test_log_snapshot_fetches_parses_and_appends(tmp_path, monkeypatch):
     assert result.n_dropped == 0
     assert log_path.exists()
     assert len(log_path.read_text().splitlines()) == 2  # header + 1 row
+
+
+def test_build_live_status_payload_joins_status_and_information_by_short_name():
+    status_payload = {
+        "last_updated": 1_700_000_000,
+        "data": {
+            "stations": [
+                {
+                    "station_id": "abc-123",
+                    "num_bikes_available": 5,
+                    "num_docks_available": 10,
+                    "is_renting": 1,
+                    "is_returning": 1,
+                },
+                {
+                    # not in station_information -- e.g. added between the two fetches
+                    "station_id": "unknown-999",
+                    "num_bikes_available": 0,
+                    "num_docks_available": 0,
+                    "is_renting": 0,
+                    "is_returning": 0,
+                },
+            ]
+        },
+    }
+    info_stations = [{"station_id": "abc-123", "short_name": "6433.01", "capacity": 33}]
+
+    payload = build_live_status_payload(status_payload, info_stations)
+
+    assert payload["n_dropped"] == 1
+    assert payload["last_updated"] == pd.Timestamp(1_700_000_000, unit="s", tz="UTC").isoformat()
+    assert payload["stations"] == {
+        "6433.01": {
+            "capacity": 33,
+            "bikes_available": 5,
+            "docks_available": 10,
+            "is_renting": True,
+            "is_returning": True,
+        }
+    }
+
+
+def test_build_live_status_payload_defaults_missing_capacity_to_zero():
+    status_payload = {
+        "last_updated": 1_700_000_000,
+        "data": {"stations": [{"station_id": "abc-123", "num_bikes_available": 0, "num_docks_available": 0, "is_renting": 0, "is_returning": 0}]},
+    }
+    # capacity deliberately absent -- station_information doesn't always carry it
+    info_stations = [{"station_id": "abc-123", "short_name": "6433.01"}]
+
+    payload = build_live_status_payload(status_payload, info_stations)
+
+    assert payload["stations"]["6433.01"]["capacity"] == 0
+    assert payload["stations"]["6433.01"]["is_renting"] is False
+
+
+def test_export_live_status_fetches_and_writes_json(tmp_path, monkeypatch):
+    status_payload = {
+        "last_updated": 1_700_000_000,
+        "data": {"stations": [{"station_id": "abc-123", "num_bikes_available": 5, "num_docks_available": 10, "is_renting": 1, "is_returning": 1}]},
+    }
+    info_payload = {"data": {"stations": [{"station_id": "abc-123", "short_name": "6433.01", "capacity": 33}]}}
+
+    def fake_get(url, timeout):
+        if "station_status" in url:
+            return _fake_response(status_payload)
+        return _fake_response(info_payload)
+
+    monkeypatch.setattr("pipeline.gbfs_logger.requests.get", fake_get)
+
+    live_status_path = tmp_path / "live_status.json"
+    payload = export_live_status(path=live_status_path)
+
+    assert payload["stations"]["6433.01"]["capacity"] == 33
+    assert live_status_path.exists()
+    on_disk = json.loads(live_status_path.read_text())
+    assert on_disk == payload

@@ -158,12 +158,29 @@ function buildSandbox() {
   // A single map stub object (not a new one per L.map() call, since the
   // dashboard only calls L.map() once) so setViewMode()'s map.removeLayer/
   // addLayer calls are observable via mapStub._layers in assertions.
+  // addLayer/removeLayer/hasLayer track _addedToMap on cluster-kind layers
+  // specifically -- this mirrors real Leaflet.markercluster, whose
+  // refreshClusters() throws (reading this._topClusterLevel) until the
+  // group has actually been through its own onAdd via map.addLayer(). An
+  // earlier version of this stub let refreshClusters() succeed
+  // unconditionally, which masked a real bug: renderHour() called it before
+  // the cluster group was ever added to the map (on the very first render,
+  // before any view-mode switch), throwing in the real browser every time.
   const mapStub = {
     setView() { return mapStub; },
     fitBounds() { return mapStub; },
     _layers: [],
-    addLayer(layer) { mapStub._layers.push(layer); return mapStub; },
-    removeLayer(layer) { mapStub._layers = mapStub._layers.filter(l => l !== layer); return mapStub; },
+    addLayer(layer) {
+      mapStub._layers.push(layer);
+      if (layer._kind === 'cluster') layer._addedToMap = true;
+      return mapStub;
+    },
+    removeLayer(layer) {
+      mapStub._layers = mapStub._layers.filter(l => l !== layer);
+      if (layer._kind === 'cluster') layer._addedToMap = false;
+      return mapStub;
+    },
+    hasLayer(layer) { return mapStub._layers.includes(layer); },
   };
 
   const L = {
@@ -175,17 +192,24 @@ function buildSandbox() {
     // this test needs beyond identity (so mapStub._layers can tell the two
     // containers apart).
     layerGroup(layers) { return { _kind: 'individual', _layers: layers }; },
-    // Grouped view's container. refreshClusters() incrementing _refreshCount
-    // is exactly what the "refreshClusters wired into all four trigger
-    // points" tests check -- not markercluster's real spatial geometry.
+    // Grouped view's container. refreshClusters() throws unless the group
+    // has been added to the map -- see mapStub's comment above -- so this
+    // stub actually exercises the map.hasLayer() guard in
+    // dashboard.html's refreshClusters(), not just its own call count.
     markerClusterGroup(opts) {
       const group = {
         _kind: 'cluster',
         _opts: opts,
         _layers: [],
         _refreshCount: 0,
+        _addedToMap: false,
         addLayers(layers) { group._layers.push(...layers); },
-        refreshClusters() { group._refreshCount += 1; },
+        refreshClusters() {
+          if (!group._addedToMap) {
+            throw new TypeError("Cannot read properties of undefined (reading 'getAllChildMarkers')");
+          }
+          group._refreshCount += 1;
+        },
       };
       return group;
     },
@@ -636,13 +660,43 @@ async function main() {
   }
 
   const clusterState = dash.getState();
+
+  // --- Regression test for the reported bug: renderHour() must NOT throw
+  // while still in individual view (clusterLayer never added to the map
+  // yet) -- this is exactly what crashed on every page load before the
+  // map.hasLayer() guard was added, aborting the load .then() callback
+  // before it ever reached the addEventListener calls below it. ---
+  assert.strictEqual(clusterState.viewMode, 'individual', 'entering this block still in individual view, as at initial load');
+  assert.doesNotThrow(() => dash.renderHour(8), 'renderHour must not throw while the cluster layer is not attached to the map');
+  assert.strictEqual(clusterState.clusterLayer._refreshCount, 0, 'refreshClusters must be a no-op (not even attempted) while the cluster layer is unattached');
+
+  // --- view-mode toggle: explicit removeLayer(old) before addLayer(new), never both attached at once ---
+  const mapLayersBefore = sandbox._map._layers.slice();
+  assert.ok(mapLayersBefore.includes(clusterState.individualLayer), 'individual view should be the one attached to the map by default');
+  assert.ok(!mapLayersBefore.includes(clusterState.clusterLayer), 'the cluster layer should not be attached while in individual view');
+
+  const viewGroupedClick = elements['view-grouped']._listeners.click;
+  assert.ok(viewGroupedClick, 'no click listener registered on the grouped view button');
+  viewGroupedClick();
+
+  assert.strictEqual(dash.getState().viewMode, 'grouped');
+  assert.ok(elements['view-grouped'].classList.contains('active'));
+  assert.ok(!elements['view-individual'].classList.contains('active'));
+  assert.ok(!sandbox._map._layers.includes(clusterState.individualLayer), 'individual layer should be removed from the map when switching to grouped view');
+  assert.ok(sandbox._map._layers.includes(clusterState.clusterLayer), 'cluster layer should be added to the map when switching to grouped view');
+  assert.strictEqual(
+    sandbox._map._layers.filter(l => l === clusterState.individualLayer || l === clusterState.clusterLayer).length, 1,
+    'exactly one of the two view containers should ever be attached to the map at once'
+  );
+
+  // --- Now that the cluster layer is actually attached, refreshClusters() should really run. ---
   const refreshCountBefore1 = clusterState.clusterLayer._refreshCount;
 
   // --- renderHour (the slider's own path) is trigger point #1 for refreshClusters() ---
   dash.renderHour(8);
   assert.strictEqual(
     dash.getState().clusterLayer._refreshCount, refreshCountBefore1 + 1,
-    'renderHour must call refreshClusters() exactly once'
+    'renderHour must call refreshClusters() exactly once now that grouped view is active'
   );
 
   // historical clusterIconCreateFunction, at hour 8, dayType weekend, period 'all':
@@ -656,6 +710,11 @@ async function main() {
   const refreshCountBefore2 = dash.getState().clusterLayer._refreshCount;
   dash.setPeriod('month:2026-05');
   assert.strictEqual(dash.getState().clusterLayer._refreshCount, refreshCountBefore2 + 1, 'setPeriod must call refreshClusters() exactly once');
+
+  // Also confirms issue 3's fix: the header/legend text and the underlying
+  // state.period used for coloring come from the exact same value -- there
+  // is no separate "displayed period" to drift out of sync with it.
+  assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 8:00 AM, weekend (May 2026)');
 
   icon = dash.clusterIconCreateFunction(fakeCluster(['B']));
   assert.strictEqual(icon.html, dash.clusterIconHTML(null, 1), 'a cluster whose only child has no data for the period should render hollow');
@@ -689,35 +748,50 @@ async function main() {
   dash.setMode('historical'); // restore, so nothing below depends on live mode by accident
   dash.setPeriod('all');
 
-  // --- view-mode toggle: explicit removeLayer(old) before addLayer(new), never both attached at once ---
-  const mapLayersBefore = sandbox._map._layers.slice();
-  assert.ok(mapLayersBefore.includes(clusterState.individualLayer), 'individual view should be the one attached to the map by default');
-  assert.ok(!mapLayersBefore.includes(clusterState.clusterLayer), 'the cluster layer should not be attached while in individual view');
-
-  const viewGroupedClick = elements['view-grouped']._listeners.click;
-  assert.ok(viewGroupedClick, 'no click listener registered on the grouped view button');
-  viewGroupedClick();
-
-  assert.strictEqual(dash.getState().viewMode, 'grouped');
-  assert.ok(elements['view-grouped'].classList.contains('active'));
-  assert.ok(!elements['view-individual'].classList.contains('active'));
-  assert.ok(!sandbox._map._layers.includes(clusterState.individualLayer), 'individual layer should be removed from the map when switching to grouped view');
-  assert.ok(sandbox._map._layers.includes(clusterState.clusterLayer), 'cluster layer should be added to the map when switching to grouped view');
-  assert.strictEqual(
-    sandbox._map._layers.filter(l => l === clusterState.individualLayer || l === clusterState.clusterLayer).length, 1,
-    'exactly one of the two view containers should ever be attached to the map at once'
-  );
-
+  // --- switching back to individual view detaches the cluster layer again ---
   const viewIndividualClick = elements['view-individual']._listeners.click;
   viewIndividualClick();
   assert.strictEqual(dash.getState().viewMode, 'individual');
   assert.ok(sandbox._map._layers.includes(clusterState.individualLayer), 'switching back to individual view should reattach the individual layer');
   assert.ok(!sandbox._map._layers.includes(clusterState.clusterLayer), 'and detach the cluster layer');
 
+  // And once detached, refreshClusters() must go back to being a safe no-op
+  // rather than throwing -- the exact scenario that crashed every page load.
+  const refreshCountBeforeFinal = dash.getState().clusterLayer._refreshCount;
+  assert.doesNotThrow(() => dash.renderHour(9), 'renderHour must not throw again after returning to individual view');
+  assert.strictEqual(dash.getState().clusterLayer._refreshCount, refreshCountBeforeFinal, 'refreshClusters must not touch the cluster group once it is detached');
+
   console.log('All dashboard slider smoke tests passed.');
 }
 
-main().catch(err => {
-  console.error('FAILED:', err.message);
-  process.exit(1);
-});
+// Separate scenario, separate sandbox: fetch() rejecting the way it does
+// under file:// (no response ever comes back) should produce the
+// actionable "serve this over http" message, not a raw/undefined error --
+// the exact bug reported ("Failed to load data/flows.json: undefined").
+async function testFileProtocolFetchFailure() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  sandbox.location = { protocol: 'file:' };
+  sandbox.fetch = () => Promise.reject(new TypeError('Failed to fetch'));
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, file:// scenario)' });
+
+  await context.__dashboard.ready;
+
+  assert.strictEqual(
+    sandbox._elements['status'].textContent,
+    'This dashboard needs to be served over http, not opened directly. Run: python3 -m http.server, then open http://localhost:8000/dashboard.html',
+    'a file:// fetch failure should show the actionable serving instructions, not a raw/undefined error'
+  );
+  console.log('file:// fetch-failure smoke test passed.');
+}
+
+main()
+  .then(testFileProtocolFetchFailure)
+  .catch(err => {
+    console.error('FAILED:', err.message);
+    process.exit(1);
+  });

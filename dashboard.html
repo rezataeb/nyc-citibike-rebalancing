@@ -345,8 +345,18 @@ function clusterIconCreateFunction(cluster) {
 // place (renderHour, below) rather than separately from setDayType/setPeriod/
 // setMode, because all three already funnel through renderHour -- same "one
 // hook point" reasoning already used for updateStationDetail().
+//
+// Guarded behind map.hasLayer(state.clusterLayer): markercluster's
+// refreshClusters() reads internal state (_topClusterLevel) that's only set
+// up once the group has actually been added to the map via its own onAdd
+// lifecycle. renderHour() runs once at initial load -- before the user has
+// ever switched to grouped view -- so calling refreshClusters() unconditionally
+// throws on every single page load, not just when toggling views (confirmed
+// bug, not a hypothetical: this uncaught exception aborted the load .then()
+// callback before it reached ANY of the addEventListener calls below it,
+// which is why controls appeared completely unresponsive).
 function refreshClusters() {
-  if (state.clusterLayer) state.clusterLayer.refreshClusters();
+  if (state.clusterLayer && map.hasLayer(state.clusterLayer)) state.clusterLayer.refreshClusters();
 }
 
 // Dashboard state, kept in one place (rather than scattered closure
@@ -855,7 +865,16 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
   })
   .catch(error => {
     const status = document.getElementById('status');
-    status.textContent = `Failed to load data/flows.json: ${error.message}`;
+    // Opening this file directly (file://) makes fetch() reject before ever
+    // reaching a response -- browsers block same-origin file:// reads for
+    // security reasons. That specific case gets a distinct, actionable
+    // message rather than whatever raw (sometimes message-less) rejection
+    // the browser produced, which is what showed up as literal "undefined".
+    if (typeof location !== 'undefined' && location.protocol === 'file:') {
+      status.textContent = 'This dashboard needs to be served over http, not opened directly. Run: python3 -m http.server, then open http://localhost:8000/dashboard.html';
+    } else {
+      status.textContent = `Failed to load dashboard data: ${error && error.message ? error.message : error}`;
+    }
     status.style.color = '#e34948';
     console.error(error);
   });

@@ -537,8 +537,8 @@ async function main() {
 
   const stateLive = dash.getState();
   assert.strictEqual(stateLive.mode, 'live');
-  assert.strictEqual(elements['historical-controls'].style.display, 'none', 'historical-only controls should hide in live mode');
-  assert.strictEqual(elements['live-as-of'].style.display, '', 'the live as-of readout should show in live mode');
+  assert.ok(elements['historical-controls'].classList.contains('hidden'), 'historical-only controls card should hide in live mode');
+  assert.ok(!elements['live-as-of'].classList.contains('hidden'), 'the live as-of card should show in live mode');
   assert.ok(elements['mode-live'].classList.contains('active'));
   assert.ok(!elements['mode-historical'].classList.contains('active'));
 
@@ -604,8 +604,8 @@ async function main() {
   modeHistoricalClick();
   const stateBackToHistorical = dash.getState();
   assert.strictEqual(stateBackToHistorical.mode, 'historical');
-  assert.strictEqual(elements['historical-controls'].style.display, '', 'historical controls should reappear');
-  assert.strictEqual(elements['live-as-of'].style.display, 'none', 'the live as-of readout should hide again');
+  assert.ok(!elements['historical-controls'].classList.contains('hidden'), 'historical controls card should reappear');
+  assert.ok(elements['live-as-of'].classList.contains('hidden'), 'the live as-of card should hide again');
   assert.strictEqual(elements['legend-label-low'].textContent, 'Deficit (no bikes)');
   assert.strictEqual(elements['legend-label-mid'].textContent, '0');
   assert.strictEqual(elements['legend-label-high'].textContent, 'Surplus (no docks)');
@@ -785,6 +785,10 @@ async function testFileProtocolFetchFailure() {
     sandbox._elements['status'].textContent,
     'This dashboard needs to be served over http, not opened directly. Run: python3 -m http.server, then open http://localhost:8000/dashboard.html',
     'a file:// fetch failure should show the actionable serving instructions, not a raw/undefined error'
+  );
+  assert.ok(
+    sandbox._elements['status'].classList.contains('error'),
+    'the banner should get the .error modifier class -- distinct visual treatment from the informational/loading state'
   );
   console.log('file:// fetch-failure smoke test passed.');
 }

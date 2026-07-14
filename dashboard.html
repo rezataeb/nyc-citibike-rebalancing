@@ -9,31 +9,79 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-  #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; background: #f9f9f7; }
+  body { display: flex; }
 
-  #title, #legend, #status, #controls, #detail {
-    position: absolute; z-index: 1000; background: rgba(252, 252, 251, 0.92);
-    border-radius: 8px; box-shadow: 0 1px 4px rgba(11, 11, 11, 0.15); color: #0b0b0b;
+  /* Sidebar + map-fill split, replacing the earlier floating top-bar
+     layout: #sidebar is a normal-flow column (scrolls if its content
+     grows taller than the viewport), #map is a flex sibling that fills
+     whatever width is left. */
+  #sidebar {
+    width: 360px; min-width: 300px; height: 100vh; overflow-y: auto;
+    box-sizing: border-box; padding: 16px; background: #fcfcfb;
+    border-right: 1px solid #d8d7d3; color: #0b0b0b;
   }
-  #title { top: 16px; left: 24px; padding: 8px 14px; font-size: 14px; }
-  #title .subtitle { color: #52514e; font-size: 12px; }
-  #controls { top: 16px; left: 320px; padding: 8px 14px; font-size: 12px; display: flex; align-items: center; gap: 10px; }
-  #controls label { color: #52514e; }
-  #controls input[type="range"] { width: 200px; }
-  #hour-label { font-weight: 600; min-width: 74px; display: inline-block; }
-  #historical-controls { display: flex; align-items: center; gap: 10px; }
-  #mode-toggle, #view-toggle, #day-toggle { display: flex; gap: 4px; margin-right: 6px; }
-  .day-btn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
+  #map { flex: 1; height: 100vh; background: #f9f9f7; }
+
+  #title { margin-bottom: 12px; font-size: 14px; }
+  #title .subtitle { color: #52514e; font-size: 12px; margin-top: 4px; }
+
+  /* Status/error banner -- normal document flow, so it can never overlap
+     a control the way a fixed/absolute toast could. Same background/
+     border/radius tokens as the rest of the sidebar; the .error modifier
+     is the only new-looking thing, and it reuses the deficit red already
+     established for the historical color scale, not a new hue. */
+  #status {
+    margin-bottom: 14px; padding: 8px 12px; font-size: 12px; color: #52514e;
+    background: #f3f2f0; border: 1px solid #d8d7d3; border-radius: 8px;
+  }
+  #status.error { color: #8a2a29; background: #fdecec; border-color: #e34948; }
+
+  /* Mode tabs: the most consequential control, sized and weighted to read
+     as primary -- full width, larger type, bold -- distinct from the
+     secondary .day-btn treatment used everywhere else. */
+  #mode-toggle { display: flex; gap: 6px; margin-bottom: 14px; }
+  .mode-btn {
+    flex: 1; font: inherit; font-weight: 700; font-size: 13px; padding: 10px 8px;
+    border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer;
+  }
+  .mode-btn.active { background: #2a78d6; border-color: #2a78d6; color: #fff; }
+
+  /* View toggle: secondary, visibly smaller than the mode tabs, and
+     stacked below them with its own caption -- two independent binary
+     choices, kept from reading as one four-way choice. */
+  .control-label { font-size: 11px; color: #898781; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 4px; }
+  #view-toggle-wrap { margin-bottom: 14px; }
+  #view-toggle, #day-toggle { display: flex; gap: 4px; }
+  .day-btn { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
   .day-btn.active { background: #2a78d6; border-color: #2a78d6; color: #fff; }
-  #period-select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-right: 6px; }
-  #live-as-of { color: #52514e; }
-  #legend { bottom: 24px; left: 24px; padding: 12px 16px; font-size: 12px; }
-  #legend .bar { width: 220px; height: 12px; border-radius: 6px; margin: 6px 0; }
+
+  /* Historical-controls and live-as-of are each a single bounded "card" --
+     one container per mode, shown/hidden as a unit via .hidden, never
+     per-sub-control. Tint reuses #map's own background color (already
+     established) so the card reads as a distinct region without a new color. */
+  .card { background: #f9f9f7; border: 1px solid #d8d7d3; border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+  .hidden { display: none; }
+
+  #period-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 6px 8px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin: 10px 0; }
+  .hour-control label { display: block; font-size: 11px; color: #52514e; margin-bottom: 4px; }
+  #hour-label { font-weight: 700; font-size: 26px; font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+  .hour-control input[type="range"] { width: 100%; box-sizing: border-box; }
+
+  #live-as-of { color: #52514e; font-size: 12px; }
+
+  /* Legend: same gradient-bar + endpoint-labels + caption content as
+     before, just relocated into normal sidebar flow instead of floating
+     over the map. */
+  #legend { margin-bottom: 14px; font-size: 12px; }
+  #legend-title { margin-bottom: 6px; }
+  #legend .bar { width: 100%; height: 12px; border-radius: 6px; margin: 6px 0; box-sizing: border-box; }
   #legend .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; }
   #legend-note { font-size: 11px; color: #898781; margin-top: 6px; line-height: 1.4; }
-  #status { top: 16px; right: 24px; padding: 8px 14px; font-size: 12px; color: #52514e; }
 
-  #detail { display: none; top: 64px; right: 24px; width: 280px; padding: 14px 16px 12px; font-size: 12px; max-height: calc(100% - 96px); overflow-y: auto; }
+  /* Detail panel: in-flow below the legend, appears on station click.
+     #sidebar's own overflow-y:auto handles scrolling if it runs long --
+     no independent max-height/scroll region of its own anymore. */
+  #detail { display: none; position: relative; padding: 12px; border: 1px solid #d8d7d3; border-radius: 8px; background: #fff; font-size: 12px; }
   #detail.visible { display: block; }
   #detail-close { position: absolute; top: 8px; right: 10px; border: none; background: none; font-size: 16px; line-height: 1; cursor: pointer; color: #898781; padding: 2px 4px; }
   #detail-close:hover { color: #0b0b0b; }
@@ -44,52 +92,61 @@
 </style>
 </head>
 <body>
-<div id="map"></div>
+<div id="sidebar">
 
-<div id="title">
-  <strong>Citi Bike Rebalancing Explorer</strong>
-  <div class="subtitle" id="title-subtitle">Net flow at 8:00 AM, weekday (all-period average)</div>
-</div>
+  <div id="title">
+    <strong>Citi Bike Rebalancing Explorer</strong>
+    <div class="subtitle" id="title-subtitle">Net flow at 8:00 AM, weekday (all-period average)</div>
+  </div>
 
-<div id="controls">
+  <div id="status">Loading stations&hellip;</div>
+
   <div id="mode-toggle">
-    <button id="mode-historical" class="day-btn active">Historical flow</button>
-    <button id="mode-live" class="day-btn">Live docks (GBFS)</button>
+    <button id="mode-historical" class="mode-btn active">Historical flow</button>
+    <button id="mode-live" class="mode-btn">Live docks (GBFS)</button>
   </div>
-  <div id="view-toggle">
-    <button id="view-individual" class="day-btn active">Individual</button>
-    <button id="view-grouped" class="day-btn">Grouped</button>
+
+  <div id="view-toggle-wrap">
+    <div class="control-label">View</div>
+    <div id="view-toggle">
+      <button id="view-individual" class="day-btn active">Individual</button>
+      <button id="view-grouped" class="day-btn">Grouped</button>
+    </div>
   </div>
-  <div id="historical-controls">
+
+  <div id="historical-controls" class="card">
     <div id="day-toggle">
       <button id="day-weekday" class="day-btn active">Weekday</button>
       <button id="day-weekend" class="day-btn">Weekend</button>
     </div>
     <select id="period-select"></select>
-    <label for="hour-slider">Hour of day</label>
-    <input type="range" id="hour-slider" min="0" max="23" step="1" value="8">
-    <span id="hour-label">8:00 AM</span>
+    <div class="hour-control">
+      <label for="hour-slider">Hour of day</label>
+      <div id="hour-label">8:00 AM</div>
+      <input type="range" id="hour-slider" min="0" max="23" step="1" value="8">
+    </div>
   </div>
-  <div id="live-as-of" style="display:none"></div>
-</div>
 
-<div id="legend">
-  <div id="legend-title">Net flow at 8:00 AM weekday (bikes/day)</div>
-  <div class="bar" id="legend-bar"></div>
-  <div class="labels"><span id="legend-label-low">Deficit (no bikes)</span><span id="legend-label-mid">0</span><span id="legend-label-high">Surplus (no docks)</span></div>
-  <div id="legend-note">Color scale is shared across weekday/weekend &mdash; paler weekend markers reflect genuinely smaller imbalance, not a rendering error.</div>
-</div>
+  <div id="live-as-of" class="card hidden"></div>
 
-<div id="status">Loading stations&hellip;</div>
+  <div id="legend">
+    <div id="legend-title">Net flow at 8:00 AM weekday (bikes/day)</div>
+    <div class="bar" id="legend-bar"></div>
+    <div class="labels"><span id="legend-label-low">Deficit (no bikes)</span><span id="legend-label-mid">0</span><span id="legend-label-high">Surplus (no docks)</span></div>
+    <div id="legend-note">Color scale is shared across weekday/weekend &mdash; paler weekend markers reflect genuinely smaller imbalance, not a rendering error.</div>
+  </div>
 
-<div id="detail">
-  <button id="detail-close" aria-label="Close station detail">&times;</button>
-  <h2 id="detail-name"></h2>
-  <div class="meta" id="detail-cluster"></div>
-  <div class="meta" id="detail-context"></div>
-  <div class="striptitle">24-hour flow rhythm (<span id="detail-daylabel"></span>)</div>
-  <svg class="strip" id="detail-strip" viewBox="0 0 240 70" preserveAspectRatio="none"></svg>
+  <div id="detail">
+    <button id="detail-close" aria-label="Close station detail">&times;</button>
+    <h2 id="detail-name"></h2>
+    <div class="meta" id="detail-cluster"></div>
+    <div class="meta" id="detail-context"></div>
+    <div class="striptitle">24-hour flow rhythm (<span id="detail-daylabel"></span>)</div>
+    <svg class="strip" id="detail-strip" viewBox="0 0 240 70" preserveAspectRatio="none"></svg>
+  </div>
+
 </div>
+<div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
@@ -101,11 +158,16 @@
 // (marker clustering was scoped out of Session 15 pending clarification --
 // no computeClusterColor or similar existed anywhere at that point, verified
 // by grep across this file, reference/dashboard.html, and PROGRESS.md).
-// Session 16 adds marker clustering (view-mode toggle, Leaflet.markercluster,
-// mode-aware cluster coloring) -- each interaction lands as its own commit.
-// Still no route layer. Equity filter is a standing scope exclusion, see
-// CLAUDE.md -- per-station equity context in the detail panel is in scope
-// and unaffected.
+// Session 16 added marker clustering (view-mode toggle, Leaflet.markercluster,
+// mode-aware cluster coloring). Session 17 fixed a refreshClusters() crash
+// on every page load plus the file:// error message. Session 18 replaces
+// the floating top-bar layout with a left sidebar + map-fill split (all
+// controls now live in #sidebar, in normal document flow) -- each
+// interaction lands as its own commit. Still no route layer. Equity filter
+// is a standing scope exclusion, see CLAUDE.md -- per-station equity
+// context in the detail panel is in scope and unaffected. No mobile
+// breakpoint exists yet (flagged as a separate decision, not silently
+// left broken -- see PROGRESS.md).
 
 const DEFAULT_HOUR = 8; // initial slider position; no longer a fixed constant once wired up
 
@@ -513,15 +575,15 @@ function updateStatusMessage() {
 }
 
 // Switches historical <-> live and re-renders through the same renderHour
-// path everything else uses. Hides/shows the historical-only controls
-// (hour slider, day-type toggle, period selector -- none apply to a live
-// snapshot) and the live "as of" readout, exactly opposite each other.
+// path everything else uses. Hides/shows the historical-only controls card
+// and the live "as of" card as single units (one .hidden toggle per
+// container, never per-sub-control), exactly opposite each other.
 function setMode(mode) {
   state.mode = mode;
   document.getElementById('mode-historical').classList.toggle('active', mode === 'historical');
   document.getElementById('mode-live').classList.toggle('active', mode === 'live');
-  document.getElementById('historical-controls').style.display = mode === 'historical' ? '' : 'none';
-  document.getElementById('live-as-of').style.display = mode === 'live' ? '' : 'none';
+  document.getElementById('historical-controls').classList.toggle('hidden', mode !== 'historical');
+  document.getElementById('live-as-of').classList.toggle('hidden', mode !== 'live');
   renderHour(state.currentHour);
   updateStatusMessage();
 }
@@ -875,7 +937,7 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     } else {
       status.textContent = `Failed to load dashboard data: ${error && error.message ? error.message : error}`;
     }
-    status.style.color = '#e34948';
+    status.classList.add('error'); // in-flow banner, never fixed/absolute -- can't overlap a control
     console.error(error);
   });
 

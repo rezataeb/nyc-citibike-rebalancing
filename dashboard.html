@@ -70,6 +70,8 @@
   .hour-control label { display: block; font-size: 11px; color: #52514e; margin-bottom: 4px; }
   #hour-label { font-weight: 700; font-size: 26px; font-variant-numeric: tabular-nums; margin-bottom: 6px; }
   .hour-control input[type="range"] { width: 100%; box-sizing: border-box; }
+  #route-toggle-wrap { margin-top: 12px; }
+  #route-toggle-btn.active { background: #7c4dbd; border-color: #7c4dbd; } /* route's own dedicated color, not the flow-scale red/blue -- see JS comment on ROUTE_COLOR */
 
   #live-as-of { color: #52514e; font-size: 12px; }
 
@@ -144,6 +146,10 @@
       <div id="hour-label">8:00 AM</div>
       <input type="range" id="hour-slider" min="0" max="23" step="1" value="8">
     </div>
+    <div id="route-toggle-wrap" class="hidden">
+      <div class="control-label">Rebalancing route</div>
+      <button id="route-toggle-btn" class="day-btn">Show route</button>
+    </div>
   </div>
 
   <div id="live-as-of" class="card hidden"></div>
@@ -191,13 +197,15 @@
 // mode-aware cluster coloring). Session 17 fixed a refreshClusters() crash
 // on every page load plus the file:// error message. Session 18 replaced
 // the floating top-bar layout with a left sidebar + map-fill split. Session
-// 19 fixes sidebar height: the station count moved into the title subtitle
+// 19 fixed sidebar height: the station count moved into the title subtitle
 // (no separate boxed row), the Legend/Station-detail pair share one
 // fixed-height tabbed container instead of two independently-growing
-// blocks, and a condensed footer was added (none existed before) -- each
-// interaction lands as its own commit. Still no route layer. Equity filter
-// is a standing scope exclusion, see CLAUDE.md -- per-station equity
-// context in the detail panel is in scope and unaffected. No mobile
+// blocks, and a condensed footer was added (none existed before). Session
+// 20 adds the rebalancing-route layer (route.json, historical-mode-only,
+// graceful degradation if the file is missing) -- each interaction lands
+// as its own commit. Equity filter is a standing scope exclusion, see
+// CLAUDE.md -- per-station equity context in the detail panel is in scope
+// and unaffected. No mobile
 // breakpoint exists yet (flagged as a separate decision, not silently
 // left broken -- see PROGRESS.md).
 
@@ -453,6 +461,115 @@ function refreshClusters() {
   if (state.clusterLayer && map.hasLayer(state.clusterLayer)) state.clusterLayer.refreshClusters();
 }
 
+// route.json's own dedicated color -- deliberately NOT reused from
+// DEFICIT_COLOR/SURPLUS_COLOR/NEUTRAL_COLOR. Those three already carry a
+// specific meaning (net-flow magnitude/sign) on this same map; a route
+// stop is a truck-visit-sequence marker, not a flow value, so painting it
+// red or blue would misleadingly suggest a deficit/surplus reading that
+// isn't what the marker means.
+const ROUTE_COLOR = '#7c4dbd';
+
+// Golden-angle spiral offset for the Nth visit to the same station within
+// one truck's tour (route.json's stops can and do revisit a station --
+// confirmed against the real data before building this, not assumed).
+// sqrt(visitIndex) growth keeps consecutive repeats close together at
+// first and only fans out further for a station visited many times,
+// rather than every repeat jumping the same fixed distance. Pure and
+// Leaflet-free: testable with plain integers.
+const STOP_OFFSET_STEP = 0.00004; // ~4-5m in latitude degrees at NYC's latitude
+const GOLDEN_ANGLE_DEG = 137.5;
+function computeStopOffset(visitIndex) {
+  if (visitIndex === 0) return { dLat: 0, dLng: 0 };
+  const angleRad = visitIndex * GOLDEN_ANGLE_DEG * (Math.PI / 180);
+  const radius = STOP_OFFSET_STEP * Math.sqrt(visitIndex);
+  return { dLat: radius * Math.cos(angleRad), dLng: radius * Math.sin(angleRad) };
+}
+
+// For each stop in one truck's tour (in visit order), how many times its
+// station has already appeared earlier in the SAME tour -- 0 for a
+// station's first visit, 1 for its second, etc. Pure: takes route.json's
+// own stop objects, returns a parallel array of integers, no Leaflet.
+function assignVisitIndices(stops) {
+  const seenCounts = {};
+  return stops.map(stop => {
+    const visitIndex = seenCounts[stop.station_id] || 0;
+    seenCounts[stop.station_id] = visitIndex + 1;
+    return visitIndex;
+  });
+}
+
+// Pure HTML-string builder for one route stop marker -- pickup is a
+// circle, dropoff is a diamond (a rotated square), so the two are
+// distinguishable by SHAPE, not color (color is one dedicated route hue
+// for both, per ROUTE_COLOR's own comment -- shape carries the
+// pickup/dropoff distinction, same "don't spend the same channel twice"
+// reasoning as the rest of this dashboard's color usage). The visit-order
+// number sits inside either shape; the diamond's number is counter-
+// rotated so it reads upright.
+function buildStopIconHTML(action, stopNumber, color) {
+  if (action === 'pickup') {
+    return `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #ffffff;color:#ffffff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(11,11,11,0.35);">${stopNumber}</div>`;
+  }
+  return `<div style="width:20px;height:20px;background:${color};border:2px solid #ffffff;transform:rotate(45deg);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(11,11,11,0.35);"><span style="display:inline-block;transform:rotate(-45deg);color:#ffffff;font-size:10px;font-weight:700;">${stopNumber}</span></div>`;
+}
+
+// Builds the route layer from route.json's real shape: one polyline plus
+// one numbered stop marker per truck's stops, in visit order. Independent
+// of individualLayer/clusterLayer entirely -- this is its own layer group,
+// drawn on top of whichever of those is currently on the map, never part
+// of the Individual/Grouped swap. Each stop marker's click opens that
+// station's detail panel via the same selectStation() every other marker
+// uses, regardless of how many times that station appears in the tour.
+function buildRouteLayer(routeData) {
+  const layers = [];
+  for (const truck of routeData.trucks) {
+    const visitIndices = assignVisitIndices(truck.stops);
+    const latlngs = [];
+    truck.stops.forEach((stop, i) => {
+      const offset = computeStopOffset(visitIndices[i]);
+      const lat = stop.lat + offset.dLat;
+      const lng = stop.lng + offset.dLng;
+      latlngs.push([lat, lng]);
+
+      const marker = L.marker([lat, lng], {
+        icon: L.divIcon({
+          html: buildStopIconHTML(stop.action, i + 1, ROUTE_COLOR),
+          className: 'route-stop-icon',
+          iconSize: [24, 24],
+        }),
+      });
+      marker.on('click', () => selectStation(stop.station_id));
+      layers.push(marker);
+    });
+    layers.push(L.polyline(latlngs, { color: ROUTE_COLOR, weight: 2.5, opacity: 0.8 }));
+  }
+  return L.layerGroup(layers);
+}
+
+// Route visibility is the AND of two independent things: the user's own
+// toggle preference (state.routeVisible, which persists across mode
+// switches so the route reappears automatically on returning to
+// historical mode rather than needing to be re-toggled) and whether
+// historical mode is even active (route planning is based on historical
+// deficit/surplus data, never live GBFS, so it's never shown in live mode
+// regardless of the toggle's last state). Both setRouteVisible() and
+// setMode() recompute from this one rule, rather than each independently
+// deciding when to add/remove the layer.
+function applyRouteVisibility() {
+  if (!state.routeLayer) return;
+  const shouldShow = state.routeVisible && state.mode === 'historical';
+  if (shouldShow) map.addLayer(state.routeLayer);
+  else map.removeLayer(state.routeLayer);
+}
+
+function setRouteVisible(visible) {
+  state.routeVisible = visible;
+  const btn = document.getElementById('route-toggle-btn');
+  btn.textContent = visible ? 'Hide route' : 'Show route';
+  btn.classList.toggle('active', visible);
+  applyRouteVisibility();
+}
+
 // Dashboard state, kept in one place (rather than scattered closure
 // variables) so the Node smoke test can inspect it via the test hook below.
 const state = {
@@ -470,6 +587,9 @@ const state = {
   individualLayer: null, // L.layerGroup holding the same marker objects as state.markers
   clusterLayer: null, // L.markerClusterGroup holding the same marker objects as state.markers
   infoTab: 'legend', // 'legend' | 'detail' -- which tab of the shared Legend/Station-detail container is showing
+  route: null, // route.json's raw payload, or null if it failed to load (graceful degradation, not fatal)
+  routeLayer: null, // L.layerGroup of polylines + numbered stop markers, built once if route.json loads
+  routeVisible: false, // the user's own toggle preference, independent of state.mode -- see applyRouteVisibility()
 };
 
 // Switches the Legend/Station-detail tab pair. Purely a visibility switch --
@@ -631,13 +751,19 @@ function updateStatusMessage() {
 // Switches historical <-> live and re-renders through the same renderHour
 // path everything else uses. Hides/shows the historical-only controls card
 // and the live "as of" card as single units (one .hidden toggle per
-// container, never per-sub-control), exactly opposite each other.
+// container, never per-sub-control), exactly opposite each other. The
+// route toggle button lives inside #historical-controls, so it already
+// hides/shows with that card; applyRouteVisibility() additionally makes
+// sure the route layer itself leaves the map in live mode (regardless of
+// the user's last toggle preference) and reappears automatically on
+// returning to historical mode, without the user needing to re-toggle it.
 function setMode(mode) {
   state.mode = mode;
   document.getElementById('mode-historical').classList.toggle('active', mode === 'historical');
   document.getElementById('mode-live').classList.toggle('active', mode === 'live');
   document.getElementById('historical-controls').classList.toggle('hidden', mode !== 'historical');
   document.getElementById('live-as-of').classList.toggle('hidden', mode !== 'live');
+  applyRouteVisibility();
   renderHour(state.currentHour);
   updateStatusMessage();
 }
@@ -891,12 +1017,22 @@ function fetchJSON(url) {
   });
 }
 
-// Both files are fetched together at load, same as the rest of this
-// dashboard's "load everything once up front" architecture -- live_status.json
-// is a small local static file (see pipeline/gbfs_logger.py's export_live_status),
-// not a call to the live GBFS feed itself, which CORS blocks from a browser.
-const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_status.json')])
-  .then(([payload, livePayload]) => {
+// route.json is fetched alongside the other two, but non-fatally: unlike
+// flows.json/live_status.json (both required for the dashboard to mean
+// anything), route.json is one optional analysis layer -- graceful
+// degradation, same rule as every other layer in this project. A failed
+// fetch resolves to null rather than rejecting, so it can never trip the
+// top-level .catch() and never blocks the rest of the dashboard from
+// loading.
+const routeReady = fetchJSON('data/route.json').catch(() => null);
+
+// Both required files are fetched together at load, same as the rest of
+// this dashboard's "load everything once up front" architecture --
+// live_status.json is a small local static file (see
+// pipeline/gbfs_logger.py's export_live_status), not a call to the live
+// GBFS feed itself, which CORS blocks from a browser.
+const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_status.json'), routeReady])
+  .then(([payload, livePayload, routePayload]) => {
     state.stations = payload.stations;
     state.liveStations = livePayload.stations;
     state.liveAsOf = livePayload.last_updated;
@@ -934,6 +1070,22 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     state.clusterLayer = L.markerClusterGroup({ iconCreateFunction: clusterIconCreateFunction });
     state.clusterLayer.addLayers(allMarkers);
     map.addLayer(state.individualLayer); // default view mode is 'individual'
+
+    // route.json is optional (see routeReady above) -- if it loaded, build
+    // the route layer and reveal its toggle; if not, explicitly keep the
+    // toggle hidden (not just relying on the static HTML default matching
+    // state.route's null default -- same "make it explicit in JS" fix as
+    // Session 19's setInfoTab('legend') call). Not added to the map yet --
+    // state.routeVisible defaults to false, so it stays off until the user
+    // turns it on.
+    state.route = routePayload;
+    if (state.route) {
+      state.routeLayer = buildRouteLayer(state.route);
+      document.getElementById('route-toggle-wrap').classList.remove('hidden');
+      document.getElementById('route-toggle-btn').addEventListener('click', () => setRouteVisible(!state.routeVisible));
+    } else {
+      document.getElementById('route-toggle-wrap').classList.add('hidden');
+    }
 
     // Period options built from flows.json's own granularity block, never a
     // hardcoded season/month list -- 'all' (the existing all-period average)
@@ -1029,6 +1181,7 @@ if (typeof globalThis !== 'undefined') {
     setMode, hasLiveData, formatAsOf,
     setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,
     setInfoTab, updateStationDetail,
+    computeStopOffset, assignVisitIndices, buildStopIconHTML, buildRouteLayer, setRouteVisible, applyRouteVisibility,
     getState: () => state,
     ready,
   };

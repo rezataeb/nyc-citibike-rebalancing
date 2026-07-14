@@ -104,6 +104,26 @@ const FAKE_LIVE_PAYLOAD = {
   },
 };
 
+// Fake route.json payload -- one truck, three stops, station A visited
+// TWICE (mirroring the real data/route.json, where a truck can and does
+// revisit a station) so the visit-index/offset logic actually gets
+// exercised, not just assumed safe for the single-visit case. Mixes
+// pickup and dropoff so both stop-icon shapes get built.
+const FAKE_ROUTE_PAYLOAD = {
+  period: 'all',
+  trucks: [
+    {
+      truck: 1,
+      capped: false,
+      stops: [
+        { action: 'pickup', amount: 5, lat: 40.75, lng: -73.98, name: 'Station A', running_load: 5, station_id: 'A' },
+        { action: 'dropoff', amount: 3, lat: 40.76, lng: -73.99, name: 'Station B', running_load: 2, station_id: 'B' },
+        { action: 'pickup', amount: 2, lat: 40.75, lng: -73.98, name: 'Station A', running_load: 4, station_id: 'A' },
+      ],
+    },
+  ],
+};
+
 function makeElementStub(id) {
   const el = {
     id,
@@ -188,6 +208,8 @@ function buildSandbox() {
     tileLayer() { return layerStub; },
     latLngBounds() { return boundsStub; },
     circleMarker(latlng, opts) { return makeMarkerStub(latlng, opts); },
+    marker(latlng, opts) { return makeMarkerStub(latlng, opts); }, // route stop markers only need .on()/_opts, same shape as circleMarker for test purposes
+    polyline(latlngs, opts) { return { _kind: 'polyline', _latlngs: latlngs, _opts: opts }; },
     // Individual view's container -- just holds the marker list, no behavior
     // this test needs beyond identity (so mapStub._layers can tell the two
     // containers apart).
@@ -227,7 +249,9 @@ function buildSandbox() {
     },
     L,
     fetch(url) {
-      const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD : FAKE_PAYLOAD;
+      let payload = FAKE_PAYLOAD;
+      if (url.includes('live_status')) payload = FAKE_LIVE_PAYLOAD;
+      else if (url.includes('route')) payload = FAKE_ROUTE_PAYLOAD;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
     },
     // Synchronous stub: a real browser defers to the next paint, but for a
@@ -785,6 +809,86 @@ async function main() {
   assert.doesNotThrow(() => dash.renderHour(9), 'renderHour must not throw again after returning to individual view');
   assert.strictEqual(dash.getState().clusterLayer._refreshCount, refreshCountBeforeFinal, 'refreshClusters must not touch the cluster group once it is detached');
 
+  // --- Session 20: rebalancing-route layer ---
+
+  // Pure functions first -- no Leaflet involved at all.
+  // Per-property, not deepStrictEqual against a fresh outer-realm literal:
+  // computeStopOffset() builds its return object inside the vm context, so
+  // a structurally-identical object literal from this (outer) realm isn't
+  // "reference-equal" to Node's assert -- primitives compare fine across
+  // realms, objects/arrays constructed on each side don't.
+  const offset0 = dash.computeStopOffset(0);
+  assert.strictEqual(offset0.dLat, 0, 'a stop\'s first visit gets no lat offset');
+  assert.strictEqual(offset0.dLng, 0, 'a stop\'s first visit gets no lng offset');
+  const offset1 = dash.computeStopOffset(1);
+  assert.ok(offset1.dLat !== 0 || offset1.dLng !== 0, 'a repeat visit must be offset from the real coordinate');
+  const offset2 = dash.computeStopOffset(2);
+  assert.notDeepStrictEqual(offset1, offset2, 'different repeat visits must land at different offsets, never stacked on each other');
+
+  assert.deepStrictEqual(
+    dash.assignVisitIndices([{ station_id: 'A' }, { station_id: 'B' }, { station_id: 'A' }]),
+    [0, 0, 1],
+    'A\'s first/second visits get indices 0 then 1; B\'s own first visit (in between) is independently 0, not affected by A\'s count'
+  );
+
+  assert.ok(dash.buildStopIconHTML('pickup', 3, '#7c4dbd').includes('border-radius:50%'), 'pickup should be a circle');
+  assert.ok(dash.buildStopIconHTML('pickup', 3, '#7c4dbd').includes('>3<'), 'the stop-icon HTML should show the visit-order number');
+  assert.ok(dash.buildStopIconHTML('dropoff', 5, '#7c4dbd').includes('rotate(45deg)'), 'dropoff should be a rotated diamond, not a circle');
+  assert.ok(!dash.buildStopIconHTML('dropoff', 5, '#7c4dbd').includes('border-radius:50%'), 'dropoff must not look like a pickup circle -- shape, not color, carries this distinction');
+
+  // route.json loaded successfully (FAKE_ROUTE_PAYLOAD) -- the toggle should be revealed, the layer built.
+  const routeState = dash.getState();
+  assert.ok(routeState.route, 'route.json should have loaded');
+  assert.ok(routeState.routeLayer, 'the route layer should be built once route.json loads');
+  assert.strictEqual(routeState.routeLayer._layers.length, 4, '3 stop markers + 1 polyline for one truck with 3 stops');
+  assert.ok(!elements['route-toggle-wrap'].classList.contains('hidden'), 'the route toggle should be revealed once route.json loads');
+
+  const stopMarkers = routeState.routeLayer._layers.filter(l => l._kind !== 'polyline');
+  assert.strictEqual(stopMarkers.length, 3, 'one marker per stop, including repeat visits');
+  // Same cross-realm reasoning as offset0 above -- compare the two
+  // coordinate values, not the array object itself, against an outer-realm literal.
+  assert.strictEqual(stopMarkers[0]._latlng[0], 40.75, 'station A\'s first visit should sit at its real latitude, unoffset');
+  assert.strictEqual(stopMarkers[0]._latlng[1], -73.98, 'station A\'s first visit should sit at its real longitude, unoffset');
+  assert.notDeepStrictEqual(
+    stopMarkers[2]._latlng, stopMarkers[0]._latlng,
+    'station A\'s second visit (a real repeat in the fixture, mirroring the real data) must render at an offset position, not exactly on top of the first'
+  );
+
+  // Clicking a route stop marker opens that station's detail panel, same as any other marker.
+  const routeStopClick = stopMarkers[1]._listeners.click; // the dropoff at station B
+  assert.ok(routeStopClick, 'no click listener registered on a route stop marker');
+  routeStopClick();
+  assert.strictEqual(dash.getState().selectedId, 'B', 'clicking a route stop should select its station, same as any other marker click');
+  assert.strictEqual(dash.getState().infoTab, 'detail', 'clicking a route stop should switch to the Station detail tab too, same as any other selection');
+
+  // --- route toggle: off by default ---
+  assert.strictEqual(routeState.routeVisible, false, 'route should be off by default');
+  assert.ok(!sandbox._map._layers.includes(routeState.routeLayer), 'route layer should not be on the map before the toggle is used');
+
+  const routeToggleClick = elements['route-toggle-btn']._listeners.click;
+  assert.ok(routeToggleClick, 'no click listener registered on the route toggle button');
+  routeToggleClick();
+  assert.strictEqual(dash.getState().routeVisible, true);
+  assert.ok(sandbox._map._layers.includes(routeState.routeLayer), 'route layer should be added to the map once toggled on');
+  assert.strictEqual(elements['route-toggle-btn'].textContent, 'Hide route');
+  assert.ok(elements['route-toggle-btn'].classList.contains('active'));
+
+  // --- switching to live mode removes the route from the map, without clearing the user's preference ---
+  const modeLiveClick2 = elements['mode-live']._listeners.click;
+  modeLiveClick2();
+  assert.ok(!sandbox._map._layers.includes(routeState.routeLayer), 'route layer must leave the map in live mode -- route planning is historical-only');
+  assert.strictEqual(dash.getState().routeVisible, true, 'the toggle preference itself must not be cleared by switching modes');
+
+  const modeHistoricalClick2 = elements['mode-historical']._listeners.click;
+  modeHistoricalClick2();
+  assert.ok(sandbox._map._layers.includes(routeState.routeLayer), 'returning to historical mode should reapply the route automatically, without re-clicking the toggle');
+
+  // --- turning the toggle off removes it again ---
+  routeToggleClick();
+  assert.strictEqual(dash.getState().routeVisible, false);
+  assert.ok(!sandbox._map._layers.includes(routeState.routeLayer));
+  assert.strictEqual(elements['route-toggle-btn'].textContent, 'Show route');
+
   console.log('All dashboard slider smoke tests passed.');
 }
 
@@ -817,8 +921,47 @@ async function testFileProtocolFetchFailure() {
   console.log('file:// fetch-failure smoke test passed.');
 }
 
+// Separate scenario: route.json specifically 404s while flows.json and
+// live_status.json both succeed -- confirms graceful degradation (the
+// route control simply never appears, nothing else on the dashboard is
+// affected) rather than either crashing or silently substituting
+// something in the missing file's place.
+async function testRouteJsonMissing() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  sandbox.fetch = url => {
+    if (url.includes('route')) {
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error('not found')) });
+    }
+    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD : FAKE_PAYLOAD;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
+  };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, route.json missing scenario)' });
+
+  await context.__dashboard.ready;
+
+  const state = context.__dashboard.getState();
+  assert.strictEqual(state.route, null, 'a route.json fetch failure should resolve to null, not throw or reject the whole load');
+  assert.strictEqual(state.routeLayer, null, 'no route layer should be built when route.json is missing');
+  assert.ok(
+    sandbox._elements['route-toggle-wrap'].classList.contains('hidden'),
+    'the route toggle control must not appear at all when route.json is missing -- graceful degradation, same rule as every other analysis layer'
+  );
+  assert.strictEqual(Object.keys(state.markers).length, 3, 'the rest of the dashboard should load completely normally even though route.json failed');
+  assert.ok(
+    sandbox._elements['status'].classList.contains('hidden'),
+    'route.json being missing alone must not trigger the fatal error banner -- only flows.json/live_status.json failures do that'
+  );
+  console.log('route.json-missing graceful-degradation smoke test passed.');
+}
+
 main()
   .then(testFileProtocolFetchFailure)
+  .then(testRouteJsonMissing)
   .catch(err => {
     console.error('FAILED:', err.message);
     process.exit(1);

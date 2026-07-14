@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Citi Bike Rebalancing Explorer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; background: #f9f9f7; }
+
+  #title, #legend, #status {
+    position: absolute; z-index: 1000; background: rgba(252, 252, 251, 0.92);
+    border-radius: 8px; box-shadow: 0 1px 4px rgba(11, 11, 11, 0.15); color: #0b0b0b;
+  }
+  #title { top: 16px; left: 24px; padding: 8px 14px; font-size: 14px; }
+  #title .subtitle { color: #52514e; font-size: 12px; }
+  #legend { bottom: 24px; left: 24px; padding: 12px 16px; font-size: 12px; }
+  #legend .bar { width: 220px; height: 12px; border-radius: 6px; margin: 6px 0; }
+  #legend .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; }
+  #status { top: 16px; right: 24px; padding: 8px 14px; font-size: 12px; color: #52514e; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="title">
+  <strong>Citi Bike Rebalancing Explorer</strong>
+  <div class="subtitle">Net flow at 8am, weekday (all-period average) &mdash; Session 10 map skeleton</div>
+</div>
+
+<div id="legend">
+  <div>Net flow at 8am weekday (bikes/day)</div>
+  <div class="bar" id="legend-bar"></div>
+  <div class="labels"><span>Deficit (no bikes)</span><span>0</span><span>Surplus (no docks)</span></div>
+</div>
+
+<div id="status">Loading stations&hellip;</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// Session 10 of the Build Plan -- map skeleton only. No time slider, no
+// weekday/weekend or season toggle, no station detail panel, no equity/
+// route/live-GBFS layers -- those are later, separately-committed sessions.
+
+const FIXED_HOUR = 8; // 8am weekday net flow, this session's fixed scope
+
+// Fixed marker radius, not magnitude-scaled: with ~2,300 stations packed
+// tightly in Manhattan, a size-encodes-magnitude scheme would make the
+// densest, most decision-relevant area the most visually cluttered and
+// hardest to click precisely. The diverging color scale below already
+// carries magnitude (via how saturated/dark each marker is); adding size
+// as a second magnitude channel is deferred, not needed for this skeleton.
+const MARKER_RADIUS_PX = 5;
+
+// Diverging red<->gray<->blue, matching the palette already used in the
+// Session 7.5 EDA report: red = draining (deficit, no bikes to pick up),
+// blue = filling (surplus, no docks to return to), gray = near zero.
+const DEFICIT_COLOR = [227, 73, 72];   // #e34948
+const SURPLUS_COLOR = [42, 120, 214];  // #2a78d6
+const NEUTRAL_COLOR = [137, 135, 129]; // #898781
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function lerpColor(c1, c2, t) {
+  return `rgb(${Math.round(lerp(c1[0], c2[0], t))}, ${Math.round(lerp(c1[1], c2[1], t))}, ${Math.round(lerp(c1[2], c2[2], t))})`;
+}
+
+function divergingColor(value, domainMax) {
+  const t = Math.max(-1, Math.min(1, value / domainMax));
+  return t < 0 ? lerpColor(DEFICIT_COLOR, NEUTRAL_COLOR, t + 1) : lerpColor(NEUTRAL_COLOR, SURPLUS_COLOR, t);
+}
+
+function percentile(sortedArr, p) {
+  const idx = (sortedArr.length - 1) * p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sortedArr[lo];
+  return lerp(sortedArr[lo], sortedArr[hi], idx - lo);
+}
+
+const map = L.map('map').setView([40.73, -73.95], 11); // NYC default, replaced by fitBounds once real station coords load
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 19,
+}).addTo(map);
+
+fetch('data/flows.json')
+  .then(response => {
+    if (!response.ok) throw new Error(`flows.json fetch failed: HTTP ${response.status}`);
+    return response.json();
+  })
+  .then(payload => {
+    const stations = payload.stations;
+    const ids = Object.keys(stations);
+
+    // Bounding box derived from the real station coordinates in flows.json,
+    // never hardcoded -- the map frames whatever data it was actually given.
+    let bounds = null;
+    const values = [];
+    for (const id of ids) {
+      const s = stations[id];
+      const latlng = [s.lat, s.lng];
+      values.push(s.weekday[FIXED_HOUR]);
+      bounds = bounds ? bounds.extend(latlng) : L.latLngBounds([latlng, latlng]);
+    }
+    map.fitBounds(bounds, { padding: [20, 20] });
+
+    // Symmetric color domain from the 95th percentile of |value|, not the
+    // raw max -- one or two outlier stations would otherwise wash out the
+    // color range for every other station on the map. Floored at 0.5 so an
+    // all-zero (or near-zero) dataset can't produce a degenerate 0-width domain.
+    const absSorted = values.map(Math.abs).sort((a, b) => a - b);
+    const domainMax = Math.max(percentile(absSorted, 0.95), 0.5);
+
+    for (const id of ids) {
+      const s = stations[id];
+      const value = s.weekday[FIXED_HOUR];
+      L.circleMarker([s.lat, s.lng], {
+        radius: MARKER_RADIUS_PX,
+        fillColor: divergingColor(value, domainMax),
+        color: '#ffffff',
+        weight: 0.75,
+        fillOpacity: 0.85,
+      }).addTo(map);
+    }
+
+    // Legend gradient is built from the exact same divergingColor() function
+    // used for the markers, so the two can never silently drift apart.
+    const stops = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = -1 + (2 * i) / 10;
+      stops.push(`${divergingColor(t * domainMax, domainMax)} ${(i / 10) * 100}%`);
+    }
+    document.getElementById('legend-bar').style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+
+    document.getElementById('status').textContent = `${ids.length.toLocaleString()} stations`;
+  })
+  .catch(error => {
+    const status = document.getElementById('status');
+    status.textContent = `Failed to load data/flows.json: ${error.message}`;
+    status.style.color = '#e34948';
+    console.error(error);
+  });
+</script>
+</body>
+</html>

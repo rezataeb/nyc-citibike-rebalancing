@@ -110,6 +110,22 @@
   #detail .strip { width: 100%; height: 70px; overflow: visible; }
 
   #footer { margin-top: 4px; font-size: 10px; color: #898781; line-height: 1.4; }
+
+  /* Collapsed by default -- a single line, zero extra height budget in the
+     common case, which is the whole point (the sidebar was just fixed to
+     fit one screen; this must not undo that). Expanding is an explicit
+     click, so it's allowed to push past viewport height per the
+     instruction -- #sidebar's own overflow-y:auto already handles that. */
+  #model-eval { margin-top: 10px; font-size: 11px; }
+  #model-eval-toggle { font: inherit; font-weight: 600; color: #52514e; background: none; border: none; padding: 0; cursor: pointer; }
+  #model-eval-toggle:hover { color: #0b0b0b; }
+  #model-eval-content { margin-top: 8px; }
+  #model-eval-content table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #model-eval-content th, #model-eval-content td { text-align: right; padding: 3px 4px; font-size: 11px; }
+  #model-eval-content th:first-child, #model-eval-content td:first-child { text-align: left; }
+  #model-eval-content thead th { color: #52514e; font-weight: 600; border-bottom: 1px solid #d8d7d3; }
+  #model-eval-content tbody td { border-bottom: 1px solid #f3f2f0; }
+  #model-eval-caption { margin-top: 6px; color: #898781; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -178,6 +194,23 @@
     </div>
   </div>
 
+  <div id="model-eval">
+    <button id="model-eval-toggle">Model performance &#9656;</button>
+    <div id="model-eval-content" class="hidden">
+      <table>
+        <thead>
+          <tr><th>Volume tercile</th><th>Seasonal-naive</th><th>Flat baseline</th><th>GBM</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Low (n=790)</td><td>0.275</td><td>0.275</td><td>0.993</td></tr>
+          <tr><td>Mid (n=788)</td><td>0.588</td><td>0.702</td><td>1.168</td></tr>
+          <tr><td>High (n=790)</td><td>1.364</td><td>1.924</td><td>2.082</td></tr>
+        </tbody>
+      </table>
+      <div id="model-eval-caption">MAE in bikes/day, Feb+April &rarr; June (held-out test month), from the Session 7.5 EDA report. GBM loses to seasonal-naive in every volume tercile &mdash; June's actual temperature fell outside the Feb+April training range, and gradient-boosted trees can't extrapolate past it.</div>
+    </div>
+  </div>
+
   <div id="footer">Public data: Citi Bike GBFS &amp; trip data, NYC Open Data, Open-Meteo. Independent portfolio project, not an official NYC DOT product.</div>
 
 </div>
@@ -202,8 +235,11 @@
 // fixed-height tabbed container instead of two independently-growing
 // blocks, and a condensed footer was added (none existed before). Session
 // 20 adds the rebalancing-route layer (route.json, historical-mode-only,
-// graceful degradation if the file is missing) -- each interaction lands
-// as its own commit. Equity filter is a standing scope exclusion, see
+// graceful degradation if the file is missing) and a collapsed-by-default
+// model-eval footer (real Session 7.5 MAE-by-volume-tercile numbers, not
+// fetched -- see PROGRESS.md for where they came from) -- each
+// interaction lands as its own commit. Equity filter is a standing scope
+// exclusion, see
 // CLAUDE.md -- per-station equity context in the detail panel is in scope
 // and unaffected. No mobile
 // breakpoint exists yet (flagged as a separate decision, not silently
@@ -590,7 +626,21 @@ const state = {
   route: null, // route.json's raw payload, or null if it failed to load (graceful degradation, not fatal)
   routeLayer: null, // L.layerGroup of polylines + numbered stop markers, built once if route.json loads
   routeVisible: false, // the user's own toggle preference, independent of state.mode -- see applyRouteVisibility()
+  modelEvalExpanded: false, // collapsed by default -- the sidebar-height fix (Session 19) must not be undone by this
 };
+
+// Collapsed by default (zero extra height budget); expanding is an
+// explicit click, allowed to push the sidebar past one screen (its own
+// overflow-y:auto handles that) since that's an explicit user action, not
+// something that happens by just loading the page. The table content
+// itself is static (real numbers, not a fetched file -- see PROGRESS.md's
+// Session 20 Part B entry for where they came from), so this is a pure
+// visibility toggle, no data fetching or rendering involved.
+function setModelEvalExpanded(expanded) {
+  state.modelEvalExpanded = expanded;
+  document.getElementById('model-eval-content').classList.toggle('hidden', !expanded);
+  document.getElementById('model-eval-toggle').textContent = `Model performance ${expanded ? '▾' : '▸'}`;
+}
 
 // Switches the Legend/Station-detail tab pair. Purely a visibility switch --
 // content population is handled separately by updateStationDetail() (called
@@ -1010,6 +1060,12 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 19,
 }).addTo(map);
 
+// Wired here, not inside the data-load .then() below -- the model-eval
+// table is static content, independent of flows.json/live_status.json/
+// route.json, so it works immediately regardless of how the fetches go.
+document.getElementById('model-eval-toggle').addEventListener('click', () => setModelEvalExpanded(!state.modelEvalExpanded));
+setModelEvalExpanded(false); // explicit, not just relying on the static HTML default to already match -- same fix as Session 19's setInfoTab('legend')
+
 function fetchJSON(url) {
   return fetch(url).then(response => {
     if (!response.ok) throw new Error(`${url} fetch failed: HTTP ${response.status}`);
@@ -1182,6 +1238,7 @@ if (typeof globalThis !== 'undefined') {
     setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,
     setInfoTab, updateStationDetail,
     computeStopOffset, assignVisitIndices, buildStopIconHTML, buildRouteLayer, setRouteVisible, applyRouteVisibility,
+    setModelEvalExpanded,
     getState: () => state,
     ready,
   };

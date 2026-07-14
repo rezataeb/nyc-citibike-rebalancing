@@ -889,6 +889,23 @@ async function main() {
   assert.ok(!sandbox._map._layers.includes(routeState.routeLayer));
   assert.strictEqual(elements['route-toggle-btn'].textContent, 'Show route');
 
+  // --- Session 20, Part B: model-eval footer, collapsed by default ---
+  assert.strictEqual(dash.getState().modelEvalExpanded, false, 'model-eval footer should be collapsed by default');
+  assert.ok(elements['model-eval-content'].classList.contains('hidden'), 'model-eval content should be hidden by default');
+  assert.strictEqual(elements['model-eval-toggle'].textContent, 'Model performance ▸');
+
+  const modelEvalClick = elements['model-eval-toggle']._listeners.click;
+  assert.ok(modelEvalClick, 'no click listener registered on the model-eval toggle');
+  modelEvalClick();
+  assert.strictEqual(dash.getState().modelEvalExpanded, true);
+  assert.ok(!elements['model-eval-content'].classList.contains('hidden'), 'model-eval content should show once expanded');
+  assert.strictEqual(elements['model-eval-toggle'].textContent, 'Model performance ▾');
+
+  modelEvalClick();
+  assert.strictEqual(dash.getState().modelEvalExpanded, false);
+  assert.ok(elements['model-eval-content'].classList.contains('hidden'), 'model-eval content should collapse again on a second click');
+  assert.strictEqual(elements['model-eval-toggle'].textContent, 'Model performance ▸');
+
   console.log('All dashboard slider smoke tests passed.');
 }
 

@@ -291,6 +291,28 @@ async function main() {
   const elements = sandbox._elements;
   assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 8:00 AM, weekday (all-period average)');
   assert.strictEqual(elements['hour-label'].textContent, '8:00 AM');
+  assert.strictEqual(elements['title-meta'].textContent, ' · 3 stations', 'station count should be merged into the subtitle line, not a separate boxed row');
+  assert.ok(elements['status'].classList.contains('hidden'), 'the boxed status banner should be hidden once data has loaded successfully');
+
+  // --- Session 19: pristine state, before any station has ever been selected ---
+  assert.ok(elements['tab-legend'].classList.contains('active'), 'Legend tab should be active by default');
+  assert.ok(elements['detail'].classList.contains('hidden'), 'Station detail pane should be hidden by default');
+  assert.strictEqual(elements['detail-name'].textContent, 'No station selected', 'the detail pane must show a placeholder, not be blank, even before the first click');
+
+  // Manually switching to the Station detail tab before ever selecting a
+  // station must work (the tab is always reachable, never disabled) and
+  // must show that same placeholder, not blank/stale content.
+  const tabDetailClick = elements['tab-detail']._listeners.click;
+  assert.ok(tabDetailClick, 'no click listener registered on the Station detail tab');
+  tabDetailClick();
+  assert.ok(!elements['detail'].classList.contains('hidden'), 'Station detail pane should show once its tab is clicked');
+  assert.ok(elements['legend'].classList.contains('hidden'), 'Legend pane should hide while Station detail is active');
+  assert.strictEqual(elements['detail-name'].textContent, 'No station selected', 'still the placeholder -- no station has been clicked on the map yet');
+
+  const tabLegendClick = elements['tab-legend']._listeners.click;
+  tabLegendClick();
+  assert.ok(!elements['legend'].classList.contains('hidden'), 'switching back to Legend should show it again');
+  assert.ok(elements['detail'].classList.contains('hidden'), 'and hide Station detail again');
 
   // --- simulate dragging the slider to 2pm (hour 14) ---
   const inputHandler = elements['hour-slider']._listeners.input;
@@ -367,7 +389,9 @@ async function main() {
   assert.strictEqual(elements['detail-name'].textContent, 'Station B');
   assert.strictEqual(elements['detail-cluster'].textContent, 'Test cluster B');
   assert.strictEqual(elements['detail-daylabel'].textContent, 'weekday, all-period average');
-  assert.ok(elements['detail'].classList.contains('visible'), 'detail panel should be visible after selecting a station');
+  assert.ok(!elements['detail'].classList.contains('hidden'), 'detail pane should be visible after selecting a station');
+  assert.ok(elements['tab-detail'].classList.contains('active'), 'selecting a station should switch to the Station detail tab');
+  assert.ok(!elements['tab-legend'].classList.contains('active'), 'and away from the Legend tab');
   assert.strictEqual(stateSelected.markers.B._opts.color, '#2a2a28', 'selected marker should get the highlight stroke color');
   assert.strictEqual(stateSelected.markers.B._opts.weight, 2, 'selected marker should get the highlight stroke weight');
 
@@ -429,7 +453,9 @@ async function main() {
   dash.closeStation();
   const stateAfterClose = dash.getState();
   assert.strictEqual(stateAfterClose.selectedId, null);
-  assert.ok(!elements['detail'].classList.contains('visible'), 'detail panel should be hidden after closing');
+  assert.ok(elements['detail'].classList.contains('hidden'), 'detail pane should be hidden after closing');
+  assert.ok(elements['tab-legend'].classList.contains('active'), 'closing should switch back to the Legend tab');
+  assert.strictEqual(elements['detail-name'].textContent, 'No station selected', 'closing should restore the placeholder, not stale content');
   assert.strictEqual(stateAfterClose.markers.B._opts.color, '#ffffff', 'closing should revert the marker highlight color');
   assert.strictEqual(stateAfterClose.markers.B._opts.weight, 0.75, 'closing should revert the marker highlight weight');
 
@@ -473,9 +499,10 @@ async function main() {
   assert.strictEqual(stateMay.markers.B._opts.weight, 1, 'a no-data marker should get the heavier no-data stroke weight');
 
   assert.strictEqual(
-    elements['status'].textContent, '2 of 3 stations have data for May 2026',
-    'the status line must surface the coverage gap, not hide it -- per the confirmed hollow-marker-plus-status-line design'
+    elements['title-meta'].textContent, ' · 2 of 3 stations have data for May 2026',
+    'the coverage message (now merged into the subtitle, not a boxed row) must surface the coverage gap, not hide it'
   );
+  assert.ok(elements['status'].classList.contains('hidden'), 'the boxed status banner should stay hidden on the success path');
   assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 8:00 PM, weekend (May 2026)');
   assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 8:00 PM weekend, May 2026 (bikes/day)');
 
@@ -526,7 +553,7 @@ async function main() {
   );
   assert.strictEqual(stateBackToAll.markers.B._opts.fillOpacity, 0.85);
   assert.strictEqual(stateBackToAll.markers.B._opts.color, '#ffffff', 'station B should revert to the plain default stroke once data exists again');
-  assert.strictEqual(elements['status'].textContent, '3 stations');
+  assert.strictEqual(elements['title-meta'].textContent, ' · 3 stations');
   assert.ok(!elements['detail-strip'].innerHTML.includes('No data'), 'station A (still selected) has all-period data -- no no-data message should remain');
 
   // --- Session 15: live GBFS mode. Entering with period='all', dayType='weekend', hour=20, selectedId='A'. ---
@@ -547,10 +574,7 @@ async function main() {
   assert.strictEqual(elements['legend-label-low'].textContent, 'Empty (0% full)');
   assert.strictEqual(elements['legend-label-mid'].textContent, '50%');
   assert.strictEqual(elements['legend-label-high'].textContent, 'Full (100% full)');
-  assert.strictEqual(
-    elements['legend-note'].textContent,
-    '50% used as a simple neutral reference point, not a station-specific target inventory level.'
-  );
+  assert.strictEqual(elements['legend-note'].textContent, '50% is a neutral reference point, not a per-station target.');
   assert.strictEqual(elements['live-as-of'].textContent, `Live as of ${dash.formatAsOf(FAKE_LIVE_PAYLOAD.last_updated)}`);
 
   // A: 10/20 = 50% full -> neutral gray (deviation 0). B: 2/20 = 10% full -> red end. C: no live match -> hollow.
@@ -571,8 +595,8 @@ async function main() {
   assert.strictEqual(stateLive.markers.A._opts.fillOpacity, 0.85, 'station A has live data -- not hollow, even while selected');
 
   assert.strictEqual(
-    elements['status'].textContent, '2 of 3 stations have live data',
-    'the status line must state live coverage explicitly, computed from the real fake payload, not hardcoded'
+    elements['title-meta'].textContent, ' · 2 of 3 stations have live data',
+    'the coverage message must state live coverage explicitly, computed from the real fake payload, not hardcoded'
   );
 
   // Detail panel should already reflect A's live reading (updateStationDetail runs from renderHour's hook).
@@ -621,7 +645,7 @@ async function main() {
     'station C should recolor from its historical weekend curve again, now that mode is historical'
   );
   assert.strictEqual(stateBackToHistorical.markers.C._opts.fillOpacity, 0.85);
-  assert.strictEqual(elements['status'].textContent, '3 stations', 'status line should revert to the plain historical count (period is still "all")');
+  assert.strictEqual(elements['title-meta'].textContent, ' · 3 stations', 'coverage message should revert to the plain historical count (period is still "all")');
   assert.ok(
     elements['detail-strip'].innerHTML.includes('id="strip-dot"'),
     'station C (still selected) has all-period historical data -- the rhythm strip should draw normally again'

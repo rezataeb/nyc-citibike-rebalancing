@@ -24,9 +24,13 @@
 
   #title { margin-bottom: 12px; font-size: 14px; }
   #title .subtitle { color: #52514e; font-size: 12px; margin-top: 4px; }
+  #title-meta { color: #898781; } /* station-count suffix, merged into the subtitle line instead of its own boxed row */
 
   /* Status/error banner -- normal document flow, so it can never overlap
-     a control the way a fixed/absolute toast could. Same background/
+     a control the way a fixed/absolute toast could. Hidden by default
+     once data loads successfully (the count moved into #title-meta
+     above); only ever shown again for the loading flash or a real error,
+     so it never costs vertical space in the common case. Same background/
      border/radius tokens as the rest of the sidebar; the .error modifier
      is the only new-looking thing, and it reuses the deficit red already
      established for the historical color scale, not a new hue. */
@@ -69,26 +73,41 @@
 
   #live-as-of { color: #52514e; font-size: 12px; }
 
+  /* Legend and Station detail share one fixed-height container as two
+     tabs, rather than two separately-growing blocks -- this is what lets
+     the sidebar fit a standard laptop viewport with a station selected,
+     not just in the empty state. #info-content's height is fixed (sized
+     to comfortably fit the detail pane's tallest normal content: name +
+     meta lines + chart title + chart); an unusually long name/meta on one
+     station scrolls locally inside it instead of growing the container
+     or the sidebar. */
+  #info-panel { border: 1px solid #d8d7d3; border-radius: 8px; background: #fff; margin-bottom: 14px; overflow: hidden; }
+  #info-tabs { display: flex; border-bottom: 1px solid #d8d7d3; }
+  .info-tab-btn { flex: 1; font: inherit; font-weight: 600; font-size: 12px; padding: 8px; border: none; background: #f9f9f7; color: #52514e; cursor: pointer; }
+  .info-tab-btn.active { background: #fff; color: #0b0b0b; box-shadow: inset 0 -2px 0 #2a78d6; }
+  #info-content { height: 280px; overflow-y: auto; padding: 12px; box-sizing: border-box; font-size: 12px; }
+
   /* Legend: same gradient-bar + endpoint-labels + caption content as
-     before, just relocated into normal sidebar flow instead of floating
-     over the map. */
-  #legend { margin-bottom: 14px; font-size: 12px; }
+     before, just relocated into the tab pane instead of floating over
+     the map. */
   #legend-title { margin-bottom: 6px; }
   #legend .bar { width: 100%; height: 12px; border-radius: 6px; margin: 6px 0; box-sizing: border-box; }
   #legend .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; }
   #legend-note { font-size: 11px; color: #898781; margin-top: 6px; line-height: 1.4; }
 
-  /* Detail panel: in-flow below the legend, appears on station click.
-     #sidebar's own overflow-y:auto handles scrolling if it runs long --
-     no independent max-height/scroll region of its own anymore. */
-  #detail { display: none; position: relative; padding: 12px; border: 1px solid #d8d7d3; border-radius: 8px; background: #fff; font-size: 12px; }
-  #detail.visible { display: block; }
-  #detail-close { position: absolute; top: 8px; right: 10px; border: none; background: none; font-size: 16px; line-height: 1; cursor: pointer; color: #898781; padding: 2px 4px; }
+  /* Detail pane: visibility is entirely driven by which tab is active
+     (see .hidden, toggled by setInfoTab()) -- no independent show/hide
+     state of its own anymore. position:relative only for the close
+     button's positioning context. */
+  #detail { position: relative; }
+  #detail-close { position: absolute; top: -4px; right: -4px; border: none; background: none; font-size: 16px; line-height: 1; cursor: pointer; color: #898781; padding: 2px 4px; }
   #detail-close:hover { color: #0b0b0b; }
   #detail h2 { margin: 0 24px 4px 0; font-size: 15px; }
   #detail .meta { color: #52514e; margin-bottom: 3px; line-height: 1.4; }
   #detail .striptitle { font-size: 11px; color: #52514e; margin: 10px 0 4px; }
   #detail .strip { width: 100%; height: 70px; overflow: visible; }
+
+  #footer { margin-top: 4px; font-size: 10px; color: #898781; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -96,7 +115,7 @@
 
   <div id="title">
     <strong>Citi Bike Rebalancing Explorer</strong>
-    <div class="subtitle" id="title-subtitle">Net flow at 8:00 AM, weekday (all-period average)</div>
+    <div class="subtitle"><span id="title-subtitle">Net flow at 8:00 AM, weekday (all-period average)</span><span id="title-meta"></span></div>
   </div>
 
   <div id="status">Loading stations&hellip;</div>
@@ -129,21 +148,31 @@
 
   <div id="live-as-of" class="card hidden"></div>
 
-  <div id="legend">
-    <div id="legend-title">Net flow at 8:00 AM weekday (bikes/day)</div>
-    <div class="bar" id="legend-bar"></div>
-    <div class="labels"><span id="legend-label-low">Deficit (no bikes)</span><span id="legend-label-mid">0</span><span id="legend-label-high">Surplus (no docks)</span></div>
-    <div id="legend-note">Color scale is shared across weekday/weekend &mdash; paler weekend markers reflect genuinely smaller imbalance, not a rendering error.</div>
+  <div id="info-panel">
+    <div id="info-tabs">
+      <button id="tab-legend" class="info-tab-btn active">Legend</button>
+      <button id="tab-detail" class="info-tab-btn">Station detail</button>
+    </div>
+    <div id="info-content">
+      <div id="legend">
+        <div id="legend-title">Net flow at 8:00 AM weekday (bikes/day)</div>
+        <div class="bar" id="legend-bar"></div>
+        <div class="labels"><span id="legend-label-low">Deficit (no bikes)</span><span id="legend-label-mid">0</span><span id="legend-label-high">Surplus (no docks)</span></div>
+        <div id="legend-note">Same scale for weekday and weekend &mdash; paler markers mean smaller imbalance, not an error.</div>
+      </div>
+
+      <div id="detail" class="hidden">
+        <button id="detail-close" aria-label="Close station detail">&times;</button>
+        <h2 id="detail-name"></h2>
+        <div class="meta" id="detail-cluster"></div>
+        <div class="meta" id="detail-context"></div>
+        <div class="striptitle">24-hour flow rhythm (<span id="detail-daylabel"></span>)</div>
+        <svg class="strip" id="detail-strip" viewBox="0 0 240 70" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
   </div>
 
-  <div id="detail">
-    <button id="detail-close" aria-label="Close station detail">&times;</button>
-    <h2 id="detail-name"></h2>
-    <div class="meta" id="detail-cluster"></div>
-    <div class="meta" id="detail-context"></div>
-    <div class="striptitle">24-hour flow rhythm (<span id="detail-daylabel"></span>)</div>
-    <svg class="strip" id="detail-strip" viewBox="0 0 240 70" preserveAspectRatio="none"></svg>
-  </div>
+  <div id="footer">Public data: Citi Bike GBFS &amp; trip data, NYC Open Data, Open-Meteo. Independent portfolio project, not an official NYC DOT product.</div>
 
 </div>
 <div id="map"></div>
@@ -160,9 +189,12 @@
 // by grep across this file, reference/dashboard.html, and PROGRESS.md).
 // Session 16 added marker clustering (view-mode toggle, Leaflet.markercluster,
 // mode-aware cluster coloring). Session 17 fixed a refreshClusters() crash
-// on every page load plus the file:// error message. Session 18 replaces
-// the floating top-bar layout with a left sidebar + map-fill split (all
-// controls now live in #sidebar, in normal document flow) -- each
+// on every page load plus the file:// error message. Session 18 replaced
+// the floating top-bar layout with a left sidebar + map-fill split. Session
+// 19 fixes sidebar height: the station count moved into the title subtitle
+// (no separate boxed row), the Legend/Station-detail pair share one
+// fixed-height tabbed container instead of two independently-growing
+// blocks, and a condensed footer was added (none existed before) -- each
 // interaction lands as its own commit. Still no route layer. Equity filter
 // is a standing scope exclusion, see CLAUDE.md -- per-station equity
 // context in the detail panel is in scope and unaffected. No mobile
@@ -437,7 +469,20 @@ const state = {
   viewMode: 'individual', // 'individual' | 'grouped'
   individualLayer: null, // L.layerGroup holding the same marker objects as state.markers
   clusterLayer: null, // L.markerClusterGroup holding the same marker objects as state.markers
+  infoTab: 'legend', // 'legend' | 'detail' -- which tab of the shared Legend/Station-detail container is showing
 };
+
+// Switches the Legend/Station-detail tab pair. Purely a visibility switch --
+// content population is handled separately by updateStationDetail() (called
+// whenever state.selectedId changes or the underlying data changes), so
+// switching tabs manually never needs to re-fetch or re-render anything.
+function setInfoTab(tab) {
+  state.infoTab = tab;
+  document.getElementById('tab-legend').classList.toggle('active', tab === 'legend');
+  document.getElementById('tab-detail').classList.toggle('active', tab === 'detail');
+  document.getElementById('legend').classList.toggle('hidden', tab !== 'legend');
+  document.getElementById('detail').classList.toggle('hidden', tab !== 'detail');
+}
 
 // Stroke (selection ring) and fill styling, kept as one lookup table so
 // "selected" and "has no data for the current period" compose correctly
@@ -512,7 +557,7 @@ function renderHour(hour) {
     document.getElementById('legend-label-mid').textContent = '50%';
     document.getElementById('legend-label-high').textContent = 'Full (100% full)';
     document.getElementById('legend-note').textContent =
-      '50% used as a simple neutral reference point, not a station-specific target inventory level.';
+      '50% is a neutral reference point, not a per-station target.';
     document.getElementById('live-as-of').textContent = `Live as of ${formatAsOf(state.liveAsOf)}`;
   } else {
     const label = formatHourLabel(hour);
@@ -523,16 +568,18 @@ function renderHour(hour) {
     document.getElementById('legend-label-mid').textContent = '0';
     document.getElementById('legend-label-high').textContent = 'Surplus (no docks)';
     document.getElementById('legend-note').textContent =
-      'Color scale is shared across weekday/weekend — paler weekend markers reflect genuinely smaller imbalance, not a rendering error.';
+      'Same scale for weekday and weekend — paler markers mean smaller imbalance, not an error.';
     document.getElementById('hour-label').textContent = label;
   }
 
-  // Keeps an open detail panel AND grouped-view cluster icons in sync with
-  // whatever just changed -- the slider, the day-type toggle, the period
-  // selector, or the historical/live mode toggle (all call renderHour). One
-  // hook point covers all four, so there's only one place that can drift
-  // out of sync.
-  if (state.selectedId) updateStationDetail();
+  // Keeps the detail pane (selected station OR the "no station selected"
+  // placeholder) AND grouped-view cluster icons in sync with whatever just
+  // changed -- the slider, the day-type toggle, the period selector, or
+  // the historical/live mode toggle (all call renderHour). One hook point
+  // covers all four, so there's only one place that can drift out of sync.
+  // Unconditional now (not just "if selected") since updateStationDetail()
+  // itself renders the placeholder when nothing is selected.
+  updateStationDetail();
   refreshClusters();
 }
 
@@ -557,21 +604,28 @@ function setPeriod(period) {
   updateStatusMessage();
 }
 
+// Writes the station-count/coverage message into #title-meta (merged into
+// the subtitle line, e.g. "... · 2,347 stations") rather than the boxed
+// #status banner -- that banner is now reserved for the loading flash and
+// real errors, so it costs zero vertical space in the common case. Always
+// hides #status here: this only runs after a successful load (or a
+// period/mode switch after one), never during the error path.
 function updateStatusMessage() {
   const ids = Object.keys(state.stations);
-  const status = document.getElementById('status');
+  document.getElementById('status').classList.add('hidden');
+  const meta = document.getElementById('title-meta');
 
   if (state.mode === 'live') {
     const withData = ids.filter(hasLiveData).length;
-    status.textContent = `${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have live data`;
+    meta.textContent = ` · ${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have live data`;
     return;
   }
   if (state.period === 'all') {
-    status.textContent = `${ids.length.toLocaleString()} stations`;
+    meta.textContent = ` · ${ids.length.toLocaleString()} stations`;
     return;
   }
   const withData = ids.filter(id => hasPeriodData(state.stations[id], state.period)).length;
-  status.textContent = `${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have data for ${formatPeriodLabel(state.period)}`;
+  meta.textContent = ` · ${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have data for ${formatPeriodLabel(state.period)}`;
 }
 
 // Switches historical <-> live and re-renders through the same renderHour
@@ -630,7 +684,9 @@ function contextLines(context) {
 // station is selected) handles everything that does. Restyles only the
 // previously- and newly-selected markers (via markerStyleFor, the same
 // lookup renderHour uses for every marker) rather than looping over all
-// ~2,300 -- selection only ever changes 1-2 markers' styles.
+// ~2,300 -- selection only ever changes 1-2 markers' styles. Also switches
+// the sidebar to the Station-detail tab, since selecting a station is the
+// one action that always means "show me its detail."
 function selectStation(id) {
   const previous = state.selectedId;
   state.selectedId = id;
@@ -649,15 +705,19 @@ function selectStation(id) {
     contextEl.appendChild(div);
   }
 
-  document.getElementById('detail').classList.add('visible');
   updateStationDetail();
+  setInfoTab('detail');
 }
 
+// Clears the selection, restores the "no station selected" placeholder
+// (via updateStationDetail()), and switches back to the Legend tab -- the
+// tab pair's other explicit transition, mirroring selectStation's.
 function closeStation() {
   const previous = state.selectedId;
   state.selectedId = null;
   if (previous) restyleMarker(previous);
-  document.getElementById('detail').classList.remove('visible');
+  updateStationDetail();
+  setInfoTab('legend');
 }
 
 const STRIP_W = 240, STRIP_H = 70, STRIP_MID = STRIP_H / 2, STRIP_PAD = 4;
@@ -727,8 +787,21 @@ function buildLiveDetailMarkup(live) {
 // readout. Either way, the panel always agrees with the map: if this
 // station has no data for whatever's currently selected, that's shown
 // explicitly, never silently falling back to something else.
+//
+// With no station selected, this renders an explicit placeholder rather
+// than returning early and leaving stale/blank content -- the Station
+// detail tab is always reachable (never disabled), so it always has to
+// show *something* coherent, even before the first click.
 function updateStationDetail() {
-  if (!state.selectedId) return;
+  if (!state.selectedId) {
+    document.getElementById('detail-name').textContent = 'No station selected';
+    document.getElementById('detail-cluster').textContent = '';
+    document.getElementById('detail-context').textContent = '';
+    document.getElementById('detail-daylabel').textContent = '';
+    document.getElementById('detail-strip').innerHTML =
+      `<text x="${STRIP_W / 2}" y="${STRIP_MID}" font-size="11" fill="#898781" text-anchor="middle">Click a station on the map to see its detail</text>`;
+    return;
+  }
   const stripEl = document.getElementById('detail-strip');
 
   if (state.mode === 'live') {
@@ -880,6 +953,7 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     drawLegendGradient(state.domainMax);
     renderHour(state.currentHour); // sets initial title/legend/slider text consistently with the markers just drawn
     updateStatusMessage();
+    setInfoTab('legend'); // explicit, not just relying on the static HTML markup to already match state.infoTab's default
 
     // Slider updates are throttled to one render per animation frame rather
     // than one per 'input' event: dragging can fire far more events than
@@ -910,6 +984,9 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     document.getElementById('view-individual').addEventListener('click', () => setViewMode('individual'));
     document.getElementById('view-grouped').addEventListener('click', () => setViewMode('grouped'));
 
+    document.getElementById('tab-legend').addEventListener('click', () => setInfoTab('legend'));
+    document.getElementById('tab-detail').addEventListener('click', () => setInfoTab('detail'));
+
     document.getElementById('detail-close').addEventListener('click', closeStation);
 
     // Attached once, directly on the (never-replaced) <svg> element -- its
@@ -937,6 +1014,7 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     } else {
       status.textContent = `Failed to load dashboard data: ${error && error.message ? error.message : error}`;
     }
+    status.classList.remove('hidden'); // defensive: updateStatusMessage() never runs on this path, but be explicit
     status.classList.add('error'); // in-flow banner, never fixed/absolute -- can't overlap a control
     console.error(error);
   });
@@ -950,6 +1028,7 @@ if (typeof globalThis !== 'undefined') {
     setPeriod, formatPeriodLabel, curveForPeriod, hasPeriodData,
     setMode, hasLiveData, formatAsOf,
     setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,
+    setInfoTab, updateStationDetail,
     getState: () => state,
     ready,
   };

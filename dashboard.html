@@ -9,12 +9,16 @@
   html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; background: #f9f9f7; }
 
-  #title, #legend, #status {
+  #title, #legend, #status, #controls {
     position: absolute; z-index: 1000; background: rgba(252, 252, 251, 0.92);
     border-radius: 8px; box-shadow: 0 1px 4px rgba(11, 11, 11, 0.15); color: #0b0b0b;
   }
   #title { top: 16px; left: 24px; padding: 8px 14px; font-size: 14px; }
   #title .subtitle { color: #52514e; font-size: 12px; }
+  #controls { top: 16px; left: 320px; padding: 8px 14px; font-size: 12px; display: flex; align-items: center; gap: 10px; }
+  #controls label { color: #52514e; }
+  #controls input[type="range"] { width: 200px; }
+  #hour-label { font-weight: 600; min-width: 74px; display: inline-block; }
   #legend { bottom: 24px; left: 24px; padding: 12px 16px; font-size: 12px; }
   #legend .bar { width: 220px; height: 12px; border-radius: 6px; margin: 6px 0; }
   #legend .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; }
@@ -26,11 +30,17 @@
 
 <div id="title">
   <strong>Citi Bike Rebalancing Explorer</strong>
-  <div class="subtitle">Net flow at 8am, weekday (all-period average) &mdash; Session 10 map skeleton</div>
+  <div class="subtitle" id="title-subtitle">Net flow at 8:00 AM, weekday (all-period average)</div>
+</div>
+
+<div id="controls">
+  <label for="hour-slider">Hour of day</label>
+  <input type="range" id="hour-slider" min="0" max="23" step="1" value="8">
+  <span id="hour-label">8:00 AM</span>
 </div>
 
 <div id="legend">
-  <div>Net flow at 8am weekday (bikes/day)</div>
+  <div id="legend-title">Net flow at 8:00 AM weekday (bikes/day)</div>
   <div class="bar" id="legend-bar"></div>
   <div class="labels"><span>Deficit (no bikes)</span><span>0</span><span>Surplus (no docks)</span></div>
 </div>
@@ -39,18 +49,19 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// Session 10 of the Build Plan -- map skeleton only. No time slider, no
-// weekday/weekend or season toggle, no station detail panel, no equity/
-// route/live-GBFS layers -- those are later, separately-committed sessions.
+// Session 10 built the map skeleton (fixed 8am, no interactivity). Session 11
+// adds interactions ONE AT A TIME, as separate commits -- this commit is the
+// 24h time slider only. Still no weekday/weekend toggle, season/month
+// selector, station detail panel, or equity/route/live-GBFS layers.
 
-const FIXED_HOUR = 8; // 8am weekday net flow, this session's fixed scope
+const DEFAULT_HOUR = 8; // initial slider position; no longer a fixed constant once wired up
 
 // Fixed marker radius, not magnitude-scaled: with ~2,300 stations packed
 // tightly in Manhattan, a size-encodes-magnitude scheme would make the
 // densest, most decision-relevant area the most visually cluttered and
 // hardest to click precisely. The diverging color scale below already
 // carries magnitude (via how saturated/dark each marker is); adding size
-// as a second magnitude channel is deferred, not needed for this skeleton.
+// as a second magnitude channel is deferred, not needed here.
 const MARKER_RADIUS_PX = 5;
 
 // Diverging red<->gray<->blue, matching the palette already used in the
@@ -78,6 +89,64 @@ function percentile(sortedArr, p) {
   return lerp(sortedArr[lo], sortedArr[hi], idx - lo);
 }
 
+// Domain computed once across ALL 24 hours x all stations, not per-hour.
+// Recomputing it per hour would make color intensity meaningless across
+// the slider: a modest 3am imbalance and a severe 8am imbalance could both
+// render fully saturated if each hour auto-normalized to its own range,
+// defeating the point of a slider meant to show *when* imbalance peaks.
+// Same 95th-percentile-of-|value| logic as Session 10, just over a bigger
+// pool of values; floored at 0.5 to avoid a degenerate 0-width domain.
+function computeDomainMax(stations, dayType) {
+  const allAbs = [];
+  for (const id in stations) {
+    const curve = stations[id][dayType];
+    for (let h = 0; h < 24; h++) allAbs.push(Math.abs(curve[h]));
+  }
+  allAbs.sort((a, b) => a - b);
+  return Math.max(percentile(allAbs, 0.95), 0.5);
+}
+
+function formatHourLabel(hour) {
+  const period = hour < 12 ? 'AM' : 'PM';
+  let displayHour = hour % 12;
+  if (displayHour === 0) displayHour = 12;
+  return `${displayHour}:00 ${period}`;
+}
+
+// Dashboard state, kept in one place (rather than scattered closure
+// variables) so the Node smoke test can inspect it via the test hook below.
+const state = {
+  stations: null,   // raw stations object from flows.json, once loaded
+  markers: {},      // station_id -> Leaflet circleMarker, kept for in-place updates
+  domainMax: null,
+  currentHour: DEFAULT_HOUR,
+};
+
+// Recolors every existing marker for `hour` and updates the hour-dependent
+// text (title subtitle, legend title, slider label). Does NOT touch the
+// legend gradient bar or recompute domainMax -- both are fixed once, at
+// load time, by design (see computeDomainMax's comment above).
+function renderHour(hour) {
+  state.currentHour = hour;
+  for (const id in state.markers) {
+    const value = state.stations[id].weekday[hour];
+    state.markers[id].setStyle({ fillColor: divergingColor(value, state.domainMax) });
+  }
+  const label = formatHourLabel(hour);
+  document.getElementById('title-subtitle').textContent = `Net flow at ${label}, weekday (all-period average)`;
+  document.getElementById('legend-title').textContent = `Net flow at ${label} weekday (bikes/day)`;
+  document.getElementById('hour-label').textContent = label;
+}
+
+function drawLegendGradient(domainMax) {
+  const stops = [];
+  for (let i = 0; i <= 10; i++) {
+    const t = -1 + (2 * i) / 10;
+    stops.push(`${divergingColor(t * domainMax, domainMax)} ${(i / 10) * 100}%`);
+  }
+  document.getElementById('legend-bar').style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+}
+
 const map = L.map('map').setView([40.73, -73.95], 11); // NYC default, replaced by fitBounds once real station coords load
 
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -86,56 +155,59 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 19,
 }).addTo(map);
 
-fetch('data/flows.json')
+const ready = fetch('data/flows.json')
   .then(response => {
     if (!response.ok) throw new Error(`flows.json fetch failed: HTTP ${response.status}`);
     return response.json();
   })
   .then(payload => {
-    const stations = payload.stations;
-    const ids = Object.keys(stations);
+    state.stations = payload.stations;
+    const ids = Object.keys(state.stations);
 
     // Bounding box derived from the real station coordinates in flows.json,
     // never hardcoded -- the map frames whatever data it was actually given.
     let bounds = null;
-    const values = [];
     for (const id of ids) {
-      const s = stations[id];
-      const latlng = [s.lat, s.lng];
-      values.push(s.weekday[FIXED_HOUR]);
+      const latlng = [state.stations[id].lat, state.stations[id].lng];
       bounds = bounds ? bounds.extend(latlng) : L.latLngBounds([latlng, latlng]);
     }
     map.fitBounds(bounds, { padding: [20, 20] });
 
-    // Symmetric color domain from the 95th percentile of |value|, not the
-    // raw max -- one or two outlier stations would otherwise wash out the
-    // color range for every other station on the map. Floored at 0.5 so an
-    // all-zero (or near-zero) dataset can't produce a degenerate 0-width domain.
-    const absSorted = values.map(Math.abs).sort((a, b) => a - b);
-    const domainMax = Math.max(percentile(absSorted, 0.95), 0.5);
+    state.domainMax = computeDomainMax(state.stations, 'weekday');
 
     for (const id of ids) {
-      const s = stations[id];
-      const value = s.weekday[FIXED_HOUR];
-      L.circleMarker([s.lat, s.lng], {
+      const s = state.stations[id];
+      state.markers[id] = L.circleMarker([s.lat, s.lng], {
         radius: MARKER_RADIUS_PX,
-        fillColor: divergingColor(value, domainMax),
+        fillColor: divergingColor(s.weekday[state.currentHour], state.domainMax),
         color: '#ffffff',
         weight: 0.75,
         fillOpacity: 0.85,
       }).addTo(map);
     }
 
-    // Legend gradient is built from the exact same divergingColor() function
-    // used for the markers, so the two can never silently drift apart.
-    const stops = [];
-    for (let i = 0; i <= 10; i++) {
-      const t = -1 + (2 * i) / 10;
-      stops.push(`${divergingColor(t * domainMax, domainMax)} ${(i / 10) * 100}%`);
-    }
-    document.getElementById('legend-bar').style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+    drawLegendGradient(state.domainMax);
+    renderHour(state.currentHour); // sets initial title/legend/slider text consistently with the markers just drawn
 
     document.getElementById('status').textContent = `${ids.length.toLocaleString()} stations`;
+
+    // Slider updates are throttled to one render per animation frame rather
+    // than one per 'input' event: dragging can fire far more events than
+    // the browser can usefully restyle 2,347 markers for, so rapid events
+    // are coalesced and only the latest value is ever rendered.
+    const slider = document.getElementById('hour-slider');
+    let pendingHour = null;
+    let rafScheduled = false;
+    slider.addEventListener('input', event => {
+      pendingHour = Number(event.target.value);
+      if (!rafScheduled) {
+        rafScheduled = true;
+        requestAnimationFrame(() => {
+          renderHour(pendingHour);
+          rafScheduled = false;
+        });
+      }
+    });
   })
   .catch(error => {
     const status = document.getElementById('status');
@@ -143,6 +215,16 @@ fetch('data/flows.json')
     status.style.color = '#e34948';
     console.error(error);
   });
+
+// Test hook for the Node smoke test (tests/dashboard.test.js) -- an extra
+// harmless global in a real browser, never read outside the test.
+if (typeof globalThis !== 'undefined') {
+  globalThis.__dashboard = {
+    divergingColor, percentile, computeDomainMax, formatHourLabel, renderHour,
+    getState: () => state,
+    ready,
+  };
+}
 </script>
 </body>
 </html>

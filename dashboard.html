@@ -22,6 +22,7 @@
   #day-toggle { display: flex; gap: 4px; margin-right: 6px; }
   .day-btn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
   .day-btn.active { background: #2a78d6; border-color: #2a78d6; color: #fff; }
+  #period-select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-right: 6px; }
   #legend { bottom: 24px; left: 24px; padding: 12px 16px; font-size: 12px; }
   #legend .bar { width: 220px; height: 12px; border-radius: 6px; margin: 6px 0; }
   #legend .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; }
@@ -51,6 +52,7 @@
     <button id="day-weekday" class="day-btn active">Weekday</button>
     <button id="day-weekend" class="day-btn">Weekend</button>
   </div>
+  <select id="period-select"></select>
   <label for="hour-slider">Hour of day</label>
   <input type="range" id="hour-slider" min="0" max="23" step="1" value="8">
   <span id="hour-label">8:00 AM</span>
@@ -78,9 +80,11 @@
 <script>
 // Session 10 built the map skeleton (fixed 8am, no interactivity). Session 11
 // added the 24h time slider. Session 12 added the weekday/weekend toggle.
-// Session 13 adds the station click -> detail panel (name, cluster, equity
-// context, 24h rhythm strip) -- each interaction lands as its own commit.
-// Still no season/month selector or equity/route/live-GBFS layers.
+// Session 13 added the station click -> detail panel. Session 14 adds the
+// season/month period selector -- each interaction lands as its own commit.
+// Still no equity/route/live-GBFS layers (equity filter is a standing scope
+// exclusion, see CLAUDE.md -- per-station equity context in the detail
+// panel is in scope and unaffected).
 
 const DEFAULT_HOUR = 8; // initial slider position; no longer a fixed constant once wired up
 
@@ -124,23 +128,32 @@ function percentile(sortedArr, p) {
   return lerp(sortedArr[lo], sortedArr[hi], idx - lo);
 }
 
-// Domain computed once across ALL 24 hours x BOTH day types x all stations,
-// not per-hour or per-day-type. Recomputing it per hour would make color
-// intensity meaningless across the slider (see Session 11); recomputing it
-// per day type has the same problem one level up -- a moderate weekend
-// imbalance would rescale to look as severe as a genuine weekday peak,
-// breaking the invariant that color intensity means the same absolute thing
-// regardless of control state. Confirmed tradeoff: weekend markers will
-// render visibly paler under this shared scale (see #legend-note), which is
-// the correct, expected consequence of weekend magnitudes being genuinely
-// smaller, not a bug. Same 95th-percentile-of-|value| logic as Session 10/11,
-// just over a bigger pool of values; floored at 0.5 to avoid a degenerate
-// 0-width domain.
+// Every weekday/weekend curve a station has, across every granularity: the
+// all-period average plus every season plus every month it's present in
+// (coverage varies per station -- e.g. only 365 of 2,347 stations have
+// 2026-05 -- so this only collects what actually exists for that station,
+// never fabricating a missing bucket).
+function allPeriodCurves(station) {
+  const curves = [station.weekday, station.weekend];
+  for (const key in station.seasons) curves.push(station.seasons[key].weekday, station.seasons[key].weekend);
+  for (const key in station.months) curves.push(station.months[key].weekday, station.months[key].weekend);
+  return curves;
+}
+
+// Domain computed once across ALL 24 hours x BOTH day types x EVERY PERIOD
+// (all-period average, every season, every month) x all stations -- not
+// per-hour, per-day-type, or per-period. Recomputing it per hour would make
+// color intensity meaningless across the slider (Session 11); recomputing
+// it per day type has the same problem one level up (Session 12); a period
+// selector is the same invariant a third time -- switching from "all-period
+// average" to "May 2026" must not rescale color intensity, or a modest May
+// swing could render as saturated as a genuine all-period extreme. Same
+// 95th-percentile-of-|value| logic as before, just over a bigger pool;
+// floored at 0.5 to avoid a degenerate 0-width domain.
 function computeDomainMax(stations) {
   const allAbs = [];
   for (const id in stations) {
-    for (const dayType of ['weekday', 'weekend']) {
-      const curve = stations[id][dayType];
+    for (const curve of allPeriodCurves(stations[id])) {
       for (let h = 0; h < 24; h++) allAbs.push(Math.abs(curve[h]));
     }
   }
@@ -155,6 +168,51 @@ function formatHourLabel(hour) {
   return `${displayHour}:00 ${period}`;
 }
 
+// Period values are 'all', `season:${name}`, or `month:${YYYY-MM}` --
+// dynamically built from flows.json's own `granularity` block (never a
+// hardcoded season/month list), so this parses that same shape back apart.
+function parsePeriod(period) {
+  if (period === 'all') return { kind: 'all', key: null };
+  const sep = period.indexOf(':');
+  return { kind: period.slice(0, sep), key: period.slice(sep + 1) };
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function formatPeriodLabel(period) {
+  if (period === 'all') return 'all-period average';
+  const { kind, key } = parsePeriod(period);
+  if (kind === 'season') return key;
+  const [year, month] = key.split('-').map(Number);
+  return `${MONTH_NAMES[month - 1]} ${year}`;
+}
+
+function periodOptionLabel(period) {
+  if (period === 'all') return 'All-period average';
+  const label = formatPeriodLabel(period);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+// Whether `station` actually has a bucket for `period` -- NOT whether that
+// bucket has a nonzero value. Coverage varies per station (see
+// allPeriodCurves above); this is the single source of truth both the
+// marker "no data" styling and the detail panel's "no data" state read from,
+// so they can never disagree about which stations are missing a period.
+function hasPeriodData(station, period) {
+  if (period === 'all') return true;
+  const { kind, key } = parsePeriod(period);
+  return Boolean(kind === 'season' ? station.seasons[key] : station.months[key]);
+}
+
+// Returns the 24h curve for `period`/`dayType`, or null if `station` has no
+// data for that period. Never fabricates a curve for a missing period.
+function curveForPeriod(station, period, dayType) {
+  if (period === 'all') return station[dayType];
+  const { kind, key } = parsePeriod(period);
+  const bucket = kind === 'season' ? station.seasons[key] : station.months[key];
+  return bucket ? bucket[dayType] : null;
+}
+
 // Dashboard state, kept in one place (rather than scattered closure
 // variables) so the Node smoke test can inspect it via the test hook below.
 const state = {
@@ -163,28 +221,70 @@ const state = {
   domainMax: null,
   currentHour: DEFAULT_HOUR,
   dayType: 'weekday',
+  period: 'all', // 'all' | `season:${name}` | `month:${YYYY-MM}`
   selectedId: null, // station id with an open detail panel, or null
 };
 
-// Recolors every existing marker for `hour`/`state.dayType` and updates the
-// hour- and day-type-dependent text (title subtitle, legend title, slider
-// label). Does NOT touch the legend gradient bar or recompute domainMax --
-// both are fixed once, at load time, by design (see computeDomainMax above).
+// Stroke (selection ring) and fill styling, kept as one lookup table so
+// "selected" and "has no data for the current period" compose correctly
+// instead of two separate setStyle() calls fighting over the same marker.
+const DEFAULT_STROKE = '#ffffff';
+const SELECTED_STROKE = '#2a2a28';
+const NO_DATA_STROKE = '#b5b3ad';
+const DEFAULT_WEIGHT = 0.75;
+const SELECTED_WEIGHT = 2;
+const NO_DATA_WEIGHT = 1; // slightly heavier than default so a hollow ring reads clearly against the basemap
+
+// The single source of truth for one marker's full visual style, given the
+// CURRENT state (period, dayType, currentHour, domainMax, selectedId). A
+// station missing the selected period (see hasPeriodData) renders hollow --
+// fillOpacity 0, gray stroke -- rather than being hidden or showing an
+// invented value; per-project rule, a data gap must stay visible, not
+// silently vanish (same precedent as typology's low-volume exclusion).
+function markerStyleFor(id) {
+  const station = state.stations[id];
+  const curve = curveForPeriod(station, state.period, state.dayType);
+  const selected = id === state.selectedId;
+  if (curve === null) {
+    return {
+      fillColor: '#ffffff',
+      fillOpacity: 0,
+      color: selected ? SELECTED_STROKE : NO_DATA_STROKE,
+      weight: selected ? SELECTED_WEIGHT : NO_DATA_WEIGHT,
+    };
+  }
+  return {
+    fillColor: divergingColor(curve[state.currentHour], state.domainMax),
+    fillOpacity: 0.85,
+    color: selected ? SELECTED_STROKE : DEFAULT_STROKE,
+    weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
+  };
+}
+
+function restyleMarker(id) {
+  state.markers[id].setStyle(markerStyleFor(id));
+}
+
+// Recolors/restyles every existing marker for `hour`/`state.dayType`/
+// `state.period` and updates the hour-, day-type-, and period-dependent text
+// (title subtitle, legend title, slider label). Does NOT touch the legend
+// gradient bar or recompute domainMax -- both are fixed once, at load time,
+// by design (see computeDomainMax above).
 function renderHour(hour) {
   state.currentHour = hour;
-  for (const id in state.markers) {
-    const value = state.stations[id][state.dayType][hour];
-    state.markers[id].setStyle({ fillColor: divergingColor(value, state.domainMax) });
-  }
+  for (const id in state.markers) restyleMarker(id);
+
   const label = formatHourLabel(hour);
-  document.getElementById('title-subtitle').textContent = `Net flow at ${label}, ${state.dayType} (all-period average)`;
-  document.getElementById('legend-title').textContent = `Net flow at ${label} ${state.dayType} (bikes/day)`;
+  const periodLabel = formatPeriodLabel(state.period);
+  document.getElementById('title-subtitle').textContent = `Net flow at ${label}, ${state.dayType} (${periodLabel})`;
+  document.getElementById('legend-title').textContent = `Net flow at ${label} ${state.dayType}, ${periodLabel} (bikes/day)`;
   document.getElementById('hour-label').textContent = label;
 
   // Keeps an open detail panel's strip and persistent-hour dot in sync with
-  // whatever just changed the hour -- the slider (direct call) or the
-  // day-type toggle (which itself calls renderHour below). One hook point
-  // covers both, so there's only one place that can drift out of sync.
+  // whatever just changed the hour -- the slider (direct call), the
+  // day-type toggle, or the period selector (both call renderHour below).
+  // One hook point covers all three, so there's only one place that can
+  // drift out of sync.
   if (state.selectedId) updateStationDetail();
 }
 
@@ -196,6 +296,28 @@ function setDayType(dayType) {
   document.getElementById('day-weekday').classList.toggle('active', dayType === 'weekday');
   document.getElementById('day-weekend').classList.toggle('active', dayType === 'weekend');
   renderHour(state.currentHour);
+}
+
+// Switches the active period and re-renders through the same renderHour
+// path, for the same reason setDayType does -- one recolor/resync path,
+// not a parallel one. Also refreshes the status line's coverage count,
+// which is period-dependent but not hour/dayType-dependent, so it doesn't
+// belong inside renderHour itself.
+function setPeriod(period) {
+  state.period = period;
+  renderHour(state.currentHour);
+  updateStatusMessage();
+}
+
+function updateStatusMessage() {
+  const ids = Object.keys(state.stations);
+  const status = document.getElementById('status');
+  if (state.period === 'all') {
+    status.textContent = `${ids.length.toLocaleString()} stations`;
+    return;
+  }
+  const withData = ids.filter(id => hasPeriodData(state.stations[id], state.period)).length;
+  status.textContent = `${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have data for ${formatPeriodLabel(state.period)}`;
 }
 
 // Builds the equity-context lines shown in the detail panel from flows.json's
@@ -217,22 +339,18 @@ function contextLines(context) {
   return lines;
 }
 
-function highlightMarker(id) {
-  state.markers[id].setStyle({ color: '#2a2a28', weight: 2 });
-}
-
-function resetMarkerHighlight(id) {
-  state.markers[id].setStyle({ color: '#ffffff', weight: 0.75 });
-}
-
 // Opens (or switches) the detail panel for `id`. Populates the fields that
-// don't depend on hour/dayType once here; updateStationDetail() (called at
-// the end of this function, and again from renderHour whenever a station is
-// selected) handles everything that does.
+// don't depend on hour/dayType/period once here; updateStationDetail()
+// (called at the end of this function, and again from renderHour whenever a
+// station is selected) handles everything that does. Restyles only the
+// previously- and newly-selected markers (via markerStyleFor, the same
+// lookup renderHour uses for every marker) rather than looping over all
+// ~2,300 -- selection only ever changes 1-2 markers' styles.
 function selectStation(id) {
-  if (state.selectedId && state.markers[state.selectedId]) resetMarkerHighlight(state.selectedId);
+  const previous = state.selectedId;
   state.selectedId = id;
-  highlightMarker(id);
+  if (previous && state.markers[previous]) restyleMarker(previous);
+  restyleMarker(id);
 
   const s = state.stations[id];
   document.getElementById('detail-name').textContent = s.name;
@@ -251,8 +369,9 @@ function selectStation(id) {
 }
 
 function closeStation() {
-  if (state.selectedId) resetMarkerHighlight(state.selectedId);
+  const previous = state.selectedId;
   state.selectedId = null;
+  if (previous) restyleMarker(previous);
   document.getElementById('detail').classList.remove('visible');
 }
 
@@ -303,16 +422,27 @@ function buildStripMarkup(curve, domainMax, currentHour) {
   `;
 }
 
-// Redraws the selected station's strip for the CURRENT state.dayType and
-// state.currentHour, and its persistent dot. domainMax is passed straight
-// from state.domainMax -- the same pooled 48-value (weekday+weekend x 24h)
-// domain the map markers use, never recomputed per station or per chart.
+// Redraws the selected station's strip for the CURRENT state.dayType,
+// state.period, and state.currentHour, and its persistent dot. domainMax is
+// passed straight from state.domainMax -- the same pooled domain (every
+// hour x both day types x every period) the map markers use, never
+// recomputed per station or per chart. The panel always agrees with the
+// map's period, same invariant as hour/day-type: if this station has no
+// data for the selected period, that's shown explicitly, never silently
+// falling back to all-period average.
 function updateStationDetail() {
   if (!state.selectedId) return;
   const s = state.stations[state.selectedId];
-  const curve = s[state.dayType];
-  document.getElementById('detail-daylabel').textContent = state.dayType;
-  document.getElementById('detail-strip').innerHTML = buildStripMarkup(curve, state.domainMax, state.currentHour);
+  const curve = curveForPeriod(s, state.period, state.dayType);
+  const periodLabel = formatPeriodLabel(state.period);
+  document.getElementById('detail-daylabel').textContent = `${state.dayType}, ${periodLabel}`;
+
+  const stripEl = document.getElementById('detail-strip');
+  if (curve === null) {
+    stripEl.innerHTML = `<text x="${STRIP_W / 2}" y="${STRIP_MID}" font-size="11" fill="#898781" text-anchor="middle">No data for ${periodLabel}</text>`;
+    return;
+  }
+  stripEl.innerHTML = buildStripMarkup(curve, state.domainMax, state.currentHour);
 }
 
 // Read-only hover preview: repositions the crosshair/tooltip elements for
@@ -322,7 +452,8 @@ function updateStationDetail() {
 // position; this is strictly a local "what if" preview under the pointer.
 function previewStripHour(hour) {
   if (!state.selectedId) return;
-  const curve = state.stations[state.selectedId][state.dayType];
+  const curve = curveForPeriod(state.stations[state.selectedId], state.period, state.dayType);
+  if (curve === null) return; // no strip is drawn for a no-data period; nothing to preview
   const x = stripX(hour);
   const y = stripY(curve[hour], state.domainMax);
 
@@ -394,20 +525,31 @@ const ready = fetch('data/flows.json')
 
     for (const id of ids) {
       const s = state.stations[id];
-      state.markers[id] = L.circleMarker([s.lat, s.lng], {
-        radius: MARKER_RADIUS_PX,
-        fillColor: divergingColor(s[state.dayType][state.currentHour], state.domainMax),
-        color: '#ffffff',
-        weight: 0.75,
-        fillOpacity: 0.85,
-      }).addTo(map);
+      state.markers[id] = L.circleMarker([s.lat, s.lng], Object.assign(
+        { radius: MARKER_RADIUS_PX },
+        markerStyleFor(id)
+      )).addTo(map);
       state.markers[id].on('click', () => selectStation(id));
     }
 
+    // Period options built from flows.json's own granularity block, never a
+    // hardcoded season/month list -- 'all' (the existing all-period average)
+    // always comes first as the default.
+    const periodSelect = document.getElementById('period-select');
+    const periods = ['all'];
+    for (const season of payload.granularity.seasons) periods.push(`season:${season}`);
+    for (const month of payload.granularity.months) periods.push(`month:${month}`);
+    for (const period of periods) {
+      const opt = document.createElement('option');
+      opt.value = period;
+      opt.textContent = periodOptionLabel(period);
+      periodSelect.appendChild(opt);
+    }
+    periodSelect.value = state.period;
+
     drawLegendGradient(state.domainMax);
     renderHour(state.currentHour); // sets initial title/legend/slider text consistently with the markers just drawn
-
-    document.getElementById('status').textContent = `${ids.length.toLocaleString()} stations`;
+    updateStatusMessage();
 
     // Slider updates are throttled to one render per animation frame rather
     // than one per 'input' event: dragging can fire far more events than
@@ -429,6 +571,8 @@ const ready = fetch('data/flows.json')
 
     document.getElementById('day-weekday').addEventListener('click', () => setDayType('weekday'));
     document.getElementById('day-weekend').addEventListener('click', () => setDayType('weekend'));
+
+    periodSelect.addEventListener('change', event => setPeriod(event.target.value));
 
     document.getElementById('detail-close').addEventListener('click', closeStation);
 
@@ -458,6 +602,7 @@ if (typeof globalThis !== 'undefined') {
   globalThis.__dashboard = {
     divergingColor, percentile, computeDomainMax, formatHourLabel, renderHour, setDayType,
     selectStation, closeStation, previewStripHour, clearStripPreview, stripX, stripY,
+    setPeriod, formatPeriodLabel, curveForPeriod, hasPeriodData,
     getState: () => state,
     ready,
   };

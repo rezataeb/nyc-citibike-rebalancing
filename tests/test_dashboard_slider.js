@@ -36,7 +36,11 @@ function makeCurve(overrides) {
 }
 
 const FAKE_PAYLOAD = {
-  granularity: { months: ['2026-04'], seasons: ['spring'] },
+  // Two months, mirroring the real data/flows.json's own granularity shape,
+  // where coverage genuinely varies by station (only 365 of 2,347 real
+  // stations have 2026-05). Station B below deliberately has no '2026-05'
+  // bucket, so it can exercise the no-data path.
+  granularity: { months: ['2026-04', '2026-05'], seasons: ['spring'] },
   stations: {
     A: {
       name: 'Station A', lat: 40.75, lng: -73.98,
@@ -46,6 +50,11 @@ const FAKE_PAYLOAD = {
         near_nycha: 1, near_school: 0, nycha_dist_m: 120, nycha_nearest: 'Test NYCHA A',
         school_dist_m: 900, school_nearest: 'Test School A',
         subway_dist_m: 200, subway_nearest: 'Test Subway A', transit_gap: 0,
+      },
+      seasons: { spring: { weekday: makeCurve({ 8: 10, 14: -3 }), weekend: makeCurve({ 8: 2, 14: -1 }) } },
+      months: {
+        '2026-04': { weekday: makeCurve({ 8: 10, 14: -3 }), weekend: makeCurve({ 8: 2, 14: -1 }) },
+        '2026-05': { weekday: makeCurve({ 8: 15, 14: -5 }), weekend: makeCurve({ 8: 3, 14: -2 }) },
       },
     },
     B: {
@@ -57,6 +66,11 @@ const FAKE_PAYLOAD = {
         school_dist_m: 150, school_nearest: 'Test School B',
         subway_dist_m: 900, subway_nearest: 'Test Subway B', transit_gap: 1,
       },
+      seasons: { spring: { weekday: makeCurve({ 8: -20, 14: 5 }), weekend: makeCurve({ 8: -4, 14: 1 }) } },
+      months: {
+        '2026-04': { weekday: makeCurve({ 8: -20, 14: 5 }), weekend: makeCurve({ 8: -4, 14: 1 }) },
+        // no '2026-05' -- this station has no data for that month, on purpose.
+      },
     },
     C: {
       name: 'Station C', lat: 40.70, lng: -73.95,
@@ -66,6 +80,11 @@ const FAKE_PAYLOAD = {
         near_nycha: 0, near_school: 0, nycha_dist_m: 2000, nycha_nearest: 'Test NYCHA C',
         school_dist_m: 2000, school_nearest: 'Test School C',
         subway_dist_m: 100, subway_nearest: 'Test Subway C', transit_gap: 0,
+      },
+      seasons: { spring: { weekday: makeCurve({ 8: 1, 14: 0.5 }), weekend: makeCurve({ 8: 0.2, 14: 0.1 }) } },
+      months: {
+        '2026-04': { weekday: makeCurve({ 8: 1, 14: 0.5 }), weekend: makeCurve({ 8: 0.2, 14: 0.1 }) },
+        '2026-05': { weekday: makeCurve({ 8: 2, 14: 1 }), weekend: makeCurve({ 8: 0.5, 14: 0.2 }) },
       },
     },
   },
@@ -222,7 +241,7 @@ async function main() {
   }
 
   assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 2:00 PM, weekday (all-period average)');
-  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 2:00 PM weekday (bikes/day)');
+  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 2:00 PM weekday, all-period average (bikes/day)');
   assert.strictEqual(elements['hour-label'].textContent, '2:00 PM');
 
   // --- simulate clicking the "Weekend" day-type toggle, still at hour 14 ---
@@ -248,7 +267,7 @@ async function main() {
   }
 
   assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 2:00 PM, weekend (all-period average)');
-  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 2:00 PM weekend (bikes/day)');
+  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 2:00 PM weekend, all-period average (bikes/day)');
   assert.ok(elements['day-weekend'].classList.contains('active'), 'weekend button should be marked active after toggling');
   assert.ok(!elements['day-weekday'].classList.contains('active'), 'weekday button should no longer be active after toggling to weekend');
 
@@ -274,7 +293,7 @@ async function main() {
   assert.strictEqual(stateSelected.selectedId, 'B');
   assert.strictEqual(elements['detail-name'].textContent, 'Station B');
   assert.strictEqual(elements['detail-cluster'].textContent, 'Test cluster B');
-  assert.strictEqual(elements['detail-daylabel'].textContent, 'weekday');
+  assert.strictEqual(elements['detail-daylabel'].textContent, 'weekday, all-period average');
   assert.ok(elements['detail'].classList.contains('visible'), 'detail panel should be visible after selecting a station');
   assert.strictEqual(stateSelected.markers.B._opts.color, '#2a2a28', 'selected marker should get the highlight stroke color');
   assert.strictEqual(stateSelected.markers.B._opts.weight, 2, 'selected marker should get the highlight stroke weight');
@@ -313,7 +332,7 @@ async function main() {
   weekendClick();
   const stateAfterToggleWhileOpen = dash.getState();
   assert.strictEqual(stateAfterToggleWhileOpen.selectedId, 'B', 'selection should survive a day-type toggle');
-  assert.strictEqual(elements['detail-daylabel'].textContent, 'weekend');
+  assert.strictEqual(elements['detail-daylabel'].textContent, 'weekend, all-period average');
   assertStripDot('B', 20, 'weekend', domainMaxAt8);
 
   // --- read-only hover preview must not touch global hour/dayType state ---
@@ -340,6 +359,102 @@ async function main() {
   assert.ok(!elements['detail'].classList.contains('visible'), 'detail panel should be hidden after closing');
   assert.strictEqual(stateAfterClose.markers.B._opts.color, '#ffffff', 'closing should revert the marker highlight color');
   assert.strictEqual(stateAfterClose.markers.B._opts.weight, 0.75, 'closing should revert the marker highlight weight');
+
+  // --- Session 14: season/month period selector. Still at hour 20, weekend. ---
+
+  const periodOptions = elements['period-select']._children;
+  assert.strictEqual(periodOptions.length, 4, 'expected all + 1 season + 2 months as period options, built from granularity');
+  assert.strictEqual(periodOptions[0].value, 'all');
+  assert.strictEqual(periodOptions[0].textContent, 'All-period average');
+  assert.strictEqual(periodOptions[1].value, 'season:spring');
+  assert.strictEqual(periodOptions[1].textContent, 'Spring');
+  assert.strictEqual(periodOptions[2].value, 'month:2026-04');
+  assert.strictEqual(periodOptions[2].textContent, 'April 2026');
+  assert.strictEqual(periodOptions[3].value, 'month:2026-05');
+  assert.strictEqual(periodOptions[3].textContent, 'May 2026');
+
+  // --- switch to May 2026, a month station B has no data for ---
+  const periodChange = elements['period-select']._listeners.change;
+  assert.ok(periodChange, 'no change listener registered on the period select');
+  periodChange({ target: { value: 'month:2026-05' } });
+
+  const stateMay = dash.getState();
+  assert.strictEqual(stateMay.period, 'month:2026-05');
+  assert.strictEqual(
+    stateMay.domainMax, domainMaxAt8,
+    'domainMax must stay fixed across a period switch too -- same pooled-domain invariant a third time'
+  );
+
+  assert.strictEqual(
+    stateMay.markers.A._opts.fillColor,
+    dash.divergingColor(FAKE_PAYLOAD.stations.A.months['2026-05'].weekend[20], domainMaxAt8),
+    'station A has May 2026 data -- its marker should recolor from that month\'s weekend curve'
+  );
+  assert.strictEqual(
+    stateMay.markers.C._opts.fillColor,
+    dash.divergingColor(FAKE_PAYLOAD.stations.C.months['2026-05'].weekend[20], domainMaxAt8),
+    'station C has May 2026 data -- its marker should recolor from that month\'s weekend curve'
+  );
+  assert.strictEqual(stateMay.markers.B._opts.fillOpacity, 0, 'station B has no May 2026 data -- its marker should be hollow, not hidden');
+  assert.strictEqual(stateMay.markers.B._opts.color, '#b5b3ad', 'a no-data marker should get the gray no-data stroke');
+  assert.strictEqual(stateMay.markers.B._opts.weight, 1, 'a no-data marker should get the heavier no-data stroke weight');
+
+  assert.strictEqual(
+    elements['status'].textContent, '2 of 3 stations have data for May 2026',
+    'the status line must surface the coverage gap, not hide it -- per the confirmed hollow-marker-plus-status-line design'
+  );
+  assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 8:00 PM, weekend (May 2026)');
+  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 8:00 PM weekend, May 2026 (bikes/day)');
+
+  // --- selecting the no-data station during May 2026 must show an explicit no-data state ---
+  const selectBDuringMay = stateMay.markers.B._listeners.click;
+  selectBDuringMay();
+  const stateBDuringMay = dash.getState();
+  assert.strictEqual(stateBDuringMay.selectedId, 'B');
+  assert.strictEqual(elements['detail-daylabel'].textContent, 'weekend, May 2026');
+  assert.ok(
+    elements['detail-strip'].innerHTML.includes('No data for May 2026'),
+    'the panel must say so explicitly, never a blank chart or a silent fallback to all-period average'
+  );
+  assert.ok(!elements['detail-strip'].innerHTML.includes('id="strip-dot"'), 'no strip marks should be drawn for a no-data period');
+  assert.strictEqual(
+    stateBDuringMay.markers.B._opts.color, '#2a2a28',
+    'a selected no-data marker still gets the selection stroke, composed with the hollow fill'
+  );
+  assert.strictEqual(stateBDuringMay.markers.B._opts.fillOpacity, 0);
+
+  // hover preview must stay a no-op for a no-data station/period -- never throw, never draw
+  dash.clearStripPreview();
+  dash.previewStripHour(9);
+  assert.strictEqual(
+    elements['strip-crosshair'].style.display, 'none',
+    'previewStripHour must no-op when the selected station has no data for the current period'
+  );
+
+  // --- selecting station A (which DOES have May data) instead should show a real chart ---
+  const selectADuringMay = stateBDuringMay.markers.A._listeners.click;
+  selectADuringMay();
+  const stateADuringMay = dash.getState();
+  assert.strictEqual(stateADuringMay.selectedId, 'A');
+  assert.ok(elements['detail-strip'].innerHTML.includes('id="strip-dot"'), 'station A has May 2026 data -- its strip should draw normally');
+  assert.strictEqual(
+    stateADuringMay.markers.B._opts.color, '#b5b3ad',
+    'deselecting station B (by selecting A instead) should revert it to the plain no-data stroke, not the default white stroke'
+  );
+
+  // --- switching back to all-period average recovers B's marker and the status line ---
+  periodChange({ target: { value: 'all' } });
+  const stateBackToAll = dash.getState();
+  assert.strictEqual(stateBackToAll.domainMax, domainMaxAt8);
+  assert.strictEqual(
+    stateBackToAll.markers.B._opts.fillColor,
+    dash.divergingColor(FAKE_PAYLOAD.stations.B.weekend[20], domainMaxAt8),
+    'switching back to all-period average should recolor station B normally again'
+  );
+  assert.strictEqual(stateBackToAll.markers.B._opts.fillOpacity, 0.85);
+  assert.strictEqual(stateBackToAll.markers.B._opts.color, '#ffffff', 'station B should revert to the plain default stroke once data exists again');
+  assert.strictEqual(elements['status'].textContent, '3 stations');
+  assert.ok(!elements['detail-strip'].innerHTML.includes('No data'), 'station A (still selected) has all-period data -- no no-data message should remain');
 
   console.log('All dashboard slider smoke tests passed.');
 }

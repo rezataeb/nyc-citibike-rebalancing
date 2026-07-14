@@ -19,9 +19,13 @@
   #controls label { color: #52514e; }
   #controls input[type="range"] { width: 200px; }
   #hour-label { font-weight: 600; min-width: 74px; display: inline-block; }
+  #day-toggle { display: flex; gap: 4px; margin-right: 6px; }
+  .day-btn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
+  .day-btn.active { background: #2a78d6; border-color: #2a78d6; color: #fff; }
   #legend { bottom: 24px; left: 24px; padding: 12px 16px; font-size: 12px; }
   #legend .bar { width: 220px; height: 12px; border-radius: 6px; margin: 6px 0; }
   #legend .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; }
+  #legend-note { font-size: 11px; color: #898781; margin-top: 6px; line-height: 1.4; }
   #status { top: 16px; right: 24px; padding: 8px 14px; font-size: 12px; color: #52514e; }
 </style>
 </head>
@@ -34,6 +38,10 @@
 </div>
 
 <div id="controls">
+  <div id="day-toggle">
+    <button id="day-weekday" class="day-btn active">Weekday</button>
+    <button id="day-weekend" class="day-btn">Weekend</button>
+  </div>
   <label for="hour-slider">Hour of day</label>
   <input type="range" id="hour-slider" min="0" max="23" step="1" value="8">
   <span id="hour-label">8:00 AM</span>
@@ -43,6 +51,7 @@
   <div id="legend-title">Net flow at 8:00 AM weekday (bikes/day)</div>
   <div class="bar" id="legend-bar"></div>
   <div class="labels"><span>Deficit (no bikes)</span><span>0</span><span>Surplus (no docks)</span></div>
+  <div id="legend-note">Color scale is shared across weekday/weekend &mdash; paler weekend markers reflect genuinely smaller imbalance, not a rendering error.</div>
 </div>
 
 <div id="status">Loading stations&hellip;</div>
@@ -50,9 +59,9 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // Session 10 built the map skeleton (fixed 8am, no interactivity). Session 11
-// adds interactions ONE AT A TIME, as separate commits -- this commit is the
-// 24h time slider only. Still no weekday/weekend toggle, season/month
-// selector, station detail panel, or equity/route/live-GBFS layers.
+// added the 24h time slider. Session 12 adds the weekday/weekend toggle --
+// each interaction lands as its own commit. Still no season/month selector,
+// station detail panel, or equity/route/live-GBFS layers.
 
 const DEFAULT_HOUR = 8; // initial slider position; no longer a fixed constant once wired up
 
@@ -89,18 +98,25 @@ function percentile(sortedArr, p) {
   return lerp(sortedArr[lo], sortedArr[hi], idx - lo);
 }
 
-// Domain computed once across ALL 24 hours x all stations, not per-hour.
-// Recomputing it per hour would make color intensity meaningless across
-// the slider: a modest 3am imbalance and a severe 8am imbalance could both
-// render fully saturated if each hour auto-normalized to its own range,
-// defeating the point of a slider meant to show *when* imbalance peaks.
-// Same 95th-percentile-of-|value| logic as Session 10, just over a bigger
-// pool of values; floored at 0.5 to avoid a degenerate 0-width domain.
-function computeDomainMax(stations, dayType) {
+// Domain computed once across ALL 24 hours x BOTH day types x all stations,
+// not per-hour or per-day-type. Recomputing it per hour would make color
+// intensity meaningless across the slider (see Session 11); recomputing it
+// per day type has the same problem one level up -- a moderate weekend
+// imbalance would rescale to look as severe as a genuine weekday peak,
+// breaking the invariant that color intensity means the same absolute thing
+// regardless of control state. Confirmed tradeoff: weekend markers will
+// render visibly paler under this shared scale (see #legend-note), which is
+// the correct, expected consequence of weekend magnitudes being genuinely
+// smaller, not a bug. Same 95th-percentile-of-|value| logic as Session 10/11,
+// just over a bigger pool of values; floored at 0.5 to avoid a degenerate
+// 0-width domain.
+function computeDomainMax(stations) {
   const allAbs = [];
   for (const id in stations) {
-    const curve = stations[id][dayType];
-    for (let h = 0; h < 24; h++) allAbs.push(Math.abs(curve[h]));
+    for (const dayType of ['weekday', 'weekend']) {
+      const curve = stations[id][dayType];
+      for (let h = 0; h < 24; h++) allAbs.push(Math.abs(curve[h]));
+    }
   }
   allAbs.sort((a, b) => a - b);
   return Math.max(percentile(allAbs, 0.95), 0.5);
@@ -120,22 +136,33 @@ const state = {
   markers: {},      // station_id -> Leaflet circleMarker, kept for in-place updates
   domainMax: null,
   currentHour: DEFAULT_HOUR,
+  dayType: 'weekday',
 };
 
-// Recolors every existing marker for `hour` and updates the hour-dependent
-// text (title subtitle, legend title, slider label). Does NOT touch the
-// legend gradient bar or recompute domainMax -- both are fixed once, at
-// load time, by design (see computeDomainMax's comment above).
+// Recolors every existing marker for `hour`/`state.dayType` and updates the
+// hour- and day-type-dependent text (title subtitle, legend title, slider
+// label). Does NOT touch the legend gradient bar or recompute domainMax --
+// both are fixed once, at load time, by design (see computeDomainMax above).
 function renderHour(hour) {
   state.currentHour = hour;
   for (const id in state.markers) {
-    const value = state.stations[id].weekday[hour];
+    const value = state.stations[id][state.dayType][hour];
     state.markers[id].setStyle({ fillColor: divergingColor(value, state.domainMax) });
   }
   const label = formatHourLabel(hour);
-  document.getElementById('title-subtitle').textContent = `Net flow at ${label}, weekday (all-period average)`;
-  document.getElementById('legend-title').textContent = `Net flow at ${label} weekday (bikes/day)`;
+  document.getElementById('title-subtitle').textContent = `Net flow at ${label}, ${state.dayType} (all-period average)`;
+  document.getElementById('legend-title').textContent = `Net flow at ${label} ${state.dayType} (bikes/day)`;
   document.getElementById('hour-label').textContent = label;
+}
+
+// Switches the active day type and re-renders through the same renderHour
+// path the slider uses, so there is exactly one place markers get recolored.
+// domainMax is deliberately NOT recomputed here (see computeDomainMax above).
+function setDayType(dayType) {
+  state.dayType = dayType;
+  document.getElementById('day-weekday').classList.toggle('active', dayType === 'weekday');
+  document.getElementById('day-weekend').classList.toggle('active', dayType === 'weekend');
+  renderHour(state.currentHour);
 }
 
 function drawLegendGradient(domainMax) {
@@ -173,13 +200,13 @@ const ready = fetch('data/flows.json')
     }
     map.fitBounds(bounds, { padding: [20, 20] });
 
-    state.domainMax = computeDomainMax(state.stations, 'weekday');
+    state.domainMax = computeDomainMax(state.stations);
 
     for (const id of ids) {
       const s = state.stations[id];
       state.markers[id] = L.circleMarker([s.lat, s.lng], {
         radius: MARKER_RADIUS_PX,
-        fillColor: divergingColor(s.weekday[state.currentHour], state.domainMax),
+        fillColor: divergingColor(s[state.dayType][state.currentHour], state.domainMax),
         color: '#ffffff',
         weight: 0.75,
         fillOpacity: 0.85,
@@ -208,6 +235,9 @@ const ready = fetch('data/flows.json')
         });
       }
     });
+
+    document.getElementById('day-weekday').addEventListener('click', () => setDayType('weekday'));
+    document.getElementById('day-weekend').addEventListener('click', () => setDayType('weekend'));
   })
   .catch(error => {
     const status = document.getElementById('status');
@@ -220,7 +250,7 @@ const ready = fetch('data/flows.json')
 // harmless global in a real browser, never read outside the test.
 if (typeof globalThis !== 'undefined') {
   globalThis.__dashboard = {
-    divergingColor, percentile, computeDomainMax, formatHourLabel, renderHour,
+    divergingColor, percentile, computeDomainMax, formatHourLabel, renderHour, setDayType,
     getState: () => state,
     ready,
   };

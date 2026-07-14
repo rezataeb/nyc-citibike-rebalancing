@@ -38,21 +38,29 @@ function makeCurve(overrides) {
 const FAKE_PAYLOAD = {
   granularity: { months: ['2026-04'], seasons: ['spring'] },
   stations: {
-    A: { name: 'Station A', lat: 40.75, lng: -73.98, weekday: makeCurve({ 8: 10, 14: -3 }), weekend: zeros() },
-    B: { name: 'Station B', lat: 40.76, lng: -73.99, weekday: makeCurve({ 8: -20, 14: 5 }), weekend: zeros() },
-    C: { name: 'Station C', lat: 40.70, lng: -73.95, weekday: makeCurve({ 8: 1, 14: 0.5 }), weekend: zeros() },
+    A: { name: 'Station A', lat: 40.75, lng: -73.98, weekday: makeCurve({ 8: 10, 14: -3 }), weekend: makeCurve({ 8: 2, 14: -1 }) },
+    B: { name: 'Station B', lat: 40.76, lng: -73.99, weekday: makeCurve({ 8: -20, 14: 5 }), weekend: makeCurve({ 8: -4, 14: 1 }) },
+    C: { name: 'Station C', lat: 40.70, lng: -73.95, weekday: makeCurve({ 8: 1, 14: 0.5 }), weekend: makeCurve({ 8: 0.2, 14: 0.1 }) },
   },
 };
 
 function makeElementStub(id) {
-  return {
+  const el = {
     id,
     textContent: '',
     style: {},
     value: undefined,
     _listeners: {},
-    addEventListener(event, handler) { this._listeners[event] = handler; },
+    _classes: new Set(),
+    addEventListener(event, handler) { el._listeners[event] = handler; },
+    classList: {
+      toggle(cls, force) {
+        if (force) el._classes.add(cls); else el._classes.delete(cls);
+      },
+      contains(cls) { return el._classes.has(cls); },
+    },
   };
+  return el;
 }
 
 function buildSandbox() {
@@ -172,6 +180,45 @@ async function main() {
   assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 2:00 PM, weekday (all-period average)');
   assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 2:00 PM weekday (bikes/day)');
   assert.strictEqual(elements['hour-label'].textContent, '2:00 PM');
+
+  // --- simulate clicking the "Weekend" day-type toggle, still at hour 14 ---
+  const weekendClick = elements['day-weekend']._listeners.click;
+  assert.ok(weekendClick, 'no click listener was registered on the weekend toggle button');
+  weekendClick();
+
+  const stateWeekend = dash.getState();
+  assert.strictEqual(stateWeekend.dayType, 'weekend');
+  assert.strictEqual(stateWeekend.currentHour, 14, 'switching day type must not change the selected hour');
+  assert.strictEqual(
+    stateWeekend.domainMax, domainMaxAt8,
+    'domainMax must stay fixed across the day-type toggle -- recomputing it per day type would let a ' +
+    'moderate weekend imbalance rescale to look as severe as a genuine weekday peak'
+  );
+
+  for (const id of ['A', 'B', 'C']) {
+    const expected = dash.divergingColor(FAKE_PAYLOAD.stations[id].weekend[14], stateWeekend.domainMax);
+    assert.strictEqual(
+      stateWeekend.markers[id]._opts.fillColor, expected,
+      `marker ${id} fillColor should come from divergingColor(weekend[14], domainMax) after the toggle`
+    );
+  }
+
+  assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 2:00 PM, weekend (all-period average)');
+  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 2:00 PM weekend (bikes/day)');
+  assert.ok(elements['day-weekend'].classList.contains('active'), 'weekend button should be marked active after toggling');
+  assert.ok(!elements['day-weekday'].classList.contains('active'), 'weekday button should no longer be active after toggling to weekend');
+
+  // --- toggle back to weekday, still at hour 14, and confirm domainMax is still untouched ---
+  const weekdayClick = elements['day-weekday']._listeners.click;
+  weekdayClick();
+  const stateBackToWeekday = dash.getState();
+  assert.strictEqual(stateBackToWeekday.dayType, 'weekday');
+  assert.strictEqual(stateBackToWeekday.domainMax, domainMaxAt8, 'domainMax must remain fixed after toggling back');
+  assert.strictEqual(
+    stateBackToWeekday.markers.B._opts.fillColor,
+    dash.divergingColor(FAKE_PAYLOAD.stations.B.weekday[14], domainMaxAt8),
+    'toggling back to weekday should recolor markers from the weekday curve again'
+  );
 
   console.log('All dashboard slider smoke tests passed.');
 }

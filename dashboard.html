@@ -9,7 +9,7 @@
   html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; background: #f9f9f7; }
 
-  #title, #legend, #status, #controls {
+  #title, #legend, #status, #controls, #detail {
     position: absolute; z-index: 1000; background: rgba(252, 252, 251, 0.92);
     border-radius: 8px; box-shadow: 0 1px 4px rgba(11, 11, 11, 0.15); color: #0b0b0b;
   }
@@ -27,6 +27,15 @@
   #legend .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; }
   #legend-note { font-size: 11px; color: #898781; margin-top: 6px; line-height: 1.4; }
   #status { top: 16px; right: 24px; padding: 8px 14px; font-size: 12px; color: #52514e; }
+
+  #detail { display: none; top: 64px; right: 24px; width: 280px; padding: 14px 16px 12px; font-size: 12px; max-height: calc(100% - 96px); overflow-y: auto; }
+  #detail.visible { display: block; }
+  #detail-close { position: absolute; top: 8px; right: 10px; border: none; background: none; font-size: 16px; line-height: 1; cursor: pointer; color: #898781; padding: 2px 4px; }
+  #detail-close:hover { color: #0b0b0b; }
+  #detail h2 { margin: 0 24px 4px 0; font-size: 15px; }
+  #detail .meta { color: #52514e; margin-bottom: 3px; line-height: 1.4; }
+  #detail .striptitle { font-size: 11px; color: #52514e; margin: 10px 0 4px; }
+  #detail .strip { width: 100%; height: 70px; overflow: visible; }
 </style>
 </head>
 <body>
@@ -56,12 +65,22 @@
 
 <div id="status">Loading stations&hellip;</div>
 
+<div id="detail">
+  <button id="detail-close" aria-label="Close station detail">&times;</button>
+  <h2 id="detail-name"></h2>
+  <div class="meta" id="detail-cluster"></div>
+  <div class="meta" id="detail-context"></div>
+  <div class="striptitle">24-hour flow rhythm (<span id="detail-daylabel"></span>)</div>
+  <svg class="strip" id="detail-strip" viewBox="0 0 240 70" preserveAspectRatio="none"></svg>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // Session 10 built the map skeleton (fixed 8am, no interactivity). Session 11
-// added the 24h time slider. Session 12 adds the weekday/weekend toggle --
-// each interaction lands as its own commit. Still no season/month selector,
-// station detail panel, or equity/route/live-GBFS layers.
+// added the 24h time slider. Session 12 added the weekday/weekend toggle.
+// Session 13 adds the station click -> detail panel (name, cluster, equity
+// context, 24h rhythm strip) -- each interaction lands as its own commit.
+// Still no season/month selector or equity/route/live-GBFS layers.
 
 const DEFAULT_HOUR = 8; // initial slider position; no longer a fixed constant once wired up
 
@@ -84,6 +103,13 @@ function lerp(a, b, t) { return a + (b - a) * t; }
 
 function lerpColor(c1, c2, t) {
   return `rgb(${Math.round(lerp(c1[0], c2[0], t))}, ${Math.round(lerp(c1[1], c2[1], t))}, ${Math.round(lerp(c1[2], c2[2], t))})`;
+}
+
+// 10% opacity wash, per the dataviz area-fill spec -- a wash, never a
+// saturated block. Used only by the station detail strip's area fills;
+// the map markers use lerpColor/divergingColor directly, unchanged.
+function rgba(c, alpha) {
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
 }
 
 function divergingColor(value, domainMax) {
@@ -137,6 +163,7 @@ const state = {
   domainMax: null,
   currentHour: DEFAULT_HOUR,
   dayType: 'weekday',
+  selectedId: null, // station id with an open detail panel, or null
 };
 
 // Recolors every existing marker for `hour`/`state.dayType` and updates the
@@ -153,6 +180,12 @@ function renderHour(hour) {
   document.getElementById('title-subtitle').textContent = `Net flow at ${label}, ${state.dayType} (all-period average)`;
   document.getElementById('legend-title').textContent = `Net flow at ${label} ${state.dayType} (bikes/day)`;
   document.getElementById('hour-label').textContent = label;
+
+  // Keeps an open detail panel's strip and persistent-hour dot in sync with
+  // whatever just changed the hour -- the slider (direct call) or the
+  // day-type toggle (which itself calls renderHour below). One hook point
+  // covers both, so there's only one place that can drift out of sync.
+  if (state.selectedId) updateStationDetail();
 }
 
 // Switches the active day type and re-renders through the same renderHour
@@ -163,6 +196,163 @@ function setDayType(dayType) {
   document.getElementById('day-weekday').classList.toggle('active', dayType === 'weekday');
   document.getElementById('day-weekend').classList.toggle('active', dayType === 'weekend');
   renderHour(state.currentHour);
+}
+
+// Builds the equity-context lines shown in the detail panel from flows.json's
+// real `context` fields (near_nycha, near_school, nycha/school/subway
+// distances+names, transit_gap) -- confirmed against actual data/flows.json
+// before writing this, not guessed from the schema doc. `capacity` is
+// deliberately not shown: the flows.json contract lists it, but it is not
+// actually present in the current data (see PROGRESS.md's Deferred list).
+function contextLines(context) {
+  const lines = [];
+  const gapNote = context.transit_gap ? ' — beyond the 800 m subway-gap threshold' : '';
+  lines.push(`Nearest subway: ${context.subway_nearest} (${context.subway_dist_m} m)${gapNote}`);
+  if (context.near_nycha) {
+    lines.push(`Within 300 m of NYCHA: ${context.nycha_nearest} (${context.nycha_dist_m} m)`);
+  }
+  if (context.near_school) {
+    lines.push(`Within 300 m of school: ${context.school_nearest} (${context.school_dist_m} m)`);
+  }
+  return lines;
+}
+
+function highlightMarker(id) {
+  state.markers[id].setStyle({ color: '#2a2a28', weight: 2 });
+}
+
+function resetMarkerHighlight(id) {
+  state.markers[id].setStyle({ color: '#ffffff', weight: 0.75 });
+}
+
+// Opens (or switches) the detail panel for `id`. Populates the fields that
+// don't depend on hour/dayType once here; updateStationDetail() (called at
+// the end of this function, and again from renderHour whenever a station is
+// selected) handles everything that does.
+function selectStation(id) {
+  if (state.selectedId && state.markers[state.selectedId]) resetMarkerHighlight(state.selectedId);
+  state.selectedId = id;
+  highlightMarker(id);
+
+  const s = state.stations[id];
+  document.getElementById('detail-name').textContent = s.name;
+  document.getElementById('detail-cluster').textContent = s.cluster_name;
+
+  const contextEl = document.getElementById('detail-context');
+  contextEl.textContent = '';
+  for (const line of contextLines(s.context)) {
+    const div = document.createElement('div');
+    div.textContent = line;
+    contextEl.appendChild(div);
+  }
+
+  document.getElementById('detail').classList.add('visible');
+  updateStationDetail();
+}
+
+function closeStation() {
+  if (state.selectedId) resetMarkerHighlight(state.selectedId);
+  state.selectedId = null;
+  document.getElementById('detail').classList.remove('visible');
+}
+
+const STRIP_W = 240, STRIP_H = 70, STRIP_MID = STRIP_H / 2, STRIP_PAD = 4;
+
+function stripX(hour) { return (hour / 23) * STRIP_W; }
+
+// Same clamped-t logic as divergingColor's domain mapping, just producing a
+// y-coordinate instead of a color -- so a station's own strip and its map
+// marker are always describing the same domain the same way.
+function stripY(value, domainMax) {
+  const t = Math.max(-1, Math.min(1, value / domainMax));
+  return STRIP_MID - t * (STRIP_MID - STRIP_PAD);
+}
+
+// Builds the strip's static markup: baseline, diverging area washes (split
+// at the zero baseline, not by an exact zero-crossing -- a fine approximation
+// at hourly resolution), the line, the persistent current-hour dot, and a
+// hidden crosshair/tooltip group that previewStripHour()/clearStripPreview()
+// toggle on hover without rebuilding this markup.
+function buildStripMarkup(curve, domainMax, currentHour) {
+  const linePoints = [], surplusPoints = [], deficitPoints = [];
+  for (let h = 0; h < 24; h++) {
+    const x = stripX(h);
+    const y = stripY(curve[h], domainMax);
+    linePoints.push(`${x},${y}`);
+    surplusPoints.push(`${x},${Math.min(y, STRIP_MID)}`);
+    deficitPoints.push(`${x},${Math.max(y, STRIP_MID)}`);
+  }
+  const surplusArea = `M${stripX(0)},${STRIP_MID} L${surplusPoints.join(' L')} L${stripX(23)},${STRIP_MID} Z`;
+  const deficitArea = `M${stripX(0)},${STRIP_MID} L${deficitPoints.join(' L')} L${stripX(23)},${STRIP_MID} Z`;
+  const linePath = `M${linePoints.join(' L')}`;
+
+  const dotX = stripX(currentHour);
+  const dotY = stripY(curve[currentHour], domainMax);
+  const dotColor = divergingColor(curve[currentHour], domainMax);
+
+  return `
+    <line x1="0" y1="${STRIP_MID}" x2="${STRIP_W}" y2="${STRIP_MID}" stroke="#d8d7d3" stroke-width="1" />
+    <path d="${surplusArea}" fill="${rgba(SURPLUS_COLOR, 0.1)}" stroke="none" />
+    <path d="${deficitArea}" fill="${rgba(DEFICIT_COLOR, 0.1)}" stroke="none" />
+    <path d="${linePath}" fill="none" stroke="#3a3a38" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+    <circle id="strip-dot" cx="${dotX}" cy="${dotY}" r="4" fill="${dotColor}" stroke="#fcfcfb" stroke-width="2" />
+    <line id="strip-crosshair" x1="0" y1="0" x2="0" y2="${STRIP_H}" stroke="#898781" stroke-width="1" style="display:none" />
+    <circle id="strip-crosshair-dot" r="3" fill="#3a3a38" stroke="#fcfcfb" stroke-width="2" style="display:none" />
+    <text id="strip-tooltip-value" x="0" y="10" font-size="9" font-weight="600" fill="#0b0b0b" text-anchor="middle" style="display:none"></text>
+    <text id="strip-tooltip-hour" x="0" y="20" font-size="7" fill="#52514e" text-anchor="middle" style="display:none"></text>
+  `;
+}
+
+// Redraws the selected station's strip for the CURRENT state.dayType and
+// state.currentHour, and its persistent dot. domainMax is passed straight
+// from state.domainMax -- the same pooled 48-value (weekday+weekend x 24h)
+// domain the map markers use, never recomputed per station or per chart.
+function updateStationDetail() {
+  if (!state.selectedId) return;
+  const s = state.stations[state.selectedId];
+  const curve = s[state.dayType];
+  document.getElementById('detail-daylabel').textContent = state.dayType;
+  document.getElementById('detail-strip').innerHTML = buildStripMarkup(curve, state.domainMax, state.currentHour);
+}
+
+// Read-only hover preview: repositions the crosshair/tooltip elements for
+// `hour` on the CURRENTLY SELECTED station's CURRENT dayType curve. Must
+// never call renderHour/setDayType or write state.currentHour/state.dayType
+// -- only the persistent dot (drawn from those) reflects the real slider
+// position; this is strictly a local "what if" preview under the pointer.
+function previewStripHour(hour) {
+  if (!state.selectedId) return;
+  const curve = state.stations[state.selectedId][state.dayType];
+  const x = stripX(hour);
+  const y = stripY(curve[hour], state.domainMax);
+
+  const crosshair = document.getElementById('strip-crosshair');
+  crosshair.setAttribute('x1', x);
+  crosshair.setAttribute('x2', x);
+  crosshair.style.display = '';
+
+  const dot = document.getElementById('strip-crosshair-dot');
+  dot.setAttribute('cx', x);
+  dot.setAttribute('cy', y);
+  dot.style.display = '';
+
+  const value = curve[hour];
+  const valueText = document.getElementById('strip-tooltip-value');
+  valueText.textContent = `${value >= 0 ? '+' : ''}${value.toFixed(1)}`;
+  valueText.setAttribute('x', x);
+  valueText.style.display = '';
+
+  const hourText = document.getElementById('strip-tooltip-hour');
+  hourText.textContent = formatHourLabel(hour);
+  hourText.setAttribute('x', x);
+  hourText.style.display = '';
+}
+
+function clearStripPreview() {
+  for (const id of ['strip-crosshair', 'strip-crosshair-dot', 'strip-tooltip-value', 'strip-tooltip-hour']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  }
 }
 
 function drawLegendGradient(domainMax) {
@@ -211,6 +401,7 @@ const ready = fetch('data/flows.json')
         weight: 0.75,
         fillOpacity: 0.85,
       }).addTo(map);
+      state.markers[id].on('click', () => selectStation(id));
     }
 
     drawLegendGradient(state.domainMax);
@@ -238,6 +429,21 @@ const ready = fetch('data/flows.json')
 
     document.getElementById('day-weekday').addEventListener('click', () => setDayType('weekday'));
     document.getElementById('day-weekend').addEventListener('click', () => setDayType('weekend'));
+
+    document.getElementById('detail-close').addEventListener('click', closeStation);
+
+    // Attached once, directly on the (never-replaced) <svg> element -- its
+    // children get rebuilt by updateStationDetail()'s innerHTML assignment,
+    // but that doesn't detach a listener bound to the svg itself.
+    const stripSvg = document.getElementById('detail-strip');
+    stripSvg.addEventListener('pointermove', event => {
+      const rect = stripSvg.getBoundingClientRect();
+      if (!rect.width) return;
+      const localX = ((event.clientX - rect.left) / rect.width) * STRIP_W;
+      const hour = Math.max(0, Math.min(23, Math.round((localX / STRIP_W) * 23)));
+      previewStripHour(hour);
+    });
+    stripSvg.addEventListener('pointerleave', clearStripPreview);
   })
   .catch(error => {
     const status = document.getElementById('status');
@@ -251,6 +457,7 @@ const ready = fetch('data/flows.json')
 if (typeof globalThis !== 'undefined') {
   globalThis.__dashboard = {
     divergingColor, percentile, computeDomainMax, formatHourLabel, renderHour, setDayType,
+    selectStation, closeStation, previewStripHour, clearStripPreview, stripX, stripY,
     getState: () => state,
     ready,
   };

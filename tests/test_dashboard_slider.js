@@ -38,9 +38,36 @@ function makeCurve(overrides) {
 const FAKE_PAYLOAD = {
   granularity: { months: ['2026-04'], seasons: ['spring'] },
   stations: {
-    A: { name: 'Station A', lat: 40.75, lng: -73.98, weekday: makeCurve({ 8: 10, 14: -3 }), weekend: makeCurve({ 8: 2, 14: -1 }) },
-    B: { name: 'Station B', lat: 40.76, lng: -73.99, weekday: makeCurve({ 8: -20, 14: 5 }), weekend: makeCurve({ 8: -4, 14: 1 }) },
-    C: { name: 'Station C', lat: 40.70, lng: -73.95, weekday: makeCurve({ 8: 1, 14: 0.5 }), weekend: makeCurve({ 8: 0.2, 14: 0.1 }) },
+    A: {
+      name: 'Station A', lat: 40.75, lng: -73.98,
+      weekday: makeCurve({ 8: 10, 14: -3 }), weekend: makeCurve({ 8: 2, 14: -1 }),
+      cluster: 1, cluster_name: 'Test cluster A',
+      context: {
+        near_nycha: 1, near_school: 0, nycha_dist_m: 120, nycha_nearest: 'Test NYCHA A',
+        school_dist_m: 900, school_nearest: 'Test School A',
+        subway_dist_m: 200, subway_nearest: 'Test Subway A', transit_gap: 0,
+      },
+    },
+    B: {
+      name: 'Station B', lat: 40.76, lng: -73.99,
+      weekday: makeCurve({ 8: -20, 14: 5 }), weekend: makeCurve({ 8: -4, 14: 1 }),
+      cluster: 2, cluster_name: 'Test cluster B',
+      context: {
+        near_nycha: 0, near_school: 1, nycha_dist_m: 1000, nycha_nearest: 'Test NYCHA B',
+        school_dist_m: 150, school_nearest: 'Test School B',
+        subway_dist_m: 900, subway_nearest: 'Test Subway B', transit_gap: 1,
+      },
+    },
+    C: {
+      name: 'Station C', lat: 40.70, lng: -73.95,
+      weekday: makeCurve({ 8: 1, 14: 0.5 }), weekend: makeCurve({ 8: 0.2, 14: 0.1 }),
+      cluster: 3, cluster_name: 'Test cluster C',
+      context: {
+        near_nycha: 0, near_school: 0, nycha_dist_m: 2000, nycha_nearest: 'Test NYCHA C',
+        school_dist_m: 2000, school_nearest: 'Test School C',
+        subway_dist_m: 100, subway_nearest: 'Test Subway C', transit_gap: 0,
+      },
+    },
   },
 };
 
@@ -48,15 +75,23 @@ function makeElementStub(id) {
   const el = {
     id,
     textContent: '',
+    innerHTML: '',
     style: {},
     value: undefined,
     _listeners: {},
     _classes: new Set(),
+    _attrs: {},
+    _children: [],
     addEventListener(event, handler) { el._listeners[event] = handler; },
+    setAttribute(name, value) { el._attrs[name] = value; },
+    getAttribute(name) { return el._attrs[name]; },
+    appendChild(child) { el._children.push(child); return child; },
     classList: {
       toggle(cls, force) {
         if (force) el._classes.add(cls); else el._classes.delete(cls);
       },
+      add(cls) { el._classes.add(cls); },
+      remove(cls) { el._classes.delete(cls); },
       contains(cls) { return el._classes.has(cls); },
     },
   };
@@ -76,12 +111,15 @@ function buildSandbox() {
   const layerStub = { addTo() { return this; } };
 
   function makeMarkerStub(latlng, opts) {
-    return {
+    const marker = {
       _latlng: latlng,
       _opts: Object.assign({}, opts),
-      addTo() { return this; },
-      setStyle(newOpts) { Object.assign(this._opts, newOpts); return this; },
+      _listeners: {},
+      addTo() { return marker; },
+      setStyle(newOpts) { Object.assign(marker._opts, newOpts); return marker; },
+      on(event, handler) { marker._listeners[event] = handler; return marker; },
     };
+    return marker;
   }
 
   const L = {
@@ -92,7 +130,13 @@ function buildSandbox() {
   };
 
   const sandbox = {
-    document: { getElementById },
+    document: {
+      getElementById,
+      createElement() {
+        const div = { textContent: '', _children: [], appendChild(child) { div._children.push(child); return child; } };
+        return div;
+      },
+    },
     L,
     fetch() {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(FAKE_PAYLOAD) });
@@ -219,6 +263,83 @@ async function main() {
     dash.divergingColor(FAKE_PAYLOAD.stations.B.weekday[14], domainMaxAt8),
     'toggling back to weekday should recolor markers from the weekday curve again'
   );
+
+  // --- Session 13: station click -> detail panel. Still at hour 14, weekday. ---
+
+  const markerBClick = stateBackToWeekday.markers.B._listeners.click;
+  assert.ok(markerBClick, 'no click listener was registered on station B\'s marker');
+  markerBClick();
+
+  const stateSelected = dash.getState();
+  assert.strictEqual(stateSelected.selectedId, 'B');
+  assert.strictEqual(elements['detail-name'].textContent, 'Station B');
+  assert.strictEqual(elements['detail-cluster'].textContent, 'Test cluster B');
+  assert.strictEqual(elements['detail-daylabel'].textContent, 'weekday');
+  assert.ok(elements['detail'].classList.contains('visible'), 'detail panel should be visible after selecting a station');
+  assert.strictEqual(stateSelected.markers.B._opts.color, '#2a2a28', 'selected marker should get the highlight stroke color');
+  assert.strictEqual(stateSelected.markers.B._opts.weight, 2, 'selected marker should get the highlight stroke weight');
+
+  const contextChildren = elements['detail-context']._children;
+  assert.strictEqual(contextChildren.length, 2, 'station B is near a school and has a subway gap -- expected 2 context lines');
+  assert.strictEqual(
+    contextChildren[0].textContent,
+    'Nearest subway: Test Subway B (900 m) — beyond the 800 m subway-gap threshold'
+  );
+  assert.strictEqual(contextChildren[1].textContent, 'Within 300 m of school: Test School B (150 m)');
+
+  // persistent dot must be drawn from B's weekday[14] against the SAME pooled
+  // domainMax used everywhere else -- checked via the actual rendered markup,
+  // using the dashboard's own stripX/stripY/divergingColor so this doesn't
+  // duplicate the pixel-mapping math, just confirms it was actually applied.
+  function assertStripDot(stationId, hour, dayType, domainMax) {
+    const curve = FAKE_PAYLOAD.stations[stationId][dayType];
+    const expectedX = dash.stripX(hour);
+    const expectedY = dash.stripY(curve[hour], domainMax);
+    const expectedFill = dash.divergingColor(curve[hour], domainMax);
+    const html = elements['detail-strip'].innerHTML;
+    assert.ok(html.includes(`id="strip-dot" cx="${expectedX}" cy="${expectedY}"`), `strip-dot should be positioned at hour ${hour}'s ${dayType} value`);
+    assert.ok(html.includes(`fill="${expectedFill}"`), `strip-dot fill should come from divergingColor(${dayType}[${hour}], domainMax)`);
+  }
+  assertStripDot('B', 14, 'weekday', domainMaxAt8);
+
+  // --- slider-sync-while-open: drag to hour 20 while the panel is open ---
+  inputHandler({ target: { value: '20' } });
+  const stateAfterSliderWhileOpen = dash.getState();
+  assert.strictEqual(stateAfterSliderWhileOpen.selectedId, 'B', 'selection should survive a slider drag');
+  assert.strictEqual(stateAfterSliderWhileOpen.domainMax, domainMaxAt8, 'domainMax must still be untouched');
+  assertStripDot('B', 20, 'weekday', domainMaxAt8);
+
+  // --- day-type-toggle-sync-while-open: toggle to weekend while still open ---
+  weekendClick();
+  const stateAfterToggleWhileOpen = dash.getState();
+  assert.strictEqual(stateAfterToggleWhileOpen.selectedId, 'B', 'selection should survive a day-type toggle');
+  assert.strictEqual(elements['detail-daylabel'].textContent, 'weekend');
+  assertStripDot('B', 20, 'weekend', domainMaxAt8);
+
+  // --- read-only hover preview must not touch global hour/dayType state ---
+  dash.previewStripHour(5);
+  const stateAfterPreview = dash.getState();
+  assert.strictEqual(stateAfterPreview.currentHour, 20, 'hover preview must not mutate state.currentHour');
+  assert.strictEqual(stateAfterPreview.dayType, 'weekend', 'hover preview must not mutate state.dayType');
+  const expectedPreviewValue = FAKE_PAYLOAD.stations.B.weekend[5]; // 0 -> "+0.0"
+  assert.strictEqual(
+    elements['strip-tooltip-value'].textContent,
+    `${expectedPreviewValue >= 0 ? '+' : ''}${expectedPreviewValue.toFixed(1)}`
+  );
+  assert.strictEqual(elements['strip-tooltip-hour'].textContent, dash.formatHourLabel(5));
+  assert.strictEqual(Number(elements['strip-crosshair']._attrs.x1), dash.stripX(5));
+  assert.notStrictEqual(elements['strip-crosshair'].style.display, 'none', 'crosshair should be visible during preview');
+
+  dash.clearStripPreview();
+  assert.strictEqual(elements['strip-crosshair'].style.display, 'none', 'crosshair should hide again once the pointer leaves');
+
+  // --- close clears both the panel and the marker highlight ---
+  dash.closeStation();
+  const stateAfterClose = dash.getState();
+  assert.strictEqual(stateAfterClose.selectedId, null);
+  assert.ok(!elements['detail'].classList.contains('visible'), 'detail panel should be hidden after closing');
+  assert.strictEqual(stateAfterClose.markers.B._opts.color, '#ffffff', 'closing should revert the marker highlight color');
+  assert.strictEqual(stateAfterClose.markers.B._opts.weight, 0.75, 'closing should revert the marker highlight weight');
 
   console.log('All dashboard slider smoke tests passed.');
 }

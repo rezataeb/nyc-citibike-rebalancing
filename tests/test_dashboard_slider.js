@@ -155,11 +155,42 @@ function buildSandbox() {
     return marker;
   }
 
+  // A single map stub object (not a new one per L.map() call, since the
+  // dashboard only calls L.map() once) so setViewMode()'s map.removeLayer/
+  // addLayer calls are observable via mapStub._layers in assertions.
+  const mapStub = {
+    setView() { return mapStub; },
+    fitBounds() { return mapStub; },
+    _layers: [],
+    addLayer(layer) { mapStub._layers.push(layer); return mapStub; },
+    removeLayer(layer) { mapStub._layers = mapStub._layers.filter(l => l !== layer); return mapStub; },
+  };
+
   const L = {
-    map() { return { setView() { return this; }, fitBounds() { return this; } }; },
+    map() { return mapStub; },
     tileLayer() { return layerStub; },
     latLngBounds() { return boundsStub; },
     circleMarker(latlng, opts) { return makeMarkerStub(latlng, opts); },
+    // Individual view's container -- just holds the marker list, no behavior
+    // this test needs beyond identity (so mapStub._layers can tell the two
+    // containers apart).
+    layerGroup(layers) { return { _kind: 'individual', _layers: layers }; },
+    // Grouped view's container. refreshClusters() incrementing _refreshCount
+    // is exactly what the "refreshClusters wired into all four trigger
+    // points" tests check -- not markercluster's real spatial geometry.
+    markerClusterGroup(opts) {
+      const group = {
+        _kind: 'cluster',
+        _opts: opts,
+        _layers: [],
+        _refreshCount: 0,
+        addLayers(layers) { group._layers.push(...layers); },
+        refreshClusters() { group._refreshCount += 1; },
+      };
+      return group;
+    },
+    divIcon(opts) { return opts; },
+    point(x, y) { return { x, y }; },
   };
 
   const sandbox = {
@@ -188,6 +219,7 @@ function buildSandbox() {
   };
   sandbox.globalThis = sandbox;
   sandbox._elements = elements; // exposed for assertions, not read by the dashboard script itself
+  sandbox._map = mapStub; // exposed for assertions -- lets tests see which layer is actually attached
   return sandbox;
 }
 
@@ -570,6 +602,117 @@ async function main() {
     elements['detail-strip'].innerHTML.includes('id="strip-dot"'),
     'station C (still selected) has all-period historical data -- the rhythm strip should draw normally again'
   );
+
+  // --- Session 16: marker clustering. Entering with mode='historical', period='all', dayType='weekend', hour=20. ---
+
+  // computeClusterColor: pure, no Leaflet -- empty -> null (never zero-filled), otherwise divergingColor(mean, domainMax).
+  assert.strictEqual(dash.computeClusterColor([], 10), null, 'no valid children -> no data, not an averaged-in zero');
+  assert.strictEqual(dash.computeClusterColor([10, -10], 10), dash.divergingColor(0, 10), 'mean of [10, -10] is 0');
+  assert.strictEqual(dash.computeClusterColor([10, 20], 10), dash.divergingColor(15, 10), 'mean of [10, 20] is 15');
+
+  // computeLiveClusterColor: same shape, fixed 50-point domain, known 0%/50%/100% inputs.
+  assert.strictEqual(dash.computeLiveClusterColor([]), null, 'no valid live children -> no data');
+  assert.strictEqual(dash.computeLiveClusterColor([0]), dash.divergingColor(-50, 50), '0% full -> full red-end deviation');
+  assert.strictEqual(dash.computeLiveClusterColor([50]), dash.divergingColor(0, 50), '50% full -> neutral gray');
+  assert.strictEqual(dash.computeLiveClusterColor([100]), dash.divergingColor(50, 50), '100% full -> full blue-end deviation');
+  assert.strictEqual(
+    dash.computeLiveClusterColor([0, 100]), dash.divergingColor(0, 50),
+    'mean of [0, 100] is 50 -> deviation 0 -> same gray as a single 50% reading'
+  );
+
+  // clusterIconHTML: pure string builder, no Leaflet.
+  assert.ok(dash.clusterIconHTML(null, 5).includes('background:transparent'), 'no-data cluster icon should be hollow');
+  assert.ok(dash.clusterIconHTML(null, 5).includes('>5<'), 'no-data cluster icon should still show the child count');
+  assert.ok(dash.clusterIconHTML('rgb(1, 2, 3)', 7).includes('background:rgb(1, 2, 3)'));
+  assert.ok(dash.clusterIconHTML('rgb(1, 2, 3)', 7).includes('>7<'));
+
+  // A lightweight FAKE cluster -- just the two methods markercluster's real
+  // cluster object exposes -- not the library's actual spatial clustering
+  // geometry, per the "unit-testable without stubbing markercluster's
+  // clustering geometry" requirement.
+  function fakeCluster(stationIds) {
+    const markers = stationIds.map(stationId => ({ stationId }));
+    return { getAllChildMarkers: () => markers, getChildCount: () => markers.length };
+  }
+
+  const clusterState = dash.getState();
+  const refreshCountBefore1 = clusterState.clusterLayer._refreshCount;
+
+  // --- renderHour (the slider's own path) is trigger point #1 for refreshClusters() ---
+  dash.renderHour(8);
+  assert.strictEqual(
+    dash.getState().clusterLayer._refreshCount, refreshCountBefore1 + 1,
+    'renderHour must call refreshClusters() exactly once'
+  );
+
+  // historical clusterIconCreateFunction, at hour 8, dayType weekend, period 'all':
+  // A.weekend[8]=2, B.weekend[8]=-4, C.weekend[8]=0.2 -- mean = -0.6.
+  let icon = dash.clusterIconCreateFunction(fakeCluster(['A', 'B', 'C']));
+  assert.strictEqual(icon.html, dash.clusterIconHTML(dash.divergingColor(-0.6, domainMaxAt8), 3));
+
+  // --- setPeriod is trigger point #2, and also sets up the no-data cluster case: ---
+  // station B has no 'month:2026-05' bucket (see the fixture), so a cluster
+  // containing only B has zero valid children this period -- hollow, not zero-filled.
+  const refreshCountBefore2 = dash.getState().clusterLayer._refreshCount;
+  dash.setPeriod('month:2026-05');
+  assert.strictEqual(dash.getState().clusterLayer._refreshCount, refreshCountBefore2 + 1, 'setPeriod must call refreshClusters() exactly once');
+
+  icon = dash.clusterIconCreateFunction(fakeCluster(['B']));
+  assert.strictEqual(icon.html, dash.clusterIconHTML(null, 1), 'a cluster whose only child has no data for the period should render hollow');
+
+  // Mixed cluster: B (no May data) must be EXCLUDED from the mean, not averaged in as 0.
+  // A.months['2026-05'].weekend[8]=3, C.months['2026-05'].weekend[8]=0.5 -- mean of just those two = 1.75.
+  icon = dash.clusterIconCreateFunction(fakeCluster(['A', 'B', 'C']));
+  assert.strictEqual(
+    icon.html, dash.clusterIconHTML(dash.divergingColor(1.75, domainMaxAt8), 3),
+    'the no-data child must be excluded from the mean entirely, not counted as a zero'
+  );
+
+  // --- setDayType is trigger point #3 ---
+  const refreshCountBefore3 = dash.getState().clusterLayer._refreshCount;
+  dash.setDayType('weekday');
+  assert.strictEqual(dash.getState().clusterLayer._refreshCount, refreshCountBefore3 + 1, 'setDayType must call refreshClusters() exactly once');
+
+  // --- setMode is trigger point #4, and switches cluster coloring to the live scale ---
+  const refreshCountBefore4 = dash.getState().clusterLayer._refreshCount;
+  dash.setMode('live');
+  assert.strictEqual(dash.getState().clusterLayer._refreshCount, refreshCountBefore4 + 1, 'setMode must call refreshClusters() exactly once');
+
+  // live clusterIconCreateFunction: A is 50% full, B is 10% full (both usable).
+  icon = dash.clusterIconCreateFunction(fakeCluster(['A', 'B']));
+  assert.strictEqual(icon.html, dash.clusterIconHTML(dash.computeLiveClusterColor([50, 10]), 2));
+
+  // live no-data cluster: station C has no live match at all.
+  icon = dash.clusterIconCreateFunction(fakeCluster(['C']));
+  assert.strictEqual(icon.html, dash.clusterIconHTML(null, 1), 'a cluster whose only child has no live match should render hollow');
+
+  dash.setMode('historical'); // restore, so nothing below depends on live mode by accident
+  dash.setPeriod('all');
+
+  // --- view-mode toggle: explicit removeLayer(old) before addLayer(new), never both attached at once ---
+  const mapLayersBefore = sandbox._map._layers.slice();
+  assert.ok(mapLayersBefore.includes(clusterState.individualLayer), 'individual view should be the one attached to the map by default');
+  assert.ok(!mapLayersBefore.includes(clusterState.clusterLayer), 'the cluster layer should not be attached while in individual view');
+
+  const viewGroupedClick = elements['view-grouped']._listeners.click;
+  assert.ok(viewGroupedClick, 'no click listener registered on the grouped view button');
+  viewGroupedClick();
+
+  assert.strictEqual(dash.getState().viewMode, 'grouped');
+  assert.ok(elements['view-grouped'].classList.contains('active'));
+  assert.ok(!elements['view-individual'].classList.contains('active'));
+  assert.ok(!sandbox._map._layers.includes(clusterState.individualLayer), 'individual layer should be removed from the map when switching to grouped view');
+  assert.ok(sandbox._map._layers.includes(clusterState.clusterLayer), 'cluster layer should be added to the map when switching to grouped view');
+  assert.strictEqual(
+    sandbox._map._layers.filter(l => l === clusterState.individualLayer || l === clusterState.clusterLayer).length, 1,
+    'exactly one of the two view containers should ever be attached to the map at once'
+  );
+
+  const viewIndividualClick = elements['view-individual']._listeners.click;
+  viewIndividualClick();
+  assert.strictEqual(dash.getState().viewMode, 'individual');
+  assert.ok(sandbox._map._layers.includes(clusterState.individualLayer), 'switching back to individual view should reattach the individual layer');
+  assert.ok(!sandbox._map._layers.includes(clusterState.clusterLayer), 'and detach the cluster layer');
 
   console.log('All dashboard slider smoke tests passed.');
 }

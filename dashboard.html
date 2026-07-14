@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Citi Bike Rebalancing Explorer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   #map { position: absolute; top: 0; bottom: 0; left: 0; right: 0; background: #f9f9f7; }
@@ -20,7 +22,7 @@
   #controls input[type="range"] { width: 200px; }
   #hour-label { font-weight: 600; min-width: 74px; display: inline-block; }
   #historical-controls { display: flex; align-items: center; gap: 10px; }
-  #mode-toggle, #day-toggle { display: flex; gap: 4px; margin-right: 6px; }
+  #mode-toggle, #view-toggle, #day-toggle { display: flex; gap: 4px; margin-right: 6px; }
   .day-btn { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
   .day-btn.active { background: #2a78d6; border-color: #2a78d6; color: #fff; }
   #period-select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-right: 6px; }
@@ -54,6 +56,10 @@
     <button id="mode-historical" class="day-btn active">Historical flow</button>
     <button id="mode-live" class="day-btn">Live docks (GBFS)</button>
   </div>
+  <div id="view-toggle">
+    <button id="view-individual" class="day-btn active">Individual</button>
+    <button id="view-grouped" class="day-btn">Grouped</button>
+  </div>
   <div id="historical-controls">
     <div id="day-toggle">
       <button id="day-weekday" class="day-btn active">Weekday</button>
@@ -86,17 +92,20 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 // Session 10 built the map skeleton (fixed 8am, no interactivity). Session 11
 // added the 24h time slider. Session 12 added the weekday/weekend toggle.
 // Session 13 added the station click -> detail panel. Session 14 added the
-// season/month period selector. Session 15 adds the live GBFS docks mode --
-// each interaction lands as its own commit. Still no route layer. Equity
-// filter is a standing scope exclusion, see CLAUDE.md -- per-station equity
-// context in the detail panel is in scope and unaffected. Marker clustering
-// is not built (checked before Session 15 -- there is no computeClusterColor
-// or similar anywhere in this file, reference/dashboard.html, or
-// PROGRESS.md; dropped from Session 15's scope pending clarification).
+// season/month period selector. Session 15 added the live GBFS docks mode
+// (marker clustering was scoped out of Session 15 pending clarification --
+// no computeClusterColor or similar existed anywhere at that point, verified
+// by grep across this file, reference/dashboard.html, and PROGRESS.md).
+// Session 16 adds marker clustering (view-mode toggle, Leaflet.markercluster,
+// mode-aware cluster coloring) -- each interaction lands as its own commit.
+// Still no route layer. Equity filter is a standing scope exclusion, see
+// CLAUDE.md -- per-station equity context in the detail panel is in scope
+// and unaffected.
 
 const DEFAULT_HOUR = 8; // initial slider position; no longer a fixed constant once wired up
 
@@ -257,6 +266,89 @@ function formatAsOf(isoString) {
   return `${isoString.replace('T', ' ').replace(/[+-]\d{2}:\d{2}$/, '').replace(/Z$/, '')} UTC`;
 }
 
+// Mean net flow of children that HAVE data for the current hour/dayType/
+// period, colored via the same divergingColor()/domainMax every individual
+// historical marker uses -- a cluster's color is directly comparable to an
+// individual marker's, not a separately-scaled summary. Pure and Leaflet-
+// free: takes plain numbers in, a color (or null) out, so it's testable
+// without stubbing markercluster's clustering geometry at all. Returns null
+// -- never averages in a missing child as zero -- when childFlows is empty,
+// so the caller can render the same hollow-gray no-data convention as an
+// individual no-data marker.
+function computeClusterColor(childFlows, domainMax) {
+  if (childFlows.length === 0) return null;
+  const mean = childFlows.reduce((sum, value) => sum + value, 0) / childFlows.length;
+  return divergingColor(mean, domainMax);
+}
+
+// Same shape and same "empty -> null, never zero-filled" rule as
+// computeClusterColor, but for live fill percentages: mean deviation-from-50
+// of children with a valid live reading, against the FIXED LIVE_FILL_DOMAIN
+// (never state.domainMax) -- same reasoning as individual live markers.
+function computeLiveClusterColor(childFillPcts) {
+  if (childFillPcts.length === 0) return null;
+  const mean = childFillPcts.reduce((sum, value) => sum + value, 0) / childFillPcts.length;
+  return divergingColor(mean - 50, LIVE_FILL_DOMAIN);
+}
+
+// Pure HTML-string builder for one cluster icon -- no Leaflet involved, so
+// the visual/color logic is testable on its own. A null color (no valid
+// children for the current mode/period) renders the same hollow-gray
+// convention as an individual no-data marker: transparent fill, gray ring.
+function clusterIconHTML(color, count) {
+  const isNoData = color === null;
+  const background = isNoData ? 'transparent' : color;
+  const border = isNoData ? NO_DATA_STROKE : '#ffffff';
+  const textColor = isNoData ? '#898781' : '#ffffff';
+  return `<div style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${background};border:2px solid ${border};color:${textColor};font-weight:600;font-size:13px;font-family:system-ui,-apple-system,sans-serif;">${count}</div>`;
+}
+
+// Leaflet.markercluster's iconCreateFunction hook -- called whenever a
+// cluster needs (re)drawing. Resolves each child marker back to its station
+// id via marker.stationId (tagged at creation time), looks up exactly the
+// same underlying value an individual marker would use for the CURRENT
+// state.mode, and delegates the aggregation/coloring to the pure functions
+// above. `cluster` only needs .getAllChildMarkers()/.getChildCount() here --
+// no spatial clustering geometry -- so a plain fake object with those two
+// methods is enough to test this directly.
+function clusterIconCreateFunction(cluster) {
+  const children = cluster.getAllChildMarkers();
+  let color;
+  if (state.mode === 'live') {
+    const fillPcts = [];
+    for (const marker of children) {
+      if (hasLiveData(marker.stationId)) {
+        const live = state.liveStations[marker.stationId];
+        fillPcts.push((live.bikes_available / live.capacity) * 100);
+      }
+    }
+    color = computeLiveClusterColor(fillPcts);
+  } else {
+    const flows = [];
+    for (const marker of children) {
+      const curve = curveForPeriod(state.stations[marker.stationId], state.period, state.dayType);
+      if (curve !== null) flows.push(curve[state.currentHour]);
+    }
+    color = computeClusterColor(flows, state.domainMax);
+  }
+  return L.divIcon({
+    html: clusterIconHTML(color, cluster.getChildCount()),
+    className: 'cluster-icon',
+    iconSize: L.point(40, 40),
+  });
+}
+
+// Forces every currently-visible cluster icon to re-run
+// clusterIconCreateFunction against the latest state -- Leaflet.markercluster
+// caches icons otherwise, so without this, grouped view would show stale
+// colors after the hour/dayType/period/mode changes. Called from exactly one
+// place (renderHour, below) rather than separately from setDayType/setPeriod/
+// setMode, because all three already funnel through renderHour -- same "one
+// hook point" reasoning already used for updateStationDetail().
+function refreshClusters() {
+  if (state.clusterLayer) state.clusterLayer.refreshClusters();
+}
+
 // Dashboard state, kept in one place (rather than scattered closure
 // variables) so the Node smoke test can inspect it via the test hook below.
 const state = {
@@ -270,6 +362,9 @@ const state = {
   mode: 'historical', // 'historical' | 'live'
   liveStations: null, // station_id -> {capacity, bikes_available, docks_available, is_renting, is_returning}, from live_status.json
   liveAsOf: null, // live_status.json's own last_updated (ISO string), never the viewer's local load time
+  viewMode: 'individual', // 'individual' | 'grouped'
+  individualLayer: null, // L.layerGroup holding the same marker objects as state.markers
+  clusterLayer: null, // L.markerClusterGroup holding the same marker objects as state.markers
 };
 
 // Stroke (selection ring) and fill styling, kept as one lookup table so
@@ -360,11 +455,13 @@ function renderHour(hour) {
     document.getElementById('hour-label').textContent = label;
   }
 
-  // Keeps an open detail panel in sync with whatever just changed -- the
-  // slider, the day-type toggle, the period selector, or the mode toggle
-  // (all call renderHour). One hook point covers all four, so there's only
-  // one place that can drift out of sync.
+  // Keeps an open detail panel AND grouped-view cluster icons in sync with
+  // whatever just changed -- the slider, the day-type toggle, the period
+  // selector, or the historical/live mode toggle (all call renderHour). One
+  // hook point covers all four, so there's only one place that can drift
+  // out of sync.
   if (state.selectedId) updateStationDetail();
+  refreshClusters();
 }
 
 // Switches the active day type and re-renders through the same renderHour
@@ -417,6 +514,23 @@ function setMode(mode) {
   document.getElementById('live-as-of').style.display = mode === 'live' ? '' : 'none';
   renderHour(state.currentHour);
   updateStatusMessage();
+}
+
+// Swaps which layer is actually on the map -- explicit removeLayer BEFORE
+// addLayer (never relying on addLayer alone), so the two containers can
+// never both be attached at once. Doesn't need to force a cluster refresh
+// itself: renderHour() already calls refreshClusters() on every hour/
+// dayType/period/mode change regardless of which view is currently
+// visible, so grouped view's icons are already current by the time you
+// switch to it.
+function setViewMode(viewMode) {
+  const oldGroup = state.viewMode === 'individual' ? state.individualLayer : state.clusterLayer;
+  const newGroup = viewMode === 'individual' ? state.individualLayer : state.clusterLayer;
+  state.viewMode = viewMode;
+  document.getElementById('view-individual').classList.toggle('active', viewMode === 'individual');
+  document.getElementById('view-grouped').classList.toggle('active', viewMode === 'grouped');
+  map.removeLayer(oldGroup);
+  map.addLayer(newGroup);
 }
 
 // Builds the equity-context lines shown in the detail panel from flows.json's
@@ -656,12 +770,25 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
 
     for (const id of ids) {
       const s = state.stations[id];
-      state.markers[id] = L.circleMarker([s.lat, s.lng], Object.assign(
+      const marker = L.circleMarker([s.lat, s.lng], Object.assign(
         { radius: MARKER_RADIUS_PX },
         markerStyleFor(id)
-      )).addTo(map);
-      state.markers[id].on('click', () => selectStation(id));
+      ));
+      marker.stationId = id; // lets clusterIconCreateFunction map a grouped child back to its station
+      marker.on('click', () => selectStation(id));
+      state.markers[id] = marker;
     }
+
+    // Two containers holding the SAME marker objects (never duplicated) --
+    // only one is ever actually attached to the map at a time, swapped by
+    // setViewMode(). Individual markers keep their existing click behavior
+    // unchanged either way; clustering only changes how they're grouped for
+    // display, not what a click on a revealed marker does.
+    const allMarkers = Object.values(state.markers);
+    state.individualLayer = L.layerGroup(allMarkers);
+    state.clusterLayer = L.markerClusterGroup({ iconCreateFunction: clusterIconCreateFunction });
+    state.clusterLayer.addLayers(allMarkers);
+    map.addLayer(state.individualLayer); // default view mode is 'individual'
 
     // Period options built from flows.json's own granularity block, never a
     // hardcoded season/month list -- 'all' (the existing all-period average)
@@ -708,6 +835,9 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     document.getElementById('mode-historical').addEventListener('click', () => setMode('historical'));
     document.getElementById('mode-live').addEventListener('click', () => setMode('live'));
 
+    document.getElementById('view-individual').addEventListener('click', () => setViewMode('individual'));
+    document.getElementById('view-grouped').addEventListener('click', () => setViewMode('grouped'));
+
     document.getElementById('detail-close').addEventListener('click', closeStation);
 
     // Attached once, directly on the (never-replaced) <svg> element -- its
@@ -738,6 +868,7 @@ if (typeof globalThis !== 'undefined') {
     selectStation, closeStation, previewStripHour, clearStripPreview, stripX, stripY,
     setPeriod, formatPeriodLabel, curveForPeriod, hasPeriodData,
     setMode, hasLiveData, formatAsOf,
+    setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,
     getState: () => state,
     ready,
   };

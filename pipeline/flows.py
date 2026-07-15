@@ -133,6 +133,43 @@ def compute_net_flow(clean_trips: pd.DataFrame) -> pd.DataFrame:
     return flows
 
 
+def compute_throughput(clean_trips: pd.DataFrame) -> pd.DataFrame:
+    """Total ridership (arrivals + departures, UNSIGNED) per (station, month,
+    day_type, hour), normalized to a per-day rate -- a busyness measure, not
+    a directional one (contrast with compute_net_flow's signed arrivals -
+    departures).
+
+    Reuses _aggregate_side and _distinct_dates_per_bucket -- the exact
+    aggregation compute_net_flow itself uses (station_id typing fixed in
+    Session 5, midnight-crossing-safe date handling fixed the same session)
+    -- rather than a new one-off aggregation, so this can't reintroduce
+    either of those bugs. Added in Session 21 (pipeline/elasticities.py) as
+    a regression control: capacity and net-flow magnitude are both
+    correlated with how busy a station is, and this is the busyness measure
+    that lets that get controlled for.
+    """
+    arrivals = _aggregate_side(
+        clean_trips,
+        "end_station_id", "end_station_name", "end_lat", "end_lng",
+        "ended_at", "has_valid_arrival_station", sign=+1,
+    )
+    departures = _aggregate_side(
+        clean_trips,
+        "start_station_id", "start_station_name", "start_lat", "start_lng",
+        "started_at", "has_valid_departure_station", sign=+1,
+    )
+    both = pd.concat([arrivals, departures], ignore_index=True)
+    throughput = (
+        both.groupby(["station_id", "month", "day_type", "hour"])
+        .agg(count=("count", "sum"))
+        .reset_index()
+    )
+    n_days = _distinct_dates_per_bucket(clean_trips)
+    throughput = throughput.merge(n_days, on=["month", "day_type"], how="left")
+    throughput["throughput_per_day"] = (throughput["count"] / throughput["n_days"].clip(lower=1)).round(3)
+    return throughput
+
+
 def add_season(flows: pd.DataFrame) -> pd.DataFrame:
     """Add a season column derived from month, using the fixed SEASON_OF map."""
     flows = flows.copy()

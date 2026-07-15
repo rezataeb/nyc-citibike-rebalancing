@@ -27,7 +27,9 @@ unlike a bare ID, it degrades gracefully for a station outside training.
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -38,6 +40,17 @@ FEATURE_COLUMNS = [
     "temp_mean_c", "precip_mm", "holiday_fraction", "doy_sin", "doy_cos",
 ]
 CATEGORICAL_COLUMNS = ["day_type"]
+
+# Session 5's exact train/test split (Feb+April train, June held out) --
+# fixed here as the single source of truth so a later caller (elasticities.py)
+# reconstructing this model gets the identical model Session 5's own
+# directional-accuracy findings describe, not a superficially-similar one
+# trained on whatever months happen to be convenient later.
+DEFAULT_TRAIN_MONTHS = ["2026-02", "2026-04"]
+DEFAULT_TEST_MONTH = "2026-06"
+DEFAULT_CATEGORIES = {"day_type": ["weekday", "weekend"]}
+
+MODEL_PATH = Path(__file__).resolve().parent.parent / "data" / "models" / "gbm_net_flow.joblib"
 
 
 def _month_calendar(year_month: str) -> pd.DataFrame:
@@ -82,7 +95,7 @@ def add_features(flows: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     return flows.merge(calendar_features, on=["month", "day_type"], how="left")
 
 
-def _apply_shared_categories(df: pd.DataFrame, categories: dict[str, list]) -> pd.DataFrame:
+def apply_shared_categories(df: pd.DataFrame, categories: dict[str, list]) -> pd.DataFrame:
     """Set categorical dtypes using a shared category list across train and test.
 
     Without this, a train-fitted category set and a test set built
@@ -97,7 +110,7 @@ def _apply_shared_categories(df: pd.DataFrame, categories: dict[str, list]) -> p
 
 def train_gbm(train_flows: pd.DataFrame, categories: dict[str, list]) -> HistGradientBoostingRegressor:
     """Fit HistGradientBoostingRegressor on train_flows, weighted by n_days per row."""
-    train_flows = _apply_shared_categories(train_flows, categories)
+    train_flows = apply_shared_categories(train_flows, categories)
     model = HistGradientBoostingRegressor(categorical_features="from_dtype", random_state=0)
     model.fit(
         train_flows[FEATURE_COLUMNS],
@@ -116,39 +129,83 @@ def predict_gbm(
     predictions if flows itself spans more than one month label for the
     same (station_id, day_type, hour) -- see backtest.py's _collapse.
     """
-    flows = _apply_shared_categories(flows, categories)
+    flows = apply_shared_categories(flows, categories)
     predicted = flows[["station_id", "day_type", "hour", "n_days"]].copy()
     predicted["predicted_net_per_day"] = model.predict(flows[FEATURE_COLUMNS])
     return predicted
 
 
-if __name__ == "__main__":
-    from pipeline.backtest import build_flat_baseline, build_naive_forecast, compute_mae
+def _load_flows(year_month: str) -> pd.DataFrame:
     from pipeline.download import download_month, load_trips
     from pipeline.flows import compute_net_flow
     from pipeline.qc import run_qc
+
+    zip_path = download_month(year_month)
+    trips = load_trips(zip_path)
+    clean, report = run_qc(trips)
+    print(f"[{year_month}] {report.summary()}\n")
+    return compute_net_flow(clean)
+
+
+def build_training_data(
+    train_months: list[str] = DEFAULT_TRAIN_MONTHS, test_month: str = DEFAULT_TEST_MONTH
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Reconstruct Session 5's exact Feb+April train / June test flows+features from real data.
+
+    Returns (train_flows, test_flows, train_features, test_features). Needed
+    because Session 4/5 never persisted a model artifact (see PROGRESS.md
+    Session 21) -- this is the one real code path that produces the training
+    panel the Feb+April model was actually fit on, reused by both this
+    module's __main__ and get_or_train_model() below so there is exactly one
+    definition of "the Session 5 model," not two that could quietly drift
+    apart.
+    """
     from pipeline.weather import fetch_daily_weather
 
-    TRAIN_MONTHS = ["2026-02", "2026-04"]
-    TEST_MONTH = "2026-06"
-
-    def _load_flows(year_month: str) -> pd.DataFrame:
-        zip_path = download_month(year_month)
-        trips = load_trips(zip_path)
-        clean, report = run_qc(trips)
-        print(f"[{year_month}] {report.summary()}\n")
-        return compute_net_flow(clean)
-
-    train_flows = pd.concat([_load_flows(m) for m in TRAIN_MONTHS], ignore_index=True)
-    test_flows = _load_flows(TEST_MONTH)
+    train_flows = pd.concat([_load_flows(m) for m in train_months], ignore_index=True)
+    test_flows = _load_flows(test_month)
 
     weather = fetch_daily_weather("2026-02-01", "2026-06-30")
     train_features = add_features(train_flows, weather)
     test_features = add_features(test_flows, weather)
+    return train_flows, test_flows, train_features, test_features
 
-    categories = {"day_type": ["weekday", "weekend"]}
+
+def save_model(model: HistGradientBoostingRegressor, path: Path = MODEL_PATH) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, path)
+
+
+def load_model(path: Path = MODEL_PATH) -> HistGradientBoostingRegressor:
+    return joblib.load(path)
+
+
+def get_or_train_model(path: Path = MODEL_PATH) -> HistGradientBoostingRegressor:
+    """Load the persisted Feb+April model if it exists; otherwise train it once
+    (the real data is already cached in data/raw/ from Sessions 4/5) and save
+    it, so every later caller -- including a second run of this function --
+    loads instead of retraining.
+    """
+    if path.exists():
+        return load_model(path)
+    _, _, train_features, _ = build_training_data()
+    model = train_gbm(train_features, DEFAULT_CATEGORIES)
+    save_model(model, path)
+    return model
+
+
+if __name__ == "__main__":
+    from pipeline.backtest import build_flat_baseline, build_naive_forecast, compute_mae
+
+    TRAIN_MONTHS = DEFAULT_TRAIN_MONTHS
+    TEST_MONTH = DEFAULT_TEST_MONTH
+
+    train_flows, test_flows, train_features, test_features = build_training_data(TRAIN_MONTHS, TEST_MONTH)
+    categories = DEFAULT_CATEGORIES
 
     model = train_gbm(train_features, categories)
+    save_model(model)
+    print(f"Saved fitted model to {MODEL_PATH}\n")
     gbm_forecast = predict_gbm(model, test_features, categories)
 
     seasonal_forecast = build_naive_forecast(train_flows)

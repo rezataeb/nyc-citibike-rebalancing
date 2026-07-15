@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from pipeline.download import RAW_DATA_DIR, load_trips
-from pipeline.flows import add_season, compute_net_flow, export_flows
+from pipeline.flows import add_season, compute_net_flow, compute_throughput, export_flows
 from pipeline.qc import run_qc
 
 BASE_ROW = {
@@ -79,6 +79,62 @@ def test_net_per_day_normalizes_by_distinct_dates():
     assert dep_row["n_days"].iloc[0] == 2
     assert dep_row["net"].iloc[0] == -2
     assert dep_row["net_per_day"].iloc[0] == -1.0
+
+
+def test_throughput_sums_arrivals_and_departures_unsigned():
+    # Same one-trip fixture as test_net_flow_counts_arrivals_and_departures_correctly,
+    # but throughput must NOT net them against each other -- both the
+    # departure station and the arrival station get a positive count of 1,
+    # not -1/+1.
+    clean = qc_clean(
+        [make_trip("2026-04-01 08:00:00", "2026-04-01 08:15:00", ride_id="t1")]
+    )
+    throughput = compute_throughput(clean)
+
+    dep_row = throughput[(throughput["station_id"] == "1") & (throughput["hour"] == 8)]
+    arr_row = throughput[(throughput["station_id"] == "2") & (throughput["hour"] == 8)]
+
+    assert dep_row["count"].iloc[0] == 1
+    assert arr_row["count"].iloc[0] == 1
+
+
+def test_throughput_missing_end_station_counts_as_departure_only():
+    # Mirrors test_missing_end_station_counts_as_departure_only: a trip
+    # missing its end station still contributes to departure throughput,
+    # same asymmetric-validity handling compute_net_flow relies on.
+    clean = qc_clean(
+        [
+            make_trip(
+                "2026-04-01 08:00:00",
+                "2026-04-01 08:15:00",
+                ride_id="no_end",
+                end_station_id=float("nan"),
+                end_station_name=float("nan"),
+            )
+        ]
+    )
+    throughput = compute_throughput(clean)
+
+    assert set(throughput["station_id"]) == {"1"}
+    assert throughput["count"].iloc[0] == 1
+
+
+def test_throughput_per_day_normalizes_by_distinct_dates():
+    # Mirrors test_net_per_day_normalizes_by_distinct_dates: two departures
+    # from station 1 on two distinct Wednesdays -> throughput_per_day == 1,
+    # not the raw count of 2.
+    clean = qc_clean(
+        [
+            make_trip("2026-04-01 08:00:00", "2026-04-01 08:15:00", ride_id="t1"),
+            make_trip("2026-04-08 08:00:00", "2026-04-08 08:15:00", ride_id="t2"),
+        ]
+    )
+    throughput = compute_throughput(clean)
+    dep_row = throughput[(throughput["station_id"] == "1") & (throughput["hour"] == 8)]
+
+    assert dep_row["n_days"].iloc[0] == 2
+    assert dep_row["count"].iloc[0] == 2
+    assert dep_row["throughput_per_day"].iloc[0] == 1.0
 
 
 def test_add_season_maps_month_to_fixed_season():

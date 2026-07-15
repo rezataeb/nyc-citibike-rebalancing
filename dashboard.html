@@ -39,6 +39,16 @@
     background: #f3f2f0; border: 1px solid #d8d7d3; border-radius: 8px;
   }
   #status.error { color: #8a2a29; background: #fdecec; border-color: #e34948; }
+  /* Demo-mode banner reuses #status's default neutral (non-.error) card --
+     it's informational, not an error state, so it deliberately never gets
+     the red treatment above. Detail toggle/content copy model-eval's own
+     ▸/▾ pattern (same collapsed-by-default rule) rather than inventing a
+     second disclosure widget. */
+  #status-detail-toggle { display: block; margin-top: 4px; font: inherit; font-weight: 600; font-size: 11px; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
+  #status-detail-toggle:hover { text-decoration: underline; }
+  #status-detail { margin-top: 6px; font-size: 11px; line-height: 1.4; }
+
+  .mode-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
   /* Mode tabs: the most consequential control, sized and weighted to read
      as primary -- full width, larger type, bold -- distinct from the
@@ -136,7 +146,11 @@
     <div class="subtitle"><span id="title-subtitle">Net flow at 8:00 AM, weekday (all-period average)</span><span id="title-meta"></span></div>
   </div>
 
-  <div id="status">Loading stations&hellip;</div>
+  <div id="status">
+    <span id="status-text">Loading stations&hellip;</span>
+    <button id="status-detail-toggle" class="hidden">Details &#9656;</button>
+    <div id="status-detail" class="hidden"></div>
+  </div>
 
   <div id="mode-toggle">
     <button id="mode-historical" class="mode-btn active">Historical flow</button>
@@ -627,6 +641,8 @@ const state = {
   routeLayer: null, // L.layerGroup of polylines + numbered stop markers, built once if route.json loads
   routeVisible: false, // the user's own toggle preference, independent of state.mode -- see applyRouteVisibility()
   modelEvalExpanded: false, // collapsed by default -- the sidebar-height fix (Session 19) must not be undone by this
+  demoMode: false, // true when flows.json failed and state.stations is DEMO_FLOWS_PAYLOAD instead of real data
+  liveAvailable: true, // false when live_status.json failed independently -- gates the Live mode tab, not tied to demoMode
 };
 
 // Collapsed by default (zero extra height budget); expanding is an
@@ -782,7 +798,14 @@ function setPeriod(period) {
 // period/mode switch after one), never during the error path.
 function updateStatusMessage() {
   const ids = Object.keys(state.stations);
-  document.getElementById('status').classList.add('hidden');
+  // The demo-mode banner (built once by showDemoBanner(), see the flows.json
+  // fetch fallback below) has to survive every later call to this function
+  // -- renderHour()/setMode()/setPeriod() all call it on every interaction,
+  // and none of them know or care whether we're in demo mode. Only hide
+  // #status here on the real-data path.
+  if (!state.demoMode) {
+    document.getElementById('status').classList.add('hidden');
+  }
   const meta = document.getElementById('title-meta');
 
   if (state.mode === 'live') {
@@ -1073,6 +1096,122 @@ function fetchJSON(url) {
   });
 }
 
+// Illustrative-only fallback for when flows.json itself can't be loaded --
+// "demo mode guarantees it always shows something" (build plan Part F,
+// Session 16). Five fabricated stations, never fetched (so they can't
+// themselves fail to load, including under file://), covering all three
+// real cluster_name values Session 9's k-means/typology step actually
+// produces against real data (confirmed against the live flows.json before
+// writing this, not guessed): two "Commuter core", two "Residential
+// feeder", and one "Low signal (excluded from clustering)" -- the exact
+// same strings real stations carry, not a paraphrase, so the detail panel
+// never displays two different phrasings for the same concept. No
+// seasons/months coverage (empty granularity) -- demo mode's job is
+// proving the map/slider/typology/detail-panel machinery still works, not
+// fabricating a full seasonal dataset. All names/ids are obviously
+// fictional ("Demo ... (illustrative)") so a reviewer can never mistake a
+// demo marker for a real station.
+const DEMO_FLOWS_PAYLOAD = {
+  granularity: { seasons: [], months: [] },
+  stations: {
+    'demo-1': {
+      name: 'Demo Commuter Plaza (illustrative)', lat: 40.745, lng: -73.985,
+      weekday: [0, 0, 0, 0, 0, 0, 1, 3, 4, 2, 0, 0, 0, 0, 0, 0, -1, -3, -4, -2, 0, 0, 0, 0],
+      weekend: [0, 0, 0, 0, 0, 0, 0.5, 1, 1, 0.5, 0, 0, 0, 0, 0, 0, -0.5, -1, -1, -0.5, 0, 0, 0, 0],
+      seasons: {}, months: {}, cluster: 0, cluster_name: 'Commuter core (fills AM, drains PM)',
+      context: {
+        near_nycha: 0, near_school: 0, nycha_dist_m: 900, nycha_nearest: 'Demo NYCHA Houses',
+        school_dist_m: 850, school_nearest: 'Demo PS 000',
+        subway_dist_m: 220, subway_nearest: 'Demo Ave-Illustrative St', transit_gap: 0,
+      },
+    },
+    'demo-2': {
+      name: 'Demo Transit Hub (illustrative)', lat: 40.758, lng: -73.968,
+      weekday: [0, 0, 0, 0, 0, 0.5, 2, 4, 3, 1, 0, 0, 0, 0, 0, -1, -2, -4, -3, -1, 0, 0, 0, 0],
+      weekend: [0, 0, 0, 0, 0, 0, 1, 1.5, 1, 0.5, 0, 0, 0, 0, 0, 0, -1, -1.5, -1, -0.5, 0, 0, 0, 0],
+      seasons: {}, months: {}, cluster: 0, cluster_name: 'Commuter core (fills AM, drains PM)',
+      context: {
+        near_nycha: 1, near_school: 0, nycha_dist_m: 180, nycha_nearest: 'Demo Riverside Houses',
+        school_dist_m: 1200, school_nearest: 'Demo PS 001',
+        subway_dist_m: 410, subway_nearest: 'Demo Blvd Station', transit_gap: 0,
+      },
+    },
+    'demo-3': {
+      name: 'Demo Residential Corner (illustrative)', lat: 40.706, lng: -73.958,
+      weekday: [0, 0, 0, 0, 0, 0, -1, -3, -4, -2, 0, 0, 0, 0, 0, 0, 1, 3, 4, 2, 0, 0, 0, 0],
+      weekend: [0, 0, 0, 0, 0, 0, -0.5, -1, -1, -0.5, 0, 0, 0, 0, 0, 0, 0.5, 1, 1, 0.5, 0, 0, 0, 0],
+      seasons: {}, months: {}, cluster: 1, cluster_name: 'Residential feeder (drains AM, fills PM)',
+      context: {
+        near_nycha: 0, near_school: 1, nycha_dist_m: 1500, nycha_nearest: 'Demo Court Houses',
+        school_dist_m: 210, school_nearest: 'Demo Elementary',
+        subway_dist_m: 900, subway_nearest: 'Demo Corner Stop', transit_gap: 1,
+      },
+    },
+    'demo-4': {
+      name: 'Demo Neighborhood Dock (illustrative)', lat: 40.712, lng: -73.942,
+      weekday: [0, 0, 0, 0, 0, -0.5, -2, -4, -3, -1, 0, 0, 0, 0, 0, 1, 2, 4, 3, 1, 0, 0, 0, 0],
+      weekend: [0, 0, 0, 0, 0, 0, -1, -1.5, -1, -0.5, 0, 0, 0, 0, 0, 0, 1, 1.5, 1, 0.5, 0, 0, 0, 0],
+      seasons: {}, months: {}, cluster: 1, cluster_name: 'Residential feeder (drains AM, fills PM)',
+      context: {
+        near_nycha: 0, near_school: 0, nycha_dist_m: 2000, nycha_nearest: 'Demo Court Houses',
+        school_dist_m: 2000, school_nearest: 'Demo Elementary',
+        subway_dist_m: 300, subway_nearest: 'Demo Park Station', transit_gap: 0,
+      },
+    },
+    'demo-5': {
+      name: 'Demo Low-Volume Dock (illustrative)', lat: 40.729, lng: -73.995,
+      weekday: [0.1, -0.1, 0.2, -0.2, 0.1, 0, -0.1, 0.2, -0.1, 0.1, -0.2, 0.1, 0, -0.1, 0.2, -0.1, 0.1, -0.2, 0.1, 0, -0.1, 0.2, -0.1, 0.1],
+      weekend: [0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1],
+      seasons: {}, months: {}, cluster: -1, cluster_name: 'Low signal (excluded from clustering)',
+      context: {
+        near_nycha: 0, near_school: 0, nycha_dist_m: 1800, nycha_nearest: 'Demo NYCHA Houses',
+        school_dist_m: 1600, school_nearest: 'Demo PS 000',
+        subway_dist_m: 650, subway_nearest: 'Demo Terminal', transit_gap: 0,
+      },
+    },
+  },
+};
+
+// Builds the reason shown behind the demo banner's expandable Details
+// toggle -- kept out of the main banner text per instruction, so a
+// reviewer sees a plain "showing illustrative data" statement up front,
+// not a raw fetch error. file:// keeps its existing distinct, actionable
+// message (the exact bug reported ("Failed to load data/flows.json:
+// undefined") stays fixed); every other failure shows the real error
+// message.
+function describeFetchError(error) {
+  if (typeof location !== 'undefined' && location.protocol === 'file:') {
+    return 'This dashboard needs to be served over http, not opened directly. Run: python3 -m http.server, then open http://localhost:8000/dashboard.html';
+  }
+  return `flows.json fetch failed: ${error && error.message ? error.message : error}`;
+}
+
+// Switches #status into the persistent demo-mode banner. Deliberately
+// reuses #status's default neutral styling (never .error -- this isn't a
+// broken dashboard, it's a working one showing fabricated data) and the
+// model-eval footer's own ▸/▾ collapsed-by-default disclosure pattern for
+// the error detail, rather than a new widget. state.demoMode = true is
+// read by updateStatusMessage() so every later render (hour/mode/period
+// changes) leaves this banner alone instead of hiding it.
+function showDemoBanner(reason) {
+  state.demoMode = true;
+  const status = document.getElementById('status');
+  document.getElementById('status-text').textContent = 'Showing illustrative demo data — flows.json could not be loaded.';
+  const toggle = document.getElementById('status-detail-toggle');
+  const detail = document.getElementById('status-detail');
+  detail.textContent = reason;
+  detail.classList.add('hidden'); // explicit, not just relying on the static markup's class="hidden" -- same standing fix as Sessions 19/20A/20B
+  toggle.textContent = 'Details ▸';
+  toggle.classList.remove('hidden');
+  toggle.addEventListener('click', () => {
+    const expanded = detail.classList.contains('hidden');
+    detail.classList.toggle('hidden', !expanded);
+    toggle.textContent = `Details ${expanded ? '▾' : '▸'}`;
+  });
+  status.classList.remove('hidden');
+  status.classList.remove('error');
+}
+
 // route.json is fetched alongside the other two, but non-fatally: unlike
 // flows.json/live_status.json (both required for the dashboard to mean
 // anything), route.json is one optional analysis layer -- graceful
@@ -1082,16 +1221,27 @@ function fetchJSON(url) {
 // loading.
 const routeReady = fetchJSON('data/route.json').catch(() => null);
 
-// Both required files are fetched together at load, same as the rest of
-// this dashboard's "load everything once up front" architecture --
-// live_status.json is a small local static file (see
-// pipeline/gbfs_logger.py's export_live_status), not a call to the live
-// GBFS feed itself, which CORS blocks from a browser.
-const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_status.json'), routeReady])
-  .then(([payload, livePayload, routePayload]) => {
-    state.stations = payload.stations;
-    state.liveStations = livePayload.stations;
-    state.liveAsOf = livePayload.last_updated;
+// flows.json and live_status.json now fail INDEPENDENTLY -- a live-feed
+// hiccup must not take down real historical data, and a historical-data
+// problem must not be masked by fabricating live counts under real
+// station identities. Each settles to a result object instead of
+// rejecting, so Promise.all below can never reject on either of these two
+// (same non-fatal shape as routeReady above, extended to the two
+// previously-required files).
+const flowsReady = fetchJSON('data/flows.json')
+  .then(payload => ({ payload, isDemo: false, error: null }))
+  .catch(error => ({ payload: DEMO_FLOWS_PAYLOAD, isDemo: true, error }));
+
+const liveReady = fetchJSON('data/live_status.json')
+  .then(payload => ({ payload, ok: true }))
+  .catch(error => ({ payload: null, ok: false, error }));
+
+const ready = Promise.all([flowsReady, liveReady, routeReady])
+  .then(([flowsResult, liveResult, routePayload]) => {
+    state.stations = flowsResult.payload.stations;
+    state.liveAvailable = liveResult.ok;
+    state.liveStations = liveResult.ok ? liveResult.payload.stations : {};
+    state.liveAsOf = liveResult.ok ? liveResult.payload.last_updated : null;
     const ids = Object.keys(state.stations);
 
     // Bounding box derived from the real station coordinates in flows.json,
@@ -1148,8 +1298,8 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     // always comes first as the default.
     const periodSelect = document.getElementById('period-select');
     const periods = ['all'];
-    for (const season of payload.granularity.seasons) periods.push(`season:${season}`);
-    for (const month of payload.granularity.months) periods.push(`month:${month}`);
+    for (const season of flowsResult.payload.granularity.seasons) periods.push(`season:${season}`);
+    for (const month of flowsResult.payload.granularity.months) periods.push(`month:${month}`);
     for (const period of periods) {
       const opt = document.createElement('option');
       opt.value = period;
@@ -1158,8 +1308,21 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     }
     periodSelect.value = state.period;
 
+    // mode-live is disabled (not hidden -- unlike route-toggle-wrap, this
+    // is one button in an always-two-button toggle group, and hiding one
+    // side would look broken) whenever live_status.json failed on its own.
+    // The click-listener guard below matters for real browsers too:
+    // .disabled blocks native click dispatch, but the Node test stubs
+    // don't emulate that, so the guard is the actual enforcement in tests.
+    const liveBtn = document.getElementById('mode-live');
+    liveBtn.disabled = !state.liveAvailable;
+    if (!state.liveAvailable) {
+      liveBtn.setAttribute('title', 'Live data unavailable (live_status.json failed to load)');
+    }
+
     drawLegendGradient(state.domainMax);
     renderHour(state.currentHour); // sets initial title/legend/slider text consistently with the markers just drawn
+    if (flowsResult.isDemo) showDemoBanner(describeFetchError(flowsResult.error)); // must run before updateStatusMessage() so the banner isn't hidden immediately after being shown
     updateStatusMessage();
     setInfoTab('legend'); // explicit, not just relying on the static HTML markup to already match state.infoTab's default
 
@@ -1187,7 +1350,10 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     periodSelect.addEventListener('change', event => setPeriod(event.target.value));
 
     document.getElementById('mode-historical').addEventListener('click', () => setMode('historical'));
-    document.getElementById('mode-live').addEventListener('click', () => setMode('live'));
+    document.getElementById('mode-live').addEventListener('click', () => {
+      if (!state.liveAvailable) return; // belt-and-suspenders: liveBtn.disabled already blocks this in a real browser
+      setMode('live');
+    });
 
     document.getElementById('view-individual').addEventListener('click', () => setViewMode('individual'));
     document.getElementById('view-grouped').addEventListener('click', () => setViewMode('grouped'));
@@ -1211,19 +1377,17 @@ const ready = Promise.all([fetchJSON('data/flows.json'), fetchJSON('data/live_st
     stripSvg.addEventListener('pointerleave', clearStripPreview);
   })
   .catch(error => {
+    // flows.json and live_status.json can no longer reject (see
+    // flowsReady/liveReady above -- both settle to a result object, demo
+    // or otherwise), and routeReady already resolves to null on failure.
+    // So this only fires for a genuinely unexpected bug in the .then()
+    // callback itself, not a data-loading problem -- those are all
+    // graceful now. Real error styling (.error) is still correct here,
+    // since this path really does mean something broke.
     const status = document.getElementById('status');
-    // Opening this file directly (file://) makes fetch() reject before ever
-    // reaching a response -- browsers block same-origin file:// reads for
-    // security reasons. That specific case gets a distinct, actionable
-    // message rather than whatever raw (sometimes message-less) rejection
-    // the browser produced, which is what showed up as literal "undefined".
-    if (typeof location !== 'undefined' && location.protocol === 'file:') {
-      status.textContent = 'This dashboard needs to be served over http, not opened directly. Run: python3 -m http.server, then open http://localhost:8000/dashboard.html';
-    } else {
-      status.textContent = `Failed to load dashboard data: ${error && error.message ? error.message : error}`;
-    }
-    status.classList.remove('hidden'); // defensive: updateStatusMessage() never runs on this path, but be explicit
-    status.classList.add('error'); // in-flow banner, never fixed/absolute -- can't overlap a control
+    document.getElementById('status-text').textContent = `Something went wrong loading the dashboard: ${error && error.message ? error.message : error}`;
+    status.classList.remove('hidden');
+    status.classList.add('error');
     console.error(error);
   });
 

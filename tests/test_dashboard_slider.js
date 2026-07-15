@@ -910,9 +910,15 @@ async function main() {
 }
 
 // Separate scenario, separate sandbox: fetch() rejecting the way it does
-// under file:// (no response ever comes back) should produce the
-// actionable "serve this over http" message, not a raw/undefined error --
-// the exact bug reported ("Failed to load data/flows.json: undefined").
+// under file:// (no response ever comes back) affects EVERY fetch equally
+// -- flows.json AND live_status.json both reject, since the file://
+// restriction isn't specific to one file. This is therefore also a live
+// real-world instance of the "both fail together" case, on top of being
+// the file://-specific regression test (the exact bug reported: "Failed to
+// load data/flows.json: undefined"). The actionable "serve this over
+// http" message now lives behind the demo banner's Details toggle, not
+// inline in the main banner text -- see showDemoBanner()/
+// describeFetchError() in dashboard.html.
 async function testFileProtocolFetchFailure() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
   const script = extractInlineScript(html);
@@ -926,16 +932,143 @@ async function testFileProtocolFetchFailure() {
 
   await context.__dashboard.ready;
 
+  const state = context.__dashboard.getState();
+  const elements = sandbox._elements;
+
+  assert.strictEqual(state.demoMode, true, 'flows.json failing under file:// must trigger demo mode');
   assert.strictEqual(
-    sandbox._elements['status'].textContent,
+    elements['status-text'].textContent,
+    'Showing illustrative demo data — flows.json could not be loaded.',
+    'the main banner text must be the plain demo-data statement, not the raw fetch error'
+  );
+  assert.ok(!elements['status'].classList.contains('error'), 'demo mode is informational, not an error -- must not get the red .error treatment');
+  assert.ok(!elements['status'].classList.contains('hidden'), 'the demo banner must stay visible, not get hidden like the normal post-load state');
+  assert.ok(!elements['status-detail-toggle'].classList.contains('hidden'), 'the Details toggle must be revealed once there is a reason to show');
+  assert.ok(elements['status-detail'].classList.contains('hidden'), 'the error detail must be collapsed by default, same rule as model-eval');
+
+  const toggleClick = elements['status-detail-toggle']._listeners.click;
+  assert.ok(toggleClick, 'no click listener registered on the status detail toggle');
+  toggleClick();
+  assert.ok(!elements['status-detail'].classList.contains('hidden'), 'clicking Details should reveal the underlying error');
+  assert.strictEqual(
+    elements['status-detail'].textContent,
     'This dashboard needs to be served over http, not opened directly. Run: python3 -m http.server, then open http://localhost:8000/dashboard.html',
-    'a file:// fetch failure should show the actionable serving instructions, not a raw/undefined error'
+    'the file://-specific actionable message must still exist, just relocated behind the toggle'
   );
+
+  assert.strictEqual(state.liveAvailable, false, 'live_status.json also fails under a blanket file:// rejection');
+  assert.strictEqual(elements['mode-live'].disabled, true, 'the Live tab must be disabled when live_status.json failed');
+  const liveClick = elements['mode-live']._listeners.click;
+  liveClick();
+  assert.strictEqual(state.mode, 'historical', 'clicking a disabled Live tab must not switch modes');
+
+  console.log('file:// fetch-failure (both files) smoke test passed.');
+}
+
+// flows.json fails on its own; live_status.json and route.json both
+// succeed. Confirms the two required files now fail independently: demo
+// mode kicks in for the map/typology/detail-panel machinery, but Live
+// mode -- which only depends on live_status.json, not on state.stations
+// being real -- stays fully enabled and switchable.
+async function testFlowsJsonFailureOnly() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  sandbox.fetch = url => {
+    if (url.includes('flows')) return Promise.reject(new Error('network down'));
+    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
+  };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, flows.json-only failure)' });
+
+  await context.__dashboard.ready;
+
+  const state = context.__dashboard.getState();
+  const elements = sandbox._elements;
+
+  assert.strictEqual(state.demoMode, true);
+  assert.ok(!elements['status'].classList.contains('hidden'), 'demo banner must show');
+  const clusterNames = Object.values(state.stations).map(s => s.cluster_name);
+  assert.ok(clusterNames.includes('Commuter core (fills AM, drains PM)'), 'demo set must cover the real commuter-core cluster label');
+  assert.ok(clusterNames.includes('Residential feeder (drains AM, fills PM)'), 'demo set must cover the real residential-feeder cluster label');
   assert.ok(
-    sandbox._elements['status'].classList.contains('error'),
-    'the banner should get the .error modifier class -- distinct visual treatment from the informational/loading state'
+    clusterNames.includes('Low signal (excluded from clustering)'),
+    'the low-signal demo station must use the exact real cluster_name string, not a paraphrase'
   );
-  console.log('file:// fetch-failure smoke test passed.');
+
+  assert.strictEqual(state.liveAvailable, true, 'live_status.json succeeded on its own and must not be affected by flows.json failing');
+  assert.notStrictEqual(elements['mode-live'].disabled, true, 'Live tab must stay enabled when only flows.json failed');
+  elements['mode-live']._listeners.click();
+  assert.strictEqual(state.mode, 'live', 'Live mode must still be switchable when only flows.json failed');
+
+  console.log('flows.json-only failure (demo banner, Live still works) smoke test passed.');
+}
+
+// live_status.json fails on its own; flows.json and route.json both
+// succeed. Confirms the opposite direction: a live-feed hiccup must not
+// touch real historical data, and must not show the demo banner at all
+// (per instruction -- only flows.json failing shows a banner).
+async function testLiveJsonFailureOnly() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  sandbox.fetch = url => {
+    if (url.includes('live_status')) return Promise.reject(new Error('live feed down'));
+    const payload = url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
+  };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, live_status.json-only failure)' });
+
+  await context.__dashboard.ready;
+
+  const state = context.__dashboard.getState();
+  const elements = sandbox._elements;
+
+  assert.strictEqual(state.demoMode, false, 'a live_status.json failure alone must never trigger demo mode');
+  assert.deepStrictEqual(Object.keys(state.stations).sort(), ['A', 'B', 'C'], 'real flows.json data must load untouched');
+  assert.ok(elements['status'].classList.contains('hidden'), 'no banner at all for a live_status.json-only failure, per instruction');
+
+  assert.strictEqual(state.liveAvailable, false);
+  assert.strictEqual(elements['mode-live'].disabled, true, 'the Live tab must be disabled when live_status.json failed');
+  elements['mode-live']._listeners.click();
+  assert.strictEqual(state.mode, 'historical', 'clicking a disabled Live tab must not switch modes even though historical data is real');
+
+  console.log('live_status.json-only failure (Live hidden, Historical unaffected) smoke test passed.');
+}
+
+// Both required files fail together (a generic double outage, distinct
+// from the file://-specific scenario above): demo banner AND Live
+// disabled, each triggered by its own independent fallback.
+async function testBothFlowsAndLiveFailure() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  sandbox.fetch = url => {
+    if (url.includes('flows') || url.includes('live_status')) return Promise.reject(new Error('network down'));
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(FAKE_ROUTE_PAYLOAD) });
+  };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, both flows and live failure)' });
+
+  await context.__dashboard.ready;
+
+  const state = context.__dashboard.getState();
+  const elements = sandbox._elements;
+
+  assert.strictEqual(state.demoMode, true);
+  assert.ok(!elements['status'].classList.contains('hidden'), 'demo banner must show');
+  assert.strictEqual(state.liveAvailable, false);
+  assert.strictEqual(elements['mode-live'].disabled, true, 'Live tab must be disabled');
+
+  console.log('both flows.json and live_status.json failing together smoke test passed.');
 }
 
 // Separate scenario: route.json specifically 404s while flows.json and
@@ -979,6 +1112,9 @@ async function testRouteJsonMissing() {
 main()
   .then(testFileProtocolFetchFailure)
   .then(testRouteJsonMissing)
+  .then(testFlowsJsonFailureOnly)
+  .then(testLiveJsonFailureOnly)
+  .then(testBothFlowsAndLiveFailure)
   .catch(err => {
     console.error('FAILED:', err.message);
     process.exit(1);

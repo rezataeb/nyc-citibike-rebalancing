@@ -124,6 +124,56 @@ const FAKE_ROUTE_PAYLOAD = {
   ],
 };
 
+// Fake fleet_scenarios.json (Investigator Mode Phase 3) -- two scenarios
+// (fleet sizes 1 and 2) with genuinely different serviced counts so tests
+// can distinguish "which scenario is currently applied," and real
+// trucks[]/stops[] shapes reused straight from build_route_payload's own
+// output shape so buildRouteLayer() (already tested against FAKE_ROUTE_PAYLOAD)
+// can consume a scenario unmodified.
+const FAKE_FLEET_SCENARIOS_PAYLOAD = {
+  fleet_sizes: [1, 2],
+  period: 'all',
+  capacity: 20,
+  max_stops: 45,
+  notes: 'fake fleet scenarios for testing',
+  scenarios: {
+    '1': {
+      period: 'all', capacity: 20, n_trucks_requested: 1, n_trucks_used: 1,
+      n_deficit_flagged: 10, n_surplus_flagged: 6,
+      n_deficit_serviced: 3, n_surplus_serviced: 2,
+      trucks: [
+        {
+          truck: 1, capped: false,
+          stops: [
+            { action: 'pickup', amount: 5, lat: 40.75, lng: -73.98, name: 'Station A', running_load: 5, station_id: 'A' },
+            { action: 'dropoff', amount: 3, lat: 40.76, lng: -73.99, name: 'Station B', running_load: 2, station_id: 'B' },
+          ],
+        },
+      ],
+    },
+    '2': {
+      period: 'all', capacity: 20, n_trucks_requested: 2, n_trucks_used: 2,
+      n_deficit_flagged: 10, n_surplus_flagged: 6,
+      n_deficit_serviced: 5, n_surplus_serviced: 4,
+      trucks: [
+        {
+          truck: 1, capped: false,
+          stops: [
+            { action: 'pickup', amount: 5, lat: 40.75, lng: -73.98, name: 'Station A', running_load: 5, station_id: 'A' },
+            { action: 'dropoff', amount: 3, lat: 40.76, lng: -73.99, name: 'Station B', running_load: 2, station_id: 'B' },
+          ],
+        },
+        {
+          truck: 2, capped: false,
+          stops: [
+            { action: 'pickup', amount: 4, lat: 40.70, lng: -73.95, name: 'Station C', running_load: 4, station_id: 'C' },
+          ],
+        },
+      ],
+    },
+  },
+};
+
 function makeElementStub(id) {
   const el = {
     id,
@@ -251,6 +301,7 @@ function buildSandbox() {
     fetch(url) {
       let payload = FAKE_PAYLOAD;
       if (url.includes('live_status')) payload = FAKE_LIVE_PAYLOAD;
+      else if (url.includes('fleet_scenarios')) payload = FAKE_FLEET_SCENARIOS_PAYLOAD;
       else if (url.includes('route')) payload = FAKE_ROUTE_PAYLOAD;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
     },
@@ -1072,7 +1123,9 @@ async function testFlowsJsonFailureOnly() {
   const sandbox = buildSandbox();
   sandbox.fetch = url => {
     if (url.includes('flows')) return Promise.reject(new Error('network down'));
-    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
+    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
+      : url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
+      : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
 
@@ -1113,7 +1166,8 @@ async function testLiveJsonFailureOnly() {
   const sandbox = buildSandbox();
   sandbox.fetch = url => {
     if (url.includes('live_status')) return Promise.reject(new Error('live feed down'));
-    const payload = url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
+    const payload = url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
+      : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
 
@@ -1147,7 +1201,8 @@ async function testBothFlowsAndLiveFailure() {
   const sandbox = buildSandbox();
   sandbox.fetch = url => {
     if (url.includes('flows') || url.includes('live_status')) return Promise.reject(new Error('network down'));
-    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(FAKE_ROUTE_PAYLOAD) });
+    const payload = url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD : FAKE_ROUTE_PAYLOAD;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
 
   const context = vm.createContext(sandbox);
@@ -1166,17 +1221,68 @@ async function testBothFlowsAndLiveFailure() {
   console.log('both flows.json and live_status.json failing together smoke test passed.');
 }
 
-// Separate scenario: route.json specifically 404s while flows.json and
-// live_status.json both succeed -- confirms graceful degradation (the
-// route control simply never appears, nothing else on the dashboard is
-// affected) rather than either crashing or silently substituting
-// something in the missing file's place.
-async function testRouteJsonMissing() {
+// Separate scenario: BOTH route.json and fleet_scenarios.json 404 while
+// flows.json and live_status.json succeed -- confirms graceful degradation
+// (route toggle AND fleet-sim sub-section both disappear, nothing else on
+// the dashboard is affected) rather than either crashing or silently
+// substituting something in the missing files' place. Since Investigator
+// Mode Phase 3, the route toggle's visibility depends on EITHER source
+// succeeding (see the next test for that case) -- this test covers the
+// case where neither does.
+async function testRouteAndFleetScenariosMissing() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
   const script = extractInlineScript(html);
 
   const sandbox = buildSandbox();
   sandbox.fetch = url => {
+    if (url.includes('route') || url.includes('fleet_scenarios')) {
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error('not found')) });
+    }
+    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD : FAKE_PAYLOAD;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
+  };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, route+fleet-scenarios missing scenario)' });
+
+  await context.__dashboard.ready;
+
+  const state = context.__dashboard.getState();
+  assert.strictEqual(state.route, null, 'a route.json fetch failure should resolve to null, not throw or reject the whole load');
+  assert.strictEqual(state.routeLayer, null, 'no route layer should be built when route.json is missing');
+  assert.strictEqual(state.fleetScenarios, null, 'a fleet_scenarios.json fetch failure should resolve to null too');
+  assert.ok(
+    sandbox._elements['route-toggle-wrap'].classList.contains('hidden'),
+    'the route toggle control must not appear when NEITHER route.json nor fleet_scenarios.json is available'
+  );
+  assert.ok(
+    sandbox._elements['fleet-sim-wrap'].classList.contains('hidden'),
+    'the fleet-sim sub-section must not appear when fleet_scenarios.json is missing'
+  );
+  assert.strictEqual(Object.keys(state.markers).length, 3, 'the rest of the dashboard should load completely normally even though both failed');
+  assert.ok(
+    sandbox._elements['status'].classList.contains('hidden'),
+    'route.json/fleet_scenarios.json being missing alone must not trigger the fatal error banner -- only flows.json/live_status.json failures do that'
+  );
+  console.log('route.json+fleet_scenarios.json-missing graceful-degradation smoke test passed.');
+}
+
+// Separate scenario: route.json specifically 404s but fleet_scenarios.json
+// succeeds -- the route toggle must still appear (Investigator Mode's
+// fleet-size slider can drive it independently of the historical
+// route.json), but state.route/routeLayer stay null until the user
+// actually moves the fleet slider (loading fleet_scenarios.json alone must
+// not silently swap the map's route display out from under someone who
+// never opens Investigator Mode).
+async function testRouteJsonMissingButFleetScenariosPresent() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  sandbox.fetch = url => {
+    if (url.includes('fleet_scenarios')) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(FAKE_FLEET_SCENARIOS_PAYLOAD) });
+    }
     if (url.includes('route')) {
       return Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error('not found')) });
     }
@@ -1185,28 +1291,49 @@ async function testRouteJsonMissing() {
   };
 
   const context = vm.createContext(sandbox);
-  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, route.json missing scenario)' });
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, route.json missing but fleet_scenarios.json present)' });
 
   await context.__dashboard.ready;
 
   const state = context.__dashboard.getState();
-  assert.strictEqual(state.route, null, 'a route.json fetch failure should resolve to null, not throw or reject the whole load');
-  assert.strictEqual(state.routeLayer, null, 'no route layer should be built when route.json is missing');
-  assert.ok(
-    sandbox._elements['route-toggle-wrap'].classList.contains('hidden'),
-    'the route toggle control must not appear at all when route.json is missing -- graceful degradation, same rule as every other analysis layer'
+  const elements = sandbox._elements;
+
+  assert.strictEqual(state.route, null, 'route.json failing must still resolve to null');
+  assert.strictEqual(state.routeLayer, null);
+  assert.ok(!elements['route-toggle-wrap'].classList.contains('hidden'), 'the route toggle must appear when fleet_scenarios.json alone succeeded');
+  assert.ok(!elements['fleet-sim-wrap'].classList.contains('hidden'));
+
+  // Fleet slider's own initial state must be explicit (same standing-rule
+  // check as the equity sliders).
+  assert.strictEqual(elements['fleet-size-slider'].value, '1');
+  assert.strictEqual(elements['fleet-size-value'].textContent, '1');
+  assert.strictEqual(
+    elements['fleet-stats'].textContent,
+    '7 of 10 deficit stations still unserved (3 cleared); 4 of 6 surplus stations still unserved (2 cleared).'
   );
-  assert.strictEqual(Object.keys(state.markers).length, 3, 'the rest of the dashboard should load completely normally even though route.json failed');
-  assert.ok(
-    sandbox._elements['status'].classList.contains('hidden'),
-    'route.json being missing alone must not trigger the fatal error banner -- only flows.json/live_status.json failures do that'
+
+  // Moving the fleet slider is what actually populates state.route/
+  // routeLayer -- it must NOT have happened just from loading the page.
+  const fleetInput = elements['fleet-size-slider']._listeners.input;
+  assert.ok(fleetInput, 'no input listener registered on the fleet-size slider');
+  fleetInput({ target: { value: '2' } });
+  assert.strictEqual(state.investigatorState.fleetSize, 2);
+  assert.strictEqual(state.route.n_trucks_requested, 2, 'moving the slider to fleet size 2 must apply that scenario');
+  assert.strictEqual(state.route.n_deficit_serviced, 5);
+  assert.ok(state.routeLayer, 'a route layer must be built for the newly-applied scenario');
+  assert.strictEqual(state.routeVisible, true, 'moving the fleet slider must auto-show the route, same as clicking Simulate would');
+  assert.strictEqual(
+    elements['fleet-stats'].textContent,
+    '5 of 10 deficit stations still unserved (5 cleared); 2 of 6 surplus stations still unserved (4 cleared).'
   );
-  console.log('route.json-missing graceful-degradation smoke test passed.');
+
+  console.log('route.json-missing-but-fleet-scenarios-present smoke test passed.');
 }
 
 main()
   .then(testFileProtocolFetchFailure)
-  .then(testRouteJsonMissing)
+  .then(testRouteAndFleetScenariosMissing)
+  .then(testRouteJsonMissingButFleetScenariosPresent)
   .then(testFlowsJsonFailureOnly)
   .then(testLiveJsonFailureOnly)
   .then(testBothFlowsAndLiveFailure)

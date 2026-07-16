@@ -1510,11 +1510,219 @@ async function testWeatherScenarioFallsBackToTypologyElasticity() {
   console.log('weather-scenario typology-fallback smoke test passed.');
 }
 
+// Investigator Mode Phase 6: diff bar, save/load preset, reset to
+// baseline. Separate dedicated test so it can freely drive all three
+// controls together without interfering with main()'s own sequencing.
+async function testInvestigatorModeDiffBarAndPresets() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, Phase 6 diff bar/presets)' });
+
+  await context.__dashboard.ready;
+  const dash = context.__dashboard;
+  const elements = sandbox._elements;
+
+  // Untouched AND collapsed: diff bar must not exist visually (zero
+  // height), same "don't cost vertical space in the common case" rule as
+  // every other card in this sidebar.
+  assert.ok(elements['investigator-diff-bar'].classList.contains('hidden'), 'diff bar must be hidden before anything is adjusted');
+
+  // Discoverability check: EXPANDING the panel alone (nothing adjusted
+  // yet) must reveal the diff bar too, showing real baseline==scenario
+  // lines -- otherwise a reviewer who never touches a control first has
+  // zero visual cue this feature exists at all. Confirmed real numbers
+  // are shown, not a placeholder: at the (still-default) 300m threshold,
+  // baseline and scenario union counts are both 2.
+  const investigatorClick = elements['investigator-toggle']._listeners.click;
+  investigatorClick();
+  assert.ok(!elements['investigator-diff-bar'].classList.contains('hidden'), 'expanding the panel alone must reveal the diff bar, even at baseline');
+  assert.strictEqual(elements['diff-equity'].textContent, 'Equity (≤300m/800m default): 2 baseline → 2 scenario');
+  // Collapsing again, still untouched, must hide it again -- expansion
+  // alone doesn't permanently pin it open.
+  investigatorClick();
+  assert.ok(elements['investigator-diff-bar'].classList.contains('hidden'), 'collapsing while still at baseline must hide the diff bar again');
+  investigatorClick(); // re-expand for the rest of this test, which drives real slider/select interactions
+
+  // --- Equity: default (300m) union count is 2 (A, B -- see the main()
+  // equity assertions), moving the slider to 2000m makes it 3.
+  const nychaSchoolInput = elements['nycha-school-slider']._listeners.input;
+  nychaSchoolInput({ target: { value: '2000' } });
+  assert.ok(!elements['investigator-diff-bar'].classList.contains('hidden'), 'diff bar must appear once equity threshold changes');
+  assert.strictEqual(elements['diff-equity'].textContent, 'Equity (≤300m/800m default): 2 baseline → 3 scenario');
+
+  // --- Fleet: FAKE_FLEET_SCENARIOS_PAYLOAD scenario 1 has
+  // n_deficit_flagged=10/n_deficit_serviced=3 (remaining 7); scenario 2
+  // has n_deficit_serviced=5 (remaining 5). Baseline is always the flagged
+  // count (0 trucks), not scenario 1.
+  const fleetInput = elements['fleet-size-slider']._listeners.input;
+  fleetInput({ target: { value: '2' } });
+  assert.strictEqual(elements['diff-fleet'].textContent, 'Fleet (0 trucks default): 10 baseline → 5 scenario (2 truck(s))');
+
+  // --- Weather: selecting snow_day.
+  const presetChange = elements['weather-preset-select']._listeners.change;
+  presetChange({ target: { value: 'snow_day' } });
+  assert.strictEqual(elements['diff-weather'].textContent, 'Weather (ideal default): Snow event');
+
+  // --- Save preset: URL contains the real current state, round-trips
+  // through JSON exactly.
+  const url = dash.buildShareableUrl();
+  assert.ok(url.includes('scenario='), 'shareable URL must contain the scenario query param');
+  const roundTripped = dash.parsePresetInput(url);
+  assert.strictEqual(roundTripped.equityThresholds.nycha_school_m, 2000);
+  assert.strictEqual(roundTripped.fleetSize, 2);
+  assert.strictEqual(roundTripped.weatherScenario.presetId, 'snow_day');
+
+  // --- Reset to baseline: every control must return to its own default,
+  // not just visually but in state. The diff bar itself STAYS visible
+  // here (not hidden) because the panel is still expanded from the
+  // discoverability check earlier in this test -- expanding pins it
+  // visible regardless of baseline state, by design (see renderDiffBar()).
+  // Content should read baseline==scenario for all three now.
+  dash.resetToBaseline();
+  assert.ok(!elements['investigator-diff-bar'].classList.contains('hidden'), 'diff bar must stay visible after reset while the panel is still expanded');
+  assert.strictEqual(elements['diff-equity'].textContent, 'Equity (≤300m/800m default): 2 baseline → 2 scenario', 'reset equity threshold must read as unchanged from baseline');
+  const state = dash.getState();
+  assert.strictEqual(state.investigatorState.equityThresholds.nycha_school_m, 300);
+  assert.strictEqual(state.investigatorState.fleetSize, 1);
+  assert.strictEqual(state.investigatorState.weatherScenario.presetId, 'ideal');
+  assert.strictEqual(elements['nycha-school-slider'].value, '300');
+  assert.strictEqual(elements['fleet-size-slider'].value, '1');
+  assert.strictEqual(elements['weather-preset-select'].value, 'ideal');
+
+  // Collapsing NOW (at baseline, post-reset) must hide the bar -- the
+  // other half of the "expanded OR non-default" visibility rule.
+  investigatorClick();
+  assert.ok(elements['investigator-diff-bar'].classList.contains('hidden'), 'collapsed + at baseline must hide the diff bar even after having been shown before');
+  investigatorClick(); // re-expand for the remainder of this test
+
+  // --- Forward/backward compatibility: a preset object with a
+  // dockOverrides key (simulating one saved after Phase 5 eventually adds
+  // it) must not crash and must not be silently misapplied to the three
+  // real fields; a preset MISSING dockOverrides entirely (every preset
+  // saved today, since Phase 5 is deferred) must load with no error at
+  // all -- confirmed explicitly, not just assumed from absence of a crash
+  // elsewhere in this test.
+  assert.doesNotThrow(() => {
+    dash.applyInvestigatorState({
+      equityThresholds: { nycha_school_m: 500, subway_gap_m: 900 },
+      fleetSize: 2, // a real scenario FAKE_FLEET_SCENARIOS_PAYLOAD actually has
+      weatherScenario: { temp_c: 15.6, precip_mm: 10.2, presetId: 'rain_day' },
+      dockOverrides: { A: 25 }, // unknown field -- must be ignored, not applied or errored on
+    });
+  }, 'a preset with an unknown dockOverrides key must not crash Load Preset');
+  assert.strictEqual(dash.getState().investigatorState.equityThresholds.nycha_school_m, 500, 'the three real fields must still apply correctly alongside an ignored unknown key');
+  assert.doesNotThrow(() => {
+    dash.applyInvestigatorState({ fleetSize: 2 }); // no equityThresholds, no weatherScenario, no dockOverrides at all
+  }, 'a partial preset missing dockOverrides (and other fields) entirely must load without error');
+  assert.strictEqual(dash.getState().investigatorState.fleetSize, 2);
+
+  // A pasted preset requesting a fleet size FAKE_FLEET_SCENARIOS_PAYLOAD
+  // doesn't actually have (only 1/2 exist here, matching how a real
+  // version-mismatched or malformed shared link could reference a
+  // fleetSize outside whatever fleet_scenarios.json currently covers)
+  // must degrade gracefully -- no crash, no state change -- rather than
+  // taking down the whole page. Real bug caught by this exact test before
+  // the guard was added (a first draft of this test used fleetSize:3
+  // here without realizing the fixture didn't have it, and it crashed).
+  assert.doesNotThrow(() => {
+    dash.applyInvestigatorState({ fleetSize: 3 });
+  }, 'an out-of-range fleetSize must not crash Load Preset');
+  assert.strictEqual(dash.getState().investigatorState.fleetSize, 2, 'an out-of-range fleetSize must be silently skipped, not applied as garbage');
+
+  // --- Validation parity: the URL preset is the one place fully
+  // external, unvalidated input reaches app state directly -- equityThresholds
+  // and weatherScenario get the same treatment fleetSize did, not just
+  // the one field that happened to crash first. None of these throw, and
+  // none of them corrupt state with NaN/negative/unrecognized values.
+  // Compared field-by-field, not via deepStrictEqual against a snapshot --
+  // same cross-realm gotcha documented in Sessions 20A/23: an object
+  // returned from inside the vm-executed dashboard script is never
+  // deepStrictEqual-equal to a fresh object built in the outer Node test
+  // realm (e.g. via JSON.parse here), even with identical values.
+  const equityBefore = dash.getState().investigatorState.equityThresholds;
+  const nychaBefore = equityBefore.nycha_school_m;
+  const gapBefore = equityBefore.subway_gap_m;
+
+  assert.doesNotThrow(() => {
+    dash.applyInvestigatorState({ equityThresholds: { nycha_school_m: NaN, subway_gap_m: 800 } });
+  }, 'a NaN equity threshold must not crash');
+  assert.strictEqual(dash.getState().investigatorState.equityThresholds.nycha_school_m, nychaBefore, 'a NaN equity threshold must be skipped entirely, not partially applied');
+  assert.strictEqual(dash.getState().investigatorState.equityThresholds.subway_gap_m, gapBefore);
+
+  assert.doesNotThrow(() => {
+    dash.applyInvestigatorState({ equityThresholds: { nycha_school_m: -100, subway_gap_m: 800 } });
+  }, 'a negative equity threshold must not crash');
+  assert.strictEqual(dash.getState().investigatorState.equityThresholds.nycha_school_m, nychaBefore, 'a negative equity threshold must be skipped, not silently accepted');
+
+  assert.doesNotThrow(() => {
+    dash.applyInvestigatorState({ equityThresholds: {} }); // missing both fields entirely
+  }, 'an equityThresholds object missing its own fields must not crash');
+  assert.strictEqual(dash.getState().investigatorState.equityThresholds.nycha_school_m, nychaBefore);
+
+  const weatherBefore = dash.getState().investigatorState.weatherScenario;
+  const tempBefore = weatherBefore.temp_c;
+  const precipBefore = weatherBefore.precip_mm;
+
+  assert.doesNotThrow(() => {
+    dash.applyInvestigatorState({ weatherScenario: { temp_c: NaN, precip_mm: 0, presetId: 'ideal' } });
+  }, 'a NaN weather temp must not crash');
+  assert.strictEqual(dash.getState().investigatorState.weatherScenario.temp_c, tempBefore, 'a NaN weather temp must be skipped entirely');
+
+  assert.doesNotThrow(() => {
+    dash.applyInvestigatorState({ weatherScenario: { temp_c: 20, precip_mm: -5, presetId: 'ideal' } });
+  }, 'negative precipitation must not crash');
+  assert.strictEqual(dash.getState().investigatorState.weatherScenario.precip_mm, precipBefore, 'negative precipitation must be skipped, not silently accepted');
+
+  // An invalid presetId is a softer case -- it's cosmetic labeling only,
+  // so the temp/precip values (if otherwise valid) still apply, but the
+  // bogus id itself is normalized to null rather than stored verbatim.
+  dash.applyInvestigatorState({ weatherScenario: { temp_c: 10, precip_mm: 5, presetId: 'not_a_real_preset_id' } });
+  assert.strictEqual(dash.getState().investigatorState.weatherScenario.presetId, null, 'an unrecognized presetId must be normalized to null, not stored as-is');
+  assert.strictEqual(dash.getState().investigatorState.weatherScenario.temp_c, 10, 'valid temp/precip alongside a bad presetId must still apply');
+
+  console.log('Investigator Mode Phase 6 diff bar/presets smoke test passed.');
+}
+
+// Separate scenario: a shared scenario URL applied automatically on page
+// load (not via a button click) -- "reload the page, load the preset
+// back, confirm state restores exactly" (Guideline's own verify step)
+// via a real link.
+async function testSharedScenarioUrlAppliesOnLoad() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sharedState = {
+    equityThresholds: { nycha_school_m: 100, subway_gap_m: 200 },
+    fleetSize: 2,
+    weatherScenario: { temp_c: -2.2, precip_mm: 7.6, presetId: 'snow_day' },
+  };
+  const sandbox = buildSandbox();
+  sandbox.location = { search: `?scenario=${encodeURIComponent(JSON.stringify(sharedState))}` };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, shared-URL scenario)' });
+
+  await context.__dashboard.ready;
+  const state = context.__dashboard.getState();
+
+  assert.strictEqual(state.investigatorState.equityThresholds.nycha_school_m, 100);
+  assert.strictEqual(state.investigatorState.fleetSize, 2);
+  assert.strictEqual(state.investigatorState.weatherScenario.presetId, 'snow_day');
+  assert.ok(!sandbox._elements['investigator-diff-bar'].classList.contains('hidden'), 'a non-default shared scenario must show the diff bar immediately on load');
+
+  console.log('shared-scenario-URL-applies-on-load smoke test passed.');
+}
+
 main()
   .then(testFileProtocolFetchFailure)
   .then(testRouteAndFleetScenariosMissing)
   .then(testRouteJsonMissingButFleetScenariosPresent)
   .then(testWeatherScenarioFallsBackToTypologyElasticity)
+  .then(testInvestigatorModeDiffBarAndPresets)
+  .then(testSharedScenarioUrlAppliesOnLoad)
   .then(testFlowsJsonFailureOnly)
   .then(testLiveJsonFailureOnly)
   .then(testBothFlowsAndLiveFailure)

@@ -155,6 +155,17 @@
   #weather-preset-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 11px; padding: 5px 6px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 10px; }
   #weather-scenario-note { margin-top: 6px; color: #898781; line-height: 1.4; font-style: italic; }
   #weather-scenario-status { margin-top: 4px; color: #52514e; line-height: 1.6; }
+
+  /* Diff bar sits OUTSIDE #investigator-content (a sibling of the toggle
+     button, not a child of the collapsible div) so it stays visible even
+     when the panel is collapsed -- the whole point is a persistent
+     summary of active adjustments. Hidden entirely (zero height) when
+     every control is at baseline, same "don't cost vertical space in the
+     common case" rule as every other card in this sidebar. */
+  #investigator-diff-bar { margin-top: 8px; padding: 8px 10px; font-size: 11px; line-height: 1.6; color: #52514e; background: #f9f9f7; border: 1px solid #d8d7d3; border-radius: 8px; }
+  #preset-controls { margin-top: 4px; }
+  #preset-controls input[type="text"] { width: 100%; box-sizing: border-box; font: inherit; font-size: 11px; padding: 5px 6px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin: 6px 0; }
+  #preset-controls .day-btn { margin-right: 4px; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -246,6 +257,11 @@
 
   <div id="investigator-panel">
     <button id="investigator-toggle">Investigator mode &#9656;</button>
+    <div id="investigator-diff-bar" class="hidden">
+      <div id="diff-equity"></div>
+      <div id="diff-fleet"></div>
+      <div id="diff-weather"></div>
+    </div>
     <div id="investigator-content" class="hidden">
       <div class="control-label">Equity thresholds</div>
       <div class="investigator-slider">
@@ -290,6 +306,15 @@
         </div>
         <div id="weather-scenario-status"></div>
         <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
+      </div>
+
+      <div class="control-label spaced">Save / load / reset</div>
+      <div id="preset-controls">
+        <button id="save-preset-btn" class="day-btn">Save preset (get link)</button>
+        <button id="reset-baseline-btn" class="day-btn">Reset to baseline</button>
+        <input type="text" id="preset-url-output" readonly placeholder="Shareable link appears here after Save">
+        <input type="text" id="preset-load-input" placeholder="Paste a shared link here">
+        <button id="load-preset-btn" class="day-btn">Load preset</button>
       </div>
     </div>
   </div>
@@ -689,6 +714,24 @@ function setRouteVisible(visible) {
   applyRouteVisibility();
 }
 
+// Factored out (not just inlined into state's own initializer below) so
+// Phase 6's "Reset to baseline" control can produce the exact same
+// defaults without retyping the magic numbers a second place they could
+// drift out of sync -- returns a fresh object each call, never a shared
+// reference, so resetting can't accidentally alias into whatever the
+// live state object currently is.
+function defaultInvestigatorState() {
+  return {
+    equityThresholds: { nycha_school_m: 300, subway_gap_m: 800 }, // CLAUDE.md's fixed defaults
+    fleetSize: 1, // Phase 3 -- 1..10 trucks, matches fleet_scenarios.json's own fleet_sizes range
+    // Phase 4 -- defaults to the 'ideal' preset's own values, which is
+    // also the fixed reference point the projection subtracts against,
+    // so the default state produces exactly zero adjustment (not just
+    // approximately) until the user actually picks something else.
+    weatherScenario: { temp_c: 22.2, precip_mm: 0.0, presetId: 'ideal' },
+  };
+}
+
 // Dashboard state, kept in one place (rather than scattered closure
 // variables) so the Node smoke test can inspect it via the test hook below.
 const state = {
@@ -717,15 +760,7 @@ const state = {
   // contract's investigatorState shape -- equityThresholds is Phase 1 (well,
   // Phase 2)'s only field; fleetSize/weatherScenario/dockOverrides join it
   // in later phases rather than each getting a separate ad hoc variable.
-  investigatorState: {
-    equityThresholds: { nycha_school_m: 300, subway_gap_m: 800 }, // CLAUDE.md's fixed defaults
-    fleetSize: 1, // Phase 3 -- 1..10 trucks, matches fleet_scenarios.json's own fleet_sizes range
-    // Phase 4 -- defaults to the 'ideal' preset's own values, which is
-    // also the fixed reference point the projection subtracts against,
-    // so the default state produces exactly zero adjustment (not just
-    // approximately) until the user actually picks something else.
-    weatherScenario: { temp_c: 22.2, precip_mm: 0.0, presetId: 'ideal' },
-  },
+  investigatorState: defaultInvestigatorState(),
   fleetScenarios: null, // raw fleet_scenarios.json payload, or null if it failed/wasn't generated -- graceful degradation, same rule as route.json
   elasticities: null, // raw elasticities.json payload, or null if missing -- Phase 4's weather-scenario projection needs this
   scenarioPresets: null, // raw scenario_presets.json payload, or null if missing
@@ -749,6 +784,7 @@ function setInvestigatorExpanded(expanded) {
   state.investigatorExpanded = expanded;
   document.getElementById('investigator-content').classList.toggle('hidden', !expanded);
   document.getElementById('investigator-toggle').textContent = `Investigator mode ${expanded ? '▾' : '▸'}`;
+  renderDiffBar(); // expanding must reveal the diff bar even at baseline -- see renderDiffBar()'s own comment on why
 }
 
 // Pure function, no DOM/Leaflet -- recomputes equity flags CLIENT-SIDE from
@@ -818,6 +854,7 @@ function renderEquityCounts() {
 function setEquityThreshold(key, value) {
   state.investigatorState.equityThresholds[key] = value;
   renderEquityCounts();
+  renderDiffBar();
 }
 
 // Fleet simulator (Phase 3): reads a precomputed scenario for the selected
@@ -861,6 +898,219 @@ function setFleetSize(fleetSize) {
   state.investigatorState.fleetSize = fleetSize;
   renderFleetStats(fleetSize);
   applyFleetScenarioToRoute(fleetSize);
+  renderDiffBar();
+}
+
+// ---- Investigator Mode Phase 6: diff bar, presets, reset ----
+
+// "Baseline" per section reuses each phase's own existing convention
+// (confirmed with the user) rather than inventing new diff-bar-specific
+// semantics: equity = CLAUDE.md's fixed 300m/800m defaults, weather =
+// the 'ideal' reference preset, fleet = 0 trucks (the flagged count
+// before any truck runs -- the same "Y" renderFleetStats() already uses
+// as its own "before" number, not a lookup into a nonexistent scenario
+// "0"). EQUITY_BASELINE_THRESHOLDS is intentionally its own constant,
+// not read from state.investigatorState -- the whole point is a FIXED
+// reference independent of whatever the user's sliders currently show.
+const EQUITY_BASELINE_THRESHOLDS = { nycha_school_m: 300, subway_gap_m: 800 };
+
+// Whether ANY of the three real controls has moved from its own default
+// -- gates the whole diff bar's visibility (zero height when nothing's
+// been explored yet, same "don't cost vertical space in the common
+// case" rule as every other card in this sidebar). Deliberately compares
+// against defaultInvestigatorState() (each field's OWN default), not
+// against the diff-bar's per-section baseline concept above -- fleetSize
+// is always >=1 by construction, so comparing it to "0 trucks" would
+// make this always true even completely untouched.
+function investigatorStateDiffersFromDefault() {
+  const current = state.investigatorState;
+  const def = defaultInvestigatorState();
+  const equityChanged = current.equityThresholds.nycha_school_m !== def.equityThresholds.nycha_school_m
+    || current.equityThresholds.subway_gap_m !== def.equityThresholds.subway_gap_m;
+  const fleetChanged = current.fleetSize !== def.fleetSize;
+  const weatherChanged = current.weatherScenario.temp_c !== def.weatherScenario.temp_c
+    || current.weatherScenario.precip_mm !== def.weatherScenario.precip_mm;
+  return equityChanged || fleetChanged || weatherChanged;
+}
+
+// Renders all three lines together whenever the bar is shown (not just
+// whichever control actually changed) -- "confirm diff bar reflects the
+// compound effect" (Guideline's own verify step) means seeing all three
+// side by side, even if one line shows no change. Each section degrades
+// independently if its own data source never loaded, same graceful-
+// degradation rule as every other optional layer.
+function renderDiffBar() {
+  const bar = document.getElementById('investigator-diff-bar');
+  // Visible whenever the panel is EXPANDED (even if every control is
+  // still at its own default) OR whenever something differs from
+  // baseline even after the panel is collapsed again. This was NOT a
+  // deliberate discoverability-vs-simplicity tradeoff in the first
+  // draft -- it defaulted to "hide when nothing to show," matching the
+  // OTHER investigator sub-sections (route/fleet/weather), without
+  // weighing that those hide because their DATA is genuinely absent,
+  // while the diff bar's default-hidden state was hiding a fully
+  // working feature just because nothing had been touched yet. A
+  // reviewer who never adjusts a control first would have had zero
+  // visual cue this existed. Fixed: expanding the panel is already an
+  // explicit user action allowed to cost vertical space (same rule
+  // model-eval-content/investigator-content themselves already follow),
+  // so showing the diff bar there too -- even displaying "297 baseline
+  // -> 297 scenario" style lines where nothing has changed yet -- costs
+  // nothing extra and teaches the feature by direct encounter. Hidden
+  // only when BOTH collapsed AND at baseline.
+  if (!state.investigatorExpanded && !investigatorStateDiffersFromDefault()) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+
+  const equityBaseline = computeEquityCounts(state.stations, EQUITY_BASELINE_THRESHOLDS);
+  const equityScenario = computeEquityCounts(state.stations, state.investigatorState.equityThresholds);
+  document.getElementById('diff-equity').textContent =
+    `Equity (≤300m/800m default): ${equityBaseline.nychaOrSchoolCount.toLocaleString()} baseline → ${equityScenario.nychaOrSchoolCount.toLocaleString()} scenario`;
+
+  const fleetEl = document.getElementById('diff-fleet');
+  if (state.fleetScenarios) {
+    const fleetSize = state.investigatorState.fleetSize;
+    const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
+    const flagged = scenario.n_deficit_flagged;
+    const remaining = flagged - scenario.n_deficit_serviced;
+    fleetEl.textContent =
+      `Fleet (0 trucks default): ${flagged.toLocaleString()} baseline → ${remaining.toLocaleString()} scenario (${fleetSize} truck(s))`;
+  } else {
+    fleetEl.textContent = 'Fleet: fleet_scenarios.json unavailable';
+  }
+
+  const weatherEl = document.getElementById('diff-weather');
+  if (state.scenarioPresets) {
+    const label = isBaselineWeatherScenario()
+      ? 'ideal (baseline)'
+      : (matchingWeatherPreset() ? matchingWeatherPreset().label : 'custom scenario');
+    weatherEl.textContent = `Weather (ideal default): ${label}`;
+  } else {
+    weatherEl.textContent = 'Weather: scenario_presets.json unavailable';
+  }
+}
+
+// Applies a (possibly partial) investigatorState object -- from a loaded
+// preset or a page-load ?scenario= param -- by delegating to the SAME
+// state-mutation functions manual interaction already uses
+// (setEquityThreshold-equivalent updates/setFleetSize/the weather
+// re-render path), so there is exactly one code path for "the equity
+// threshold changed," not two that could drift apart. A missing key
+// (e.g. dockOverrides, which doesn't exist as a real field yet -- Phase
+// 5 is deferred, see PROGRESS.md's Deferred list) is simply never read
+// here at all, not an error and not defaulted to a placeholder -- a
+// preset saved today will keep loading correctly once Phase 5
+// eventually adds that key back to the real schema.
+// Rejects NaN/undefined/strings/Infinity alike -- the URL preset (and a
+// pasted Load Preset blob) is the one place in this dashboard where
+// fully external, unvalidated input reaches app state directly, so every
+// field below is validated the same way fleetSize's own crash fix
+// established: malformed input is silently skipped for that section,
+// never applied as NaN/garbage and never allowed to throw.
+function isFiniteNumber(x) {
+  return typeof x === 'number' && Number.isFinite(x);
+}
+
+function applyInvestigatorState(loaded) {
+  if (
+    loaded && loaded.equityThresholds
+    && isFiniteNumber(loaded.equityThresholds.nycha_school_m) && loaded.equityThresholds.nycha_school_m >= 0
+    && isFiniteNumber(loaded.equityThresholds.subway_gap_m) && loaded.equityThresholds.subway_gap_m >= 0
+  ) {
+    state.investigatorState.equityThresholds = {
+      nycha_school_m: loaded.equityThresholds.nycha_school_m,
+      subway_gap_m: loaded.equityThresholds.subway_gap_m,
+    };
+    const nychaSchoolSlider = document.getElementById('nycha-school-slider');
+    const subwayGapSlider = document.getElementById('subway-gap-slider');
+    nychaSchoolSlider.value = String(loaded.equityThresholds.nycha_school_m);
+    document.getElementById('nycha-school-value').textContent = String(loaded.equityThresholds.nycha_school_m);
+    subwayGapSlider.value = String(loaded.equityThresholds.subway_gap_m);
+    document.getElementById('subway-gap-value').textContent = String(loaded.equityThresholds.subway_gap_m);
+    if (state.stations) renderEquityCounts();
+  }
+
+  // A malformed or version-mismatched fleetSize (e.g. shared before
+  // fleet_scenarios.json's own range changed) must degrade gracefully,
+  // not crash the page. Checked against the CURRENT fleet_scenarios.json's
+  // own scenarios, not just "is it a number."
+  if (loaded && loaded.fleetSize && state.fleetScenarios && state.fleetScenarios.scenarios[String(loaded.fleetSize)]) {
+    document.getElementById('fleet-size-slider').value = String(loaded.fleetSize);
+    document.getElementById('fleet-size-value').textContent = String(loaded.fleetSize);
+    setFleetSize(loaded.fleetSize); // also calls renderDiffBar(), but a second call below is harmless (idempotent)
+  }
+
+  if (
+    loaded && loaded.weatherScenario && state.elasticities && state.scenarioPresets
+    && isFiniteNumber(loaded.weatherScenario.temp_c)
+    && isFiniteNumber(loaded.weatherScenario.precip_mm) && loaded.weatherScenario.precip_mm >= 0
+  ) {
+    // presetId is cosmetic labeling only -- matchingWeatherPreset() looks
+    // stations up by temp_c/precip_mm VALUES, never by this id -- so an
+    // unrecognized id is normalized to null (reads as "custom scenario"
+    // in the status line) rather than rejecting the whole section over a
+    // bad label.
+    const knownPresetId = state.scenarioPresets.presets.some(p => p.id === loaded.weatherScenario.presetId)
+      ? loaded.weatherScenario.presetId
+      : null;
+    state.investigatorState.weatherScenario = {
+      temp_c: loaded.weatherScenario.temp_c,
+      precip_mm: loaded.weatherScenario.precip_mm,
+      presetId: knownPresetId,
+    };
+    const tempF = Math.round(loaded.weatherScenario.temp_c * 9 / 5 + 32);
+    const precipIn = mmToInches(loaded.weatherScenario.precip_mm);
+    document.getElementById('weather-preset-select').value = knownPresetId || '';
+    document.getElementById('weather-temp-slider').value = String(tempF);
+    document.getElementById('weather-temp-value').textContent = String(tempF);
+    document.getElementById('weather-precip-slider').value = precipIn.toFixed(2);
+    document.getElementById('weather-precip-value').textContent = precipIn.toFixed(1);
+    renderHour(state.currentHour);
+    updateStatusMessage();
+    renderWeatherScenarioStatus();
+  }
+
+  renderDiffBar();
+}
+
+function resetToBaseline() {
+  applyInvestigatorState(defaultInvestigatorState());
+}
+
+const PRESET_QUERY_PARAM = 'scenario';
+
+function buildShareableUrl() {
+  const encoded = encodeURIComponent(JSON.stringify(state.investigatorState));
+  const base = (typeof location !== 'undefined' && location.origin) ? `${location.origin}${location.pathname}` : '';
+  return `${base}?${PRESET_QUERY_PARAM}=${encoded}`;
+}
+
+// Accepts either a full shared URL (extracts the ?scenario= param) or a
+// raw encoded/JSON blob pasted directly -- a user might paste just the
+// query-string portion, not necessarily a full link. Deliberately does
+// NOT use URLSearchParams (a Node/browser API, not a core ECMAScript
+// built-in -- unavailable in the Node smoke test's vm sandbox unless
+// explicitly added there, unlike JSON/encodeURIComponent/decodeURIComponent,
+// which are standard and always present) -- plain string search keeps
+// this portable to both environments with no sandbox changes needed.
+function parsePresetInput(text) {
+  if (!text) return null;
+  const trimmed = text.trim();
+  let raw = trimmed;
+  const paramMarker = `${PRESET_QUERY_PARAM}=`;
+  const markerIndex = trimmed.indexOf(paramMarker);
+  if (markerIndex !== -1) {
+    raw = trimmed.slice(markerIndex + paramMarker.length);
+    const ampIndex = raw.indexOf('&');
+    if (ampIndex !== -1) raw = raw.slice(0, ampIndex);
+  }
+  try {
+    return JSON.parse(decodeURIComponent(raw));
+  } catch (error) {
+    return null;
+  }
 }
 
 // Switches the Legend/Station-detail tab pair. Purely a visibility switch --
@@ -1722,6 +1972,7 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
             renderHour(state.currentHour);
             updateStatusMessage(); // renderHour() alone doesn't refresh #title-meta's weather-scenario suffix
             renderWeatherScenarioStatus();
+            renderDiffBar();
             weatherRafScheduled = false;
           });
         }
@@ -1758,6 +2009,28 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
     } else {
       document.getElementById('weather-scenario-wrap').classList.add('hidden');
     }
+
+    // Investigator Mode Phase 6: save/load/reset, wired regardless of
+    // which of the three data sources loaded -- applyInvestigatorState()
+    // itself already guards each section independently.
+    document.getElementById('save-preset-btn').addEventListener('click', () => {
+      document.getElementById('preset-url-output').value = buildShareableUrl();
+    });
+    document.getElementById('load-preset-btn').addEventListener('click', () => {
+      const loaded = parsePresetInput(document.getElementById('preset-load-input').value);
+      if (loaded) applyInvestigatorState(loaded);
+    });
+    document.getElementById('reset-baseline-btn').addEventListener('click', resetToBaseline);
+
+    // Auto-apply a shared scenario from the URL on load, if present --
+    // "reload the page, load the preset back, confirm state restores
+    // exactly" (Guideline's own verify step) works via a real shared
+    // link, not a manual extra click after navigating there.
+    if (typeof location !== 'undefined' && location.search) {
+      const loadedFromUrl = parsePresetInput(location.search);
+      if (loadedFromUrl) applyInvestigatorState(loadedFromUrl);
+    }
+    renderDiffBar(); // initial render either way -- hides itself if nothing loaded from the URL and nothing's been touched yet
 
     // Period options built from flows.json's own granularity block, never a
     // hardcoded season/month list -- 'all' (the existing all-period average)
@@ -1917,6 +2190,8 @@ if (typeof globalThis !== 'undefined') {
     renderFleetStats, applyFleetScenarioToRoute, setFleetSize,
     fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
     isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,
+    defaultInvestigatorState, investigatorStateDiffersFromDefault, renderDiffBar, applyInvestigatorState,
+    resetToBaseline, buildShareableUrl, parsePresetInput,
     getState: () => state,
     ready,
   };

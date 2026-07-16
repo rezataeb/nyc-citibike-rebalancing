@@ -136,6 +136,20 @@
   #model-eval-content thead th { color: #52514e; font-weight: 600; border-bottom: 1px solid #d8d7d3; }
   #model-eval-content tbody td { border-bottom: 1px solid #f3f2f0; }
   #model-eval-caption { margin-top: 6px; color: #898781; line-height: 1.4; }
+
+  /* Investigator mode: same collapsed-by-default disclosure pattern as
+     #model-eval above (zero extra height budget in the common case),
+     not a new widget. Deliberately not mode-gated (unlike
+     #historical-controls) -- equity proximity is a static per-station
+     property, independent of the historical/live axis. */
+  #investigator-panel { margin-top: 10px; font-size: 11px; }
+  #investigator-toggle { font: inherit; font-weight: 600; color: #52514e; background: none; border: none; padding: 0; cursor: pointer; }
+  #investigator-toggle:hover { color: #0b0b0b; }
+  #investigator-content { margin-top: 8px; }
+  .investigator-slider { margin-bottom: 10px; }
+  .investigator-slider label { display: block; font-size: 11px; color: #52514e; margin-bottom: 4px; }
+  .investigator-slider input[type="range"] { width: 100%; box-sizing: border-box; }
+  #investigator-counts { margin-top: 4px; color: #52514e; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -222,6 +236,28 @@
         </tbody>
       </table>
       <div id="model-eval-caption">MAE in bikes/day, Feb+April &rarr; June (held-out test month), from the Session 7.5 EDA report. GBM loses to seasonal-naive in every volume tercile &mdash; June's actual temperature fell outside the Feb+April training range, and gradient-boosted trees can't extrapolate past it.</div>
+    </div>
+  </div>
+
+  <div id="investigator-panel">
+    <button id="investigator-toggle">Investigator mode &#9656;</button>
+    <div id="investigator-content" class="hidden">
+      <div class="control-label">Equity thresholds</div>
+      <div class="investigator-slider">
+        <label for="nycha-school-slider">NYCHA / school proximity: <span id="nycha-school-value">300</span> m</label>
+        <input type="range" id="nycha-school-slider" min="0" max="3000" step="50" value="300">
+      </div>
+      <div class="investigator-slider">
+        <label for="subway-gap-slider">Subway gap: <span id="subway-gap-value">800</span> m</label>
+        <input type="range" id="subway-gap-slider" min="0" max="3000" step="50" value="800">
+      </div>
+      <div id="investigator-counts">
+        <div id="count-nycha"></div>
+        <div id="count-school"></div>
+        <div id="count-nycha-or-school"></div>
+        <div id="count-nycha-and-school"></div>
+        <div id="count-subway-gap"></div>
+      </div>
     </div>
   </div>
 
@@ -643,6 +679,14 @@ const state = {
   modelEvalExpanded: false, // collapsed by default -- the sidebar-height fix (Session 19) must not be undone by this
   demoMode: false, // true when flows.json failed and state.stations is DEMO_FLOWS_PAYLOAD instead of real data
   liveAvailable: true, // false when live_status.json failed independently -- gates the Live mode tab, not tied to demoMode
+  investigatorExpanded: false, // collapsed by default, same rule as modelEvalExpanded
+  // Investigator Mode's own state namespace, matching the Investigator_Mode_Guideline.md
+  // contract's investigatorState shape -- equityThresholds is Phase 1 (well,
+  // Phase 2)'s only field; fleetSize/weatherScenario/dockOverrides join it
+  // in later phases rather than each getting a separate ad hoc variable.
+  investigatorState: {
+    equityThresholds: { nycha_school_m: 300, subway_gap_m: 800 }, // CLAUDE.md's fixed defaults
+  },
 };
 
 // Collapsed by default (zero extra height budget); expanding is an
@@ -656,6 +700,82 @@ function setModelEvalExpanded(expanded) {
   state.modelEvalExpanded = expanded;
   document.getElementById('model-eval-content').classList.toggle('hidden', !expanded);
   document.getElementById('model-eval-toggle').textContent = `Model performance ${expanded ? '▾' : '▸'}`;
+}
+
+// Same collapsed-by-default pattern as setModelEvalExpanded above.
+function setInvestigatorExpanded(expanded) {
+  state.investigatorExpanded = expanded;
+  document.getElementById('investigator-content').classList.toggle('hidden', !expanded);
+  document.getElementById('investigator-toggle').textContent = `Investigator mode ${expanded ? '▾' : '▸'}`;
+}
+
+// Pure function, no DOM/Leaflet -- recomputes equity flags CLIENT-SIDE from
+// each station's raw context distances (nycha_dist_m/school_dist_m/
+// subway_dist_m), never the near_nycha/near_school/transit_gap booleans
+// flows.json also carries (those were baked in by equity_join.py at the
+// FIXED 300m/800m defaults and can't reflect a slider's chosen threshold --
+// this is exactly why Session 6 exported raw distances instead of only
+// flags, per CLAUDE.md). NYCHA and school proximity share one threshold
+// (nycha_school_m) per the Investigator_Mode_Guideline.md contract's
+// equityThresholds shape, but are reported as two separate counts --
+// they're different real-world facilities, and collapsing them into one
+// blended count would hide which one is actually driving a given result.
+// Deliberately returns COUNTS, never a per-station pass/fail list or
+// anything that could feed a map recolor -- CLAUDE.md's standing scope
+// exclusion rules out a map-level equity filter/recolor control in this
+// dashboard, in any session; per-station equity context stays in scope
+// (already in the detail panel), but a whole-map filter does not.
+function computeEquityCounts(stations, thresholds) {
+  const ids = Object.keys(stations);
+  let nychaCount = 0;
+  let schoolCount = 0;
+  let subwayGapCount = 0;
+  // Union/overlap between NYCHA and school specifically -- they share one
+  // slider (nycha_school_m), so "how many stations does this threshold
+  // flag at all" (union) and "how many are flagged by both facility types,
+  // not just one" (overlap/intersection) are what actually answer "which
+  // population is this flagging" for a reviewer, not just two independent
+  // counts that could double-count or hide overlap either way. Subway gap
+  // is a genuinely separate axis (its own threshold, its own kind of
+  // criterion), so it's not folded into this union/overlap.
+  let nychaOrSchoolCount = 0;
+  let nychaAndSchoolCount = 0;
+  for (const id of ids) {
+    const context = stations[id].context;
+    const nearNycha = context.nycha_dist_m <= thresholds.nycha_school_m;
+    const nearSchool = context.school_dist_m <= thresholds.nycha_school_m;
+    if (nearNycha) nychaCount += 1;
+    if (nearSchool) schoolCount += 1;
+    if (nearNycha || nearSchool) nychaOrSchoolCount += 1;
+    if (nearNycha && nearSchool) nychaAndSchoolCount += 1;
+    if (context.subway_dist_m > thresholds.subway_gap_m) subwayGapCount += 1;
+  }
+  return { total: ids.length, nychaCount, schoolCount, subwayGapCount, nychaOrSchoolCount, nychaAndSchoolCount };
+}
+
+// Renders computeEquityCounts()'s result into the three count lines. Called
+// once at load (alongside every other initial render) and again on every
+// slider move -- never a full station-count computation on every 'input'
+// event without throttling, same rAF-coalescing rule the hour slider uses,
+// see the slider wiring below.
+function renderEquityCounts() {
+  const counts = computeEquityCounts(state.stations, state.investigatorState.equityThresholds);
+  const total = counts.total.toLocaleString();
+  document.getElementById('count-nycha').textContent =
+    `Within NYCHA threshold: ${counts.nychaCount.toLocaleString()} of ${total} stations`;
+  document.getElementById('count-school').textContent =
+    `Within school threshold: ${counts.schoolCount.toLocaleString()} of ${total} stations`;
+  document.getElementById('count-nycha-or-school').textContent =
+    `NYCHA or school (combined): ${counts.nychaOrSchoolCount.toLocaleString()} of ${total} stations`;
+  document.getElementById('count-nycha-and-school').textContent =
+    `NYCHA and school (overlap): ${counts.nychaAndSchoolCount.toLocaleString()} of ${total} stations`;
+  document.getElementById('count-subway-gap').textContent =
+    `Beyond subway-gap threshold: ${counts.subwayGapCount.toLocaleString()} of ${total} stations`;
+}
+
+function setEquityThreshold(key, value) {
+  state.investigatorState.equityThresholds[key] = value;
+  renderEquityCounts();
 }
 
 // Switches the Legend/Station-detail tab pair. Purely a visibility switch --
@@ -1363,6 +1483,50 @@ const ready = Promise.all([flowsReady, liveReady, routeReady])
 
     document.getElementById('detail-close').addEventListener('click', closeStation);
 
+    // Investigator mode: wired here (not top-level like model-eval's
+    // toggle) because, unlike that static table, the counts genuinely
+    // depend on state.stations -- there's nothing meaningful to compute
+    // before data loads. Not mode-gated (unlike #historical-controls):
+    // equity proximity is a static per-station property, so it stays
+    // available in both historical and live mode.
+    document.getElementById('investigator-toggle').addEventListener('click', () => setInvestigatorExpanded(!state.investigatorExpanded));
+    setInvestigatorExpanded(false); // explicit, not just relying on the static HTML default to already match -- same standing fix as Sessions 19/20A/20B/21
+
+    renderEquityCounts(); // populate the three count lines at the default 300m/800m thresholds before any slider interaction
+
+    // Same rAF-coalescing pattern as the hour slider above -- 2,347
+    // stations recomputed on every 'input' event during a drag would be
+    // wasteful; only the latest value per animation frame is ever rendered.
+    // The numeric label next to each slider updates immediately regardless
+    // (cheap, just a textContent write), only the count recomputation itself
+    // is throttled. The slider's initial .value and label text are set
+    // explicitly here from state.investigatorState, not left to the static
+    // HTML's value="300"/value="800" attributes to already agree with it --
+    // same standing-rule fix as Sessions 19/20A/20B/21 (a test stub doesn't
+    // read static markup attributes, only JS-driven changes).
+    function wireEquitySlider(sliderId, valueId, thresholdKey) {
+      const sliderEl = document.getElementById(sliderId);
+      const valueEl = document.getElementById(valueId);
+      const initialValue = state.investigatorState.equityThresholds[thresholdKey];
+      sliderEl.value = String(initialValue);
+      valueEl.textContent = String(initialValue);
+      let pendingValue = null;
+      let rafScheduled = false;
+      sliderEl.addEventListener('input', event => {
+        pendingValue = Number(event.target.value);
+        valueEl.textContent = String(pendingValue);
+        if (!rafScheduled) {
+          rafScheduled = true;
+          requestAnimationFrame(() => {
+            setEquityThreshold(thresholdKey, pendingValue);
+            rafScheduled = false;
+          });
+        }
+      });
+    }
+    wireEquitySlider('nycha-school-slider', 'nycha-school-value', 'nycha_school_m');
+    wireEquitySlider('subway-gap-slider', 'subway-gap-value', 'subway_gap_m');
+
     // Attached once, directly on the (never-replaced) <svg> element -- its
     // children get rebuilt by updateStationDetail()'s innerHTML assignment,
     // but that doesn't detach a listener bound to the svg itself.
@@ -1403,6 +1567,7 @@ if (typeof globalThis !== 'undefined') {
     setInfoTab, updateStationDetail,
     computeStopOffset, assignVisitIndices, buildStopIconHTML, buildRouteLayer, setRouteVisible, applyRouteVisibility,
     setModelEvalExpanded,
+    setInvestigatorExpanded, computeEquityCounts, renderEquityCounts, setEquityThreshold,
     getState: () => state,
     ready,
   };

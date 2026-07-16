@@ -906,6 +906,101 @@ async function main() {
   assert.ok(elements['model-eval-content'].classList.contains('hidden'), 'model-eval content should collapse again on a second click');
   assert.strictEqual(elements['model-eval-toggle'].textContent, 'Model performance ▸');
 
+  // --- Investigator Mode Phase 2: equity threshold sliders ---
+  // FAKE_PAYLOAD's real context values: A nycha=120/school=900/subway=200,
+  // B nycha=1000/school=150/subway=900, C nycha=2000/school=2000/subway=100.
+  assert.strictEqual(dash.getState().investigatorExpanded, false, 'investigator panel should be collapsed by default');
+  assert.ok(elements['investigator-content'].classList.contains('hidden'), 'investigator content should be hidden by default');
+  assert.strictEqual(elements['investigator-toggle'].textContent, 'Investigator mode ▸');
+
+  const investigatorClick = elements['investigator-toggle']._listeners.click;
+  assert.ok(investigatorClick, 'no click listener registered on the investigator toggle');
+  investigatorClick();
+  assert.strictEqual(dash.getState().investigatorExpanded, true);
+  assert.ok(!elements['investigator-content'].classList.contains('hidden'));
+  assert.strictEqual(elements['investigator-toggle'].textContent, 'Investigator mode ▾');
+
+  // Regression check for the standing "default state must be set in JS, not
+  // implied by markup" bug (recurred in Sessions 19/20A/20B) -- the stub
+  // element never had .value/.textContent set except by real JS, so this
+  // would read as undefined if wireEquitySlider() didn't explicitly set the
+  // slider's initial value/label from state.investigatorState at load.
+  assert.strictEqual(elements['nycha-school-slider'].value, '300', 'slider .value must be explicitly set in JS at load, not left to the static value="300" attribute');
+  assert.strictEqual(elements['nycha-school-value'].textContent, '300');
+  assert.strictEqual(elements['subway-gap-slider'].value, '800');
+  assert.strictEqual(elements['subway-gap-value'].textContent, '800');
+
+  // Pure function, checked directly against the known fixture values first --
+  // at the default 300m/900m... wait, defaults are 300m/800m: only station A
+  // (120m) clears NYCHA, only station B (150m) clears school, only station B
+  // (900m > 800m) is beyond the subway gap.
+  // Compared field-by-field, not via deepStrictEqual against a fresh outer-
+  // realm object literal -- same cross-realm gotcha documented in Session
+  // 20A: an object constructed inside the vm-executed dashboard script is
+  // never reference-equal to one built in the outer Node test realm, even
+  // with identical structure/values.
+  const defaultCounts = dash.computeEquityCounts(dash.getState().stations, { nycha_school_m: 300, subway_gap_m: 800 });
+  assert.strictEqual(defaultCounts.total, 3);
+  assert.strictEqual(defaultCounts.nychaCount, 1);
+  assert.strictEqual(defaultCounts.schoolCount, 1);
+  assert.strictEqual(defaultCounts.subwayGapCount, 1);
+  // At the default 300m, only station A clears NYCHA and only station B
+  // clears school -- disjoint, so union == 2 and overlap == 0.
+  assert.strictEqual(defaultCounts.nychaOrSchoolCount, 2);
+  assert.strictEqual(defaultCounts.nychaAndSchoolCount, 0);
+
+  // Initial render (before any slider interaction) must already reflect the
+  // defaults, not a placeholder -- renderEquityCounts() runs once at load.
+  assert.strictEqual(elements['count-nycha'].textContent, 'Within NYCHA threshold: 1 of 3 stations');
+  assert.strictEqual(elements['count-school'].textContent, 'Within school threshold: 1 of 3 stations');
+  assert.strictEqual(elements['count-nycha-or-school'].textContent, 'NYCHA or school (combined): 2 of 3 stations');
+  assert.strictEqual(elements['count-nycha-and-school'].textContent, 'NYCHA and school (overlap): 0 of 3 stations');
+  assert.strictEqual(elements['count-subway-gap'].textContent, 'Beyond subway-gap threshold: 1 of 3 stations');
+
+  // A threshold where union, overlap, and the two individual counts are all
+  // genuinely distinct (not just coincidentally equal), so this actually
+  // exercises the union/intersection logic rather than a degenerate case.
+  // At 500m: A clears NYCHA only (120<=500, 900>500), B clears school only
+  // (1000>500, 150<=500), C clears neither -- nychaCount=1, schoolCount=1,
+  // union=2 (A or B), overlap=0 (no station clears both).
+  const nychaSchoolInputMid = elements['nycha-school-slider']._listeners.input;
+  nychaSchoolInputMid({ target: { value: '500' } });
+  assert.strictEqual(elements['count-nycha-or-school'].textContent, 'NYCHA or school (combined): 2 of 3 stations');
+  assert.strictEqual(elements['count-nycha-and-school'].textContent, 'NYCHA and school (overlap): 0 of 3 stations');
+  // Now push it to 1000m, where BOTH A and B clear both criteria (A:
+  // 120<=1000 and 900<=1000; B: 1000<=1000 and 150<=1000), while C still
+  // clears neither -- union and overlap converge to 2, distinct from the
+  // 500m case above, confirming overlap genuinely tracks intersection
+  // rather than being a constant.
+  nychaSchoolInputMid({ target: { value: '1000' } });
+  assert.strictEqual(elements['count-nycha-or-school'].textContent, 'NYCHA or school (combined): 2 of 3 stations');
+  assert.strictEqual(elements['count-nycha-and-school'].textContent, 'NYCHA and school (overlap): 2 of 3 stations', 'overlap must rise to 2 once both A and B clear both criteria at 1000m');
+
+  // Guideline's own verify step: 0m -> zero flagged; 2000m -> nearly
+  // everything (all 3, in this tiny fixture) flagged. Also confirms the
+  // numeric label next to the slider updates immediately.
+  const nychaSchoolInput = elements['nycha-school-slider']._listeners.input;
+  assert.ok(nychaSchoolInput, 'no input listener registered on the NYCHA/school slider');
+  nychaSchoolInput({ target: { value: '0' } });
+  assert.strictEqual(elements['nycha-school-value'].textContent, '0');
+  assert.strictEqual(elements['count-nycha'].textContent, 'Within NYCHA threshold: 0 of 3 stations', 'threshold 0m must flag zero stations');
+  assert.strictEqual(elements['count-school'].textContent, 'Within school threshold: 0 of 3 stations');
+
+  nychaSchoolInput({ target: { value: '2000' } });
+  assert.strictEqual(elements['count-nycha'].textContent, 'Within NYCHA threshold: 3 of 3 stations', 'threshold 2000m must flag nearly everything (all, in this fixture)');
+  assert.strictEqual(elements['count-school'].textContent, 'Within school threshold: 3 of 3 stations');
+
+  // Subway-gap slider is independent of the NYCHA/school one -- moving it
+  // must not disturb the counts the other slider just set.
+  const subwayGapInput = elements['subway-gap-slider']._listeners.input;
+  assert.ok(subwayGapInput, 'no input listener registered on the subway-gap slider');
+  subwayGapInput({ target: { value: '3000' } });
+  assert.strictEqual(elements['count-subway-gap'].textContent, 'Beyond subway-gap threshold: 0 of 3 stations', 'a 3000m gap threshold exceeds every fixture station\'s real subway distance');
+  assert.strictEqual(elements['count-nycha'].textContent, 'Within NYCHA threshold: 3 of 3 stations', 'the NYCHA count set by the other slider must be unaffected');
+
+  assert.strictEqual(dash.getState().investigatorState.equityThresholds.nycha_school_m, 2000);
+  assert.strictEqual(dash.getState().investigatorState.equityThresholds.subway_gap_m, 3000);
+
   console.log('All dashboard slider smoke tests passed.');
 }
 

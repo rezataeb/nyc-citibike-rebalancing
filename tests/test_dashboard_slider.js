@@ -174,6 +174,40 @@ const FAKE_FLEET_SCENARIOS_PAYLOAD = {
   },
 };
 
+// Fake scenario_presets.json (Investigator Mode Phase 4) -- real schema,
+// real converted values (60F->15.6C, 28F->-2.2C, 72F->22.2C; 0.4in->10.2mm,
+// 0.3in->7.6mm), heat_wave deliberately absent, same as the real file.
+const FAKE_SCENARIO_PRESETS_PAYLOAD = {
+  presets: [
+    { id: 'rain_day', label: 'Steady rain', temp_c: 15.6, precip_mm: 10.2 },
+    { id: 'snow_day', label: 'Snow event', temp_c: -2.2, precip_mm: 7.6 },
+    { id: 'ideal', label: 'Ideal riding weather', temp_c: 22.2, precip_mm: 0.0 },
+  ],
+  reference_preset_id: 'ideal',
+  notes: 'fake scenario presets for testing',
+};
+
+// Fake elasticities.json (Investigator Mode Phase 4) -- deliberately gives
+// station A its own by_station entry, station B a different by_station
+// entry, and station C NEITHER a by_station entry NOR a matching
+// by_typology group (FAKE_PAYLOAD's cluster_name values are 'Test cluster
+// A/B/C', which don't match TYPOLOGY_SLUG_BY_CLUSTER_NAME's real keys --
+// deliberately, so C exercises the "no elasticity data at all -> stays
+// unadjusted" path without needing to touch FAKE_PAYLOAD, which other
+// tests already assert exact cluster_name text against).
+const FAKE_ELASTICITIES_PAYLOAD = {
+  generated_at: '2026-07-16T00:00:00+00:00',
+  method: 'fake elasticities for testing',
+  by_typology: {
+    commuter_core: { capacity_elasticity: 0.02, temp_elasticity: 0.2, precip_elasticity: -0.05, n_stations: 1 },
+  },
+  by_station: {
+    A: { temp_elasticity: 0.1, precip_elasticity: -0.02, n_obs: 10 },
+    B: { temp_elasticity: 0.05, precip_elasticity: 0.01, n_obs: 8 },
+  },
+  notes: 'fake elasticities for testing',
+};
+
 function makeElementStub(id) {
   const el = {
     id,
@@ -302,6 +336,8 @@ function buildSandbox() {
       let payload = FAKE_PAYLOAD;
       if (url.includes('live_status')) payload = FAKE_LIVE_PAYLOAD;
       else if (url.includes('fleet_scenarios')) payload = FAKE_FLEET_SCENARIOS_PAYLOAD;
+      else if (url.includes('scenario_presets')) payload = FAKE_SCENARIO_PRESETS_PAYLOAD;
+      else if (url.includes('elasticities')) payload = FAKE_ELASTICITIES_PAYLOAD;
       else if (url.includes('route')) payload = FAKE_ROUTE_PAYLOAD;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
     },
@@ -1052,6 +1088,84 @@ async function main() {
   assert.strictEqual(dash.getState().investigatorState.equityThresholds.nycha_school_m, 2000);
   assert.strictEqual(dash.getState().investigatorState.equityThresholds.subway_gap_m, 3000);
 
+  // --- Investigator Mode Phase 4: weather scenarios ---
+  // FAKE_ELASTICITIES_PAYLOAD: station A has its own by_station elasticity
+  // (temp=0.1, precip=-0.02), station B a different one (temp=0.05,
+  // precip=0.01), station C has NEITHER a by_station entry NOR a matching
+  // by_typology group (its cluster_name doesn't match the real typology
+  // slugs) -- deliberately, to exercise the "no elasticity data at all ->
+  // stays unadjusted" path.
+  assert.ok(!elements['weather-scenario-wrap'].classList.contains('hidden'), 'weather scenario section must show once both elasticities.json and scenario_presets.json load');
+  // The Guideline's own required label, verbatim, actually on the page --
+  // not just in elasticities.json's notes field or PROGRESS.md. Checked
+  // against the RAW HTML SOURCE (`html`, read at the top of main()), not
+  // the DOM stub: #weather-scenario-note is purely static markup, never
+  // touched by JS, so its real text is structurally invisible to the
+  // stub (which only tracks JS-driven changes, always '' otherwise --
+  // the same standing "stub doesn't reflect static markup" limitation
+  // this project has hit from the other direction four times already).
+  assert.ok(
+    html.includes('Estimated from historical elasticity, not a weather-specific model.'),
+    'the Guideline-required label must be present verbatim in the actual page markup'
+  );
+
+  // Default state is the 'ideal' reference preset itself -- exactly zero
+  // adjustment by construction, not just close to it.
+  assert.strictEqual(elements['weather-temp-slider'].value, '72', 'initial slider value must be set explicitly in JS from state, not left to the static value="72" attribute');
+  assert.strictEqual(elements['weather-temp-value'].textContent, '72');
+  assert.strictEqual(elements['weather-precip-value'].textContent, '0.0');
+  assert.strictEqual(elements['weather-scenario-status'].textContent, 'Currently showing: baseline (no adjustment).');
+  assert.strictEqual(dash.weatherMultiplierFor('A'), 1);
+  assert.strictEqual(dash.weatherMultiplierFor('B'), 1);
+  assert.strictEqual(dash.weatherMultiplierFor('C'), 1);
+  assert.strictEqual(dash.isBaselineWeatherScenario(), true);
+
+  // Selecting a preset moves BOTH sliders (sliders are the real state,
+  // presets are a shortcut) and changes every station's multiplier by a
+  // real, station-specific amount -- except C, which has no elasticity
+  // data and must stay at exactly 1 regardless of scenario.
+  const presetChange = elements['weather-preset-select']._listeners.change;
+  assert.ok(presetChange, 'no change listener registered on the weather preset select');
+  presetChange({ target: { value: 'snow_day' } });
+
+  assert.strictEqual(elements['weather-temp-slider'].value, '28', '-2.2C converts to 28F');
+  assert.strictEqual(elements['weather-temp-value'].textContent, '28');
+  assert.strictEqual(elements['weather-precip-value'].textContent, '0.3', '7.6mm converts to 0.3in');
+  assert.strictEqual(elements['weather-scenario-status'].textContent, 'Currently showing: Snow event (projected, not baseline).');
+  assert.ok(!dash.isBaselineWeatherScenario());
+
+  // deltaTemp = -2.2 - 22.2 = -24.4; deltaPrecip = 7.6 - 0 = 7.6.
+  // A: 1 + 0.1*(-24.4) + (-0.02)*7.6 = -1.592
+  // B: 1 + 0.05*(-24.4) + 0.01*7.6 = -0.144
+  assert.ok(Math.abs(dash.weatherMultiplierFor('A') - (-1.592)) < 1e-9, `expected -1.592, got ${dash.weatherMultiplierFor('A')}`);
+  assert.ok(Math.abs(dash.weatherMultiplierFor('B') - (-0.144)) < 1e-9, `expected -0.144, got ${dash.weatherMultiplierFor('B')}`);
+  assert.strictEqual(dash.weatherMultiplierFor('C'), 1, 'a station with no by_station AND no matching by_typology entry must stay exactly unadjusted');
+
+  // #title-meta must surface the active scenario even though the
+  // investigator panel could be collapsed -- recolored markers should
+  // never be silently unexplained.
+  assert.ok(elements['title-meta'].textContent.includes('Snow event (projected)'), `expected a Snow event suffix in title-meta, got: ${elements['title-meta'].textContent}`);
+
+  // Manually dragging a slider away from every preset's exact values is a
+  // genuinely custom scenario -- presetId isn't invalidated (it's just
+  // metadata, sliders are authoritative) but matchingWeatherPreset() must
+  // correctly report null, and the status line must say "Custom scenario."
+  const tempInput = elements['weather-temp-slider']._listeners.input;
+  const precipInput = elements['weather-precip-slider']._listeners.input;
+  assert.ok(tempInput && precipInput, 'weather sliders must have input listeners registered');
+  precipInput({ target: { value: '0' } });
+  tempInput({ target: { value: '50' } }); // 50F -> 10.0C, matches no preset (with precip now back to 0)
+  assert.strictEqual(dash.matchingWeatherPreset(), null);
+  assert.strictEqual(elements['weather-scenario-status'].textContent, 'Currently showing: Custom scenario (projected, not baseline).');
+  assert.ok(elements['title-meta'].textContent.includes('custom weather scenario'));
+
+  // Selecting 'ideal' again must fully reset to baseline -- no residual
+  // adjustment left over from the custom drag above.
+  presetChange({ target: { value: 'ideal' } });
+  assert.strictEqual(dash.isBaselineWeatherScenario(), true);
+  assert.strictEqual(dash.weatherMultiplierFor('A'), 1);
+  assert.ok(!elements['title-meta'].textContent.includes('projected'));
+
   console.log('All dashboard slider smoke tests passed.');
 }
 
@@ -1125,6 +1239,8 @@ async function testFlowsJsonFailureOnly() {
     if (url.includes('flows')) return Promise.reject(new Error('network down'));
     const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
       : url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
+      : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD
       : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
@@ -1167,6 +1283,8 @@ async function testLiveJsonFailureOnly() {
   sandbox.fetch = url => {
     if (url.includes('live_status')) return Promise.reject(new Error('live feed down'));
     const payload = url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
+      : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD
       : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
@@ -1201,7 +1319,9 @@ async function testBothFlowsAndLiveFailure() {
   const sandbox = buildSandbox();
   sandbox.fetch = url => {
     if (url.includes('flows') || url.includes('live_status')) return Promise.reject(new Error('network down'));
-    const payload = url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD : FAKE_ROUTE_PAYLOAD;
+    const payload = url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
+      : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD : FAKE_ROUTE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
 
@@ -1238,7 +1358,9 @@ async function testRouteAndFleetScenariosMissing() {
     if (url.includes('route') || url.includes('fleet_scenarios')) {
       return Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error('not found')) });
     }
-    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD : FAKE_PAYLOAD;
+    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
+      : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
 
@@ -1286,7 +1408,9 @@ async function testRouteJsonMissingButFleetScenariosPresent() {
     if (url.includes('route')) {
       return Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error('not found')) });
     }
-    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD : FAKE_PAYLOAD;
+    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
+      : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
 
@@ -1330,10 +1454,67 @@ async function testRouteJsonMissingButFleetScenariosPresent() {
   console.log('route.json-missing-but-fleet-scenarios-present smoke test passed.');
 }
 
+// Separate scenario, separate fixture: a station with a REAL typology
+// cluster_name (unlike FAKE_PAYLOAD's A/B/C, which deliberately use
+// non-matching 'Test cluster X' names so C could exercise the
+// no-elasticity-at-all path above) but NO by_station elasticity entry --
+// confirms it falls back to its by_typology group's value, per the
+// documented contract, rather than also landing on the unadjusted path.
+async function testWeatherScenarioFallsBackToTypologyElasticity() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const payloadWithTypologyStation = JSON.parse(JSON.stringify(FAKE_PAYLOAD));
+  payloadWithTypologyStation.stations.D = {
+    name: 'Station D', lat: 40.72, lng: -73.96,
+    weekday: zeros(), weekend: zeros(),
+    cluster: 0, cluster_name: 'Commuter core (fills AM, drains PM)',
+    context: {
+      near_nycha: 0, near_school: 0, nycha_dist_m: 500, nycha_nearest: 'Test NYCHA D',
+      school_dist_m: 500, school_nearest: 'Test School D',
+      subway_dist_m: 500, subway_nearest: 'Test Subway D', transit_gap: 0,
+    },
+    seasons: {}, months: { '2026-04': { weekday: zeros(), weekend: zeros() } },
+  };
+
+  const sandbox = buildSandbox();
+  sandbox.fetch = url => {
+    if (url.includes('flows')) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payloadWithTypologyStation) });
+    }
+    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
+      : url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
+      : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD
+      : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
+  };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, typology-fallback scenario)' });
+
+  await context.__dashboard.ready;
+  const dash = context.__dashboard;
+
+  // FAKE_ELASTICITIES_PAYLOAD.by_typology.commuter_core: temp=0.2, precip=-0.05.
+  // Station D has no by_station entry, so it must use those group values.
+  assert.strictEqual(dash.weatherMultiplierFor('D'), 1, 'still exactly unadjusted at the default ideal/reference scenario');
+
+  const presetChange = sandbox._elements['weather-preset-select']._listeners.change;
+  presetChange({ target: { value: 'snow_day' } });
+  // deltaTemp = -2.2 - 22.2 = -24.4; deltaPrecip = 7.6 - 0 = 7.6.
+  // D: 1 + 0.2*(-24.4) + (-0.05)*7.6 = 1 - 4.88 - 0.38 = -4.26
+  const multiplierD = dash.weatherMultiplierFor('D');
+  assert.ok(Math.abs(multiplierD - (-4.26)) < 1e-9, `expected -4.26 (typology fallback), got ${multiplierD}`);
+
+  console.log('weather-scenario typology-fallback smoke test passed.');
+}
+
 main()
   .then(testFileProtocolFetchFailure)
   .then(testRouteAndFleetScenariosMissing)
   .then(testRouteJsonMissingButFleetScenariosPresent)
+  .then(testWeatherScenarioFallsBackToTypologyElasticity)
   .then(testFlowsJsonFailureOnly)
   .then(testLiveJsonFailureOnly)
   .then(testBothFlowsAndLiveFailure)

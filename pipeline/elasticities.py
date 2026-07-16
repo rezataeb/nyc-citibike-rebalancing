@@ -157,6 +157,21 @@ DIRECTIONAL_ACCURACY_CAVEAT = (
     "sensitivities from a directionally-unreliable model, not a validated "
     "forecast of what a real temperature/precipitation change would do."
 )
+SPARSE_GRID_CAVEAT = (
+    "A further weakness beyond the directional-accuracy caveat above, "
+    "found while building Investigator Mode Phase 4 (weather scenarios): "
+    "temp_mean_c and precip_mm are each a per-(month, day_type) AGGREGATE, "
+    "not a per-observation feature, so the entire Feb+April training panel "
+    "contains only 5 distinct values of each (checked directly: temp_mean_c "
+    "in {-4.4, -2.6, 11.1, 13.1, 18.7} degrees C). temp_elasticity/"
+    "precip_elasticity are therefore linear-regression slopes fit through "
+    "only 5 points, not a smooth curve -- and the partial dependence curve "
+    "itself shows a sharp isolated jump at the single highest point (18.7C), "
+    "consistent with a sparse-grid artifact rather than a genuine trend. "
+    "Any consumer projecting a scenario from these elasticities should "
+    "treat values near or beyond that top point as resting on the fit's "
+    "least reliable segment, not simply 'outside the observed range.'"
+)
 # Rank-correlation thresholds for how confidently ceiling_effect_note() below
 # describes the diminishing-effect evidence as "clean" vs "weak/inconsistent"
 # -- a real, computed number per group, not a hardcoded description of one
@@ -465,6 +480,7 @@ def build_elasticities(
             "Ceiling-effect evidence by group (a real Spearman rank correlation between "
             "by_station capacity and capacity_elasticity, not asserted uniformly): "
             + " ".join(ceiling_effect_notes) + " " + DIRECTIONAL_ACCURACY_CAVEAT
+            + " " + SPARSE_GRID_CAVEAT
         ),
     }
 

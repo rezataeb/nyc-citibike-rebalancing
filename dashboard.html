@@ -152,6 +152,9 @@
   #investigator-counts { margin-top: 4px; color: #52514e; line-height: 1.6; }
   #investigator-content .control-label.spaced { margin-top: 12px; } /* separates the Fleet simulator group from Equity thresholds above it, without touching .control-label's other uses elsewhere in the dashboard */
   #fleet-stats { margin-top: 4px; color: #52514e; line-height: 1.6; }
+  #weather-preset-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 11px; padding: 5px 6px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 10px; }
+  #weather-scenario-note { margin-top: 6px; color: #898781; line-height: 1.4; font-style: italic; }
+  #weather-scenario-status { margin-top: 4px; color: #52514e; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -268,6 +271,25 @@
           <input type="range" id="fleet-size-slider" min="1" max="10" step="1" value="1">
         </div>
         <div id="fleet-stats"></div>
+      </div>
+
+      <div class="control-label spaced">Weather scenario</div>
+      <div id="weather-scenario-wrap" class="hidden">
+        <select id="weather-preset-select">
+          <option value="ideal">Ideal riding weather (baseline)</option>
+          <option value="rain_day">Steady rain</option>
+          <option value="snow_day">Snow event</option>
+        </select>
+        <div class="investigator-slider">
+          <label for="weather-temp-slider">Temperature: <span id="weather-temp-value">72</span>&deg;F</label>
+          <input type="range" id="weather-temp-slider" min="0" max="90" step="1" value="72">
+        </div>
+        <div class="investigator-slider">
+          <label for="weather-precip-slider">Precipitation: <span id="weather-precip-value">0.0</span> in</label>
+          <input type="range" id="weather-precip-slider" min="0" max="1" step="0.05" value="0">
+        </div>
+        <div id="weather-scenario-status"></div>
+        <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
       </div>
     </div>
   </div>
@@ -698,8 +720,15 @@ const state = {
   investigatorState: {
     equityThresholds: { nycha_school_m: 300, subway_gap_m: 800 }, // CLAUDE.md's fixed defaults
     fleetSize: 1, // Phase 3 -- 1..10 trucks, matches fleet_scenarios.json's own fleet_sizes range
+    // Phase 4 -- defaults to the 'ideal' preset's own values, which is
+    // also the fixed reference point the projection subtracts against,
+    // so the default state produces exactly zero adjustment (not just
+    // approximately) until the user actually picks something else.
+    weatherScenario: { temp_c: 22.2, precip_mm: 0.0, presetId: 'ideal' },
   },
   fleetScenarios: null, // raw fleet_scenarios.json payload, or null if it failed/wasn't generated -- graceful degradation, same rule as route.json
+  elasticities: null, // raw elasticities.json payload, or null if missing -- Phase 4's weather-scenario projection needs this
+  scenarioPresets: null, // raw scenario_presets.json payload, or null if missing
 };
 
 // Collapsed by default (zero extra height budget); expanding is an
@@ -865,6 +894,126 @@ function noDataStyle(selected) {
   };
 }
 
+// Unit conversion, display-only -- the weather-scenario projection math
+// below always works in Celsius/mm (matching elasticities.json/
+// scenario_presets.json's own units), never Fahrenheit/inches. A US-based
+// DOT-reviewer audience reads degF/inches more naturally, so that's what
+// the sliders show, but converting at the display boundary keeps the
+// underlying math in the same units as every other file in this project.
+function fahrenheitToCelsius(f) { return (f - 32) * 5 / 9; }
+function inchesToMm(inches) { return inches * 25.4; }
+function mmToInches(mm) { return mm / 25.4; }
+
+// Mirrors pipeline/elasticities.py's own TYPOLOGY_SLUGS mapping exactly --
+// matched by cluster_name text, not assumed index, same reasoning as the
+// Python side (a future station_typology.py re-run could flip which index
+// is "0" vs "1"). Duplicated here (not fetched) because it's a fixed,
+// rarely-changing mapping, same treatment as elasticities.py's own
+// hardcoded copy.
+const TYPOLOGY_SLUG_BY_CLUSTER_NAME = {
+  'Commuter core (fills AM, drains PM)': 'commuter_core',
+  'Residential feeder (drains AM, fills PM)': 'residential_feeder',
+};
+
+// station_elasticity/typology_elasticity may each be null (no fetch) or
+// missing the field (e.g. by_station's capacity_elasticity is sometimes
+// absent -- same optional-field shape here for temp/precip, even though
+// in practice every by_station entry does carry them). Station-specific
+// wins if present, per the Guideline's own documented fallback contract.
+function pickElasticity(stationElasticity, typologyElasticity, field) {
+  if (stationElasticity && stationElasticity[field] != null) return stationElasticity[field];
+  if (typologyElasticity && typologyElasticity[field] != null) return typologyElasticity[field];
+  return null;
+}
+
+// Returns the multiplier baseline_flow gets scaled by under the current
+// weather scenario: 1 + temp_elasticity*Δtemp + precip_elasticity*Δprecip,
+// per Investigator Mode Phase 4's own contract formula. Returns exactly 1
+// (no adjustment) when: elasticities.json/scenario_presets.json didn't
+// load, the reference preset can't be found, OR the station has neither a
+// by_station nor a by_typology elasticity at all -- a low-signal (cluster
+// -1) station has NO typology group and often no by_station entry either,
+// and CLAUDE.md's "never invent numbers" rule means such a station is
+// shown unadjusted, not silently guessed at (documented in the panel's
+// own weather-scenario-note text, not just here).
+function weatherMultiplierFor(id) {
+  if (!state.elasticities || !state.scenarioPresets) return 1;
+  const referencePreset = state.scenarioPresets.presets.find(
+    p => p.id === state.scenarioPresets.reference_preset_id
+  );
+  if (!referencePreset) return 1;
+
+  const scenario = state.investigatorState.weatherScenario;
+  const deltaTemp = scenario.temp_c - referencePreset.temp_c;
+  const deltaPrecip = scenario.precip_mm - referencePreset.precip_mm;
+
+  const station = state.stations[id];
+  const slug = TYPOLOGY_SLUG_BY_CLUSTER_NAME[station.cluster_name];
+  const stationElasticity = state.elasticities.by_station[id];
+  const typologyElasticity = slug ? state.elasticities.by_typology[slug] : null;
+
+  const tempElasticity = pickElasticity(stationElasticity, typologyElasticity, 'temp_elasticity');
+  const precipElasticity = pickElasticity(stationElasticity, typologyElasticity, 'precip_elasticity');
+  if (tempElasticity === null && precipElasticity === null) return 1;
+
+  return 1 + (tempElasticity || 0) * deltaTemp + (precipElasticity || 0) * deltaPrecip;
+}
+
+// True when the current weather scenario is exactly the reference preset's
+// own values (temp_c/precip_mm), i.e. produces exactly zero adjustment --
+// not "close to baseline," genuinely identical, since the reference IS
+// the zero point by construction. Also true (deliberately, not just a
+// fallback) when scenario_presets.json hasn't loaded: no reference point
+// means no projection is possible, so nothing should claim to be a
+// scenario.
+function isBaselineWeatherScenario() {
+  if (!state.scenarioPresets) return true;
+  const referencePreset = state.scenarioPresets.presets.find(
+    p => p.id === state.scenarioPresets.reference_preset_id
+  );
+  if (!referencePreset) return true;
+  const scenario = state.investigatorState.weatherScenario;
+  return scenario.temp_c === referencePreset.temp_c && scenario.precip_mm === referencePreset.precip_mm;
+}
+
+// The preset (if any) whose own values exactly match the current slider
+// state -- null once the user has dragged either slider away from every
+// preset's exact values, i.e. a genuinely custom scenario, not a stale
+// dropdown selection.
+function matchingWeatherPreset() {
+  if (!state.scenarioPresets) return null;
+  const scenario = state.investigatorState.weatherScenario;
+  return state.scenarioPresets.presets.find(
+    p => p.temp_c === scenario.temp_c && p.precip_mm === scenario.precip_mm
+  ) || null;
+}
+
+// Short suffix for #title-meta -- lets a collapsed Investigator panel's
+// active scenario stay visible somewhere, so recolored markers are never
+// silently unexplained. Historical-mode concept only (weather elasticities
+// were derived from historical flow, not live dock fill %); callers only
+// use this from historical-mode branches.
+function weatherScenarioMetaSuffix() {
+  if (isBaselineWeatherScenario()) return '';
+  const preset = matchingWeatherPreset();
+  const label = preset ? preset.label : 'custom weather scenario';
+  return ` · ${label} (projected)`;
+}
+
+// Populates the investigator panel's own status line -- the primary,
+// always-visible-when-expanded explanation of what's currently applied,
+// independent of whether #title-meta's compact suffix is also showing.
+function renderWeatherScenarioStatus() {
+  const statusEl = document.getElementById('weather-scenario-status');
+  if (isBaselineWeatherScenario()) {
+    statusEl.textContent = 'Currently showing: baseline (no adjustment).';
+    return;
+  }
+  const preset = matchingWeatherPreset();
+  const label = preset ? preset.label : 'Custom scenario';
+  statusEl.textContent = `Currently showing: ${label} (projected, not baseline).`;
+}
+
 // The single source of truth for one marker's full visual style, given the
 // CURRENT state (mode, period, dayType, currentHour, domainMax,
 // selectedId). A station missing data for whatever's currently selected --
@@ -891,8 +1040,13 @@ function markerStyleFor(id) {
   const station = state.stations[id];
   const curve = curveForPeriod(station, state.period, state.dayType);
   if (curve === null) return noDataStyle(selected);
+  // Weather-scenario projection is historical-mode only (elasticities were
+  // derived from historical flow data, not live dock fill %) -- applied
+  // here, at the single source of truth every marker's color already goes
+  // through, rather than a second parallel coloring path.
+  const adjustedValue = curve[state.currentHour] * weatherMultiplierFor(id);
   return {
-    fillColor: divergingColor(curve[state.currentHour], state.domainMax),
+    fillColor: divergingColor(adjustedValue, state.domainMax),
     fillOpacity: 0.85,
     color: selected ? SELECTED_STROKE : DEFAULT_STROKE,
     weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
@@ -990,11 +1144,11 @@ function updateStatusMessage() {
     return;
   }
   if (state.period === 'all') {
-    meta.textContent = ` · ${ids.length.toLocaleString()} stations`;
+    meta.textContent = ` · ${ids.length.toLocaleString()} stations` + weatherScenarioMetaSuffix();
     return;
   }
   const withData = ids.filter(id => hasPeriodData(state.stations[id], state.period)).length;
-  meta.textContent = ` · ${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have data for ${formatPeriodLabel(state.period)}`;
+  meta.textContent = ` · ${withData.toLocaleString()} of ${ids.length.toLocaleString()} stations have data for ${formatPeriodLabel(state.period)}` + weatherScenarioMetaSuffix();
 }
 
 // Switches historical <-> live and re-renders through the same renderHour
@@ -1403,6 +1557,15 @@ const routeReady = fetchJSON('data/route.json').catch(() => null);
 // all until that script has been run once.
 const fleetScenariosReady = fetchJSON('data/fleet_scenarios.json').catch(() => null);
 
+// elasticities.json/scenario_presets.json (Investigator Mode Phase 4) --
+// same optional/non-fatal treatment. BOTH are needed for a meaningful
+// weather-scenario projection (elasticities to project with, presets for
+// the reference point and quick-fill values), so the dashboard checks for
+// both before revealing that sub-section, but each still fails
+// independently rather than one dragging the other down.
+const elasticitiesReady = fetchJSON('data/elasticities.json').catch(() => null);
+const scenarioPresetsReady = fetchJSON('data/scenario_presets.json').catch(() => null);
+
 // flows.json and live_status.json now fail INDEPENDENTLY -- a live-feed
 // hiccup must not take down real historical data, and a historical-data
 // problem must not be masked by fabricating live counts under real
@@ -1418,8 +1581,8 @@ const liveReady = fetchJSON('data/live_status.json')
   .then(payload => ({ payload, ok: true }))
   .catch(error => ({ payload: null, ok: false, error }));
 
-const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosReady])
-  .then(([flowsResult, liveResult, routePayload, fleetScenariosPayload]) => {
+const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady])
+  .then(([flowsResult, liveResult, routePayload, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload]) => {
     state.stations = flowsResult.payload.stations;
     state.liveAvailable = liveResult.ok;
     state.liveStations = liveResult.ok ? liveResult.payload.stations : {};
@@ -1520,6 +1683,80 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
       });
     } else {
       document.getElementById('fleet-sim-wrap').classList.add('hidden');
+    }
+
+    // Weather scenario sub-section (Phase 4): visible only if BOTH
+    // elasticities.json and scenario_presets.json loaded -- a projection
+    // needs both (elasticities to project with, presets for the reference
+    // point and quick-fill values). Preset/slider initial state set
+    // explicitly here from state.investigatorState.weatherScenario, same
+    // standing fix as every other control above. Every change re-renders
+    // through renderHour() (the one existing render path every marker's
+    // color already goes through, not a second parallel coloring path),
+    // rAF-throttled the same as the hour slider.
+    state.elasticities = elasticitiesPayload;
+    state.scenarioPresets = scenarioPresetsPayload;
+    if (state.elasticities && state.scenarioPresets) {
+      document.getElementById('weather-scenario-wrap').classList.remove('hidden');
+      const presetSelect = document.getElementById('weather-preset-select');
+      const tempSlider = document.getElementById('weather-temp-slider');
+      const tempValueEl = document.getElementById('weather-temp-value');
+      const precipSlider = document.getElementById('weather-precip-slider');
+      const precipValueEl = document.getElementById('weather-precip-value');
+
+      const initialScenario = state.investigatorState.weatherScenario;
+      presetSelect.value = initialScenario.presetId;
+      const initialTempF = Math.round(initialScenario.temp_c * 9 / 5 + 32);
+      tempSlider.value = String(initialTempF);
+      tempValueEl.textContent = String(initialTempF);
+      const initialPrecipIn = mmToInches(initialScenario.precip_mm);
+      precipSlider.value = initialPrecipIn.toFixed(2);
+      precipValueEl.textContent = initialPrecipIn.toFixed(1);
+      renderWeatherScenarioStatus();
+
+      let weatherRafScheduled = false;
+      function scheduleWeatherRerender() {
+        if (!weatherRafScheduled) {
+          weatherRafScheduled = true;
+          requestAnimationFrame(() => {
+            renderHour(state.currentHour);
+            updateStatusMessage(); // renderHour() alone doesn't refresh #title-meta's weather-scenario suffix
+            renderWeatherScenarioStatus();
+            weatherRafScheduled = false;
+          });
+        }
+      }
+
+      presetSelect.addEventListener('change', event => {
+        const preset = state.scenarioPresets.presets.find(p => p.id === event.target.value);
+        if (!preset) return;
+        state.investigatorState.weatherScenario = {
+          temp_c: preset.temp_c, precip_mm: preset.precip_mm, presetId: preset.id,
+        };
+        const tempF = Math.round(preset.temp_c * 9 / 5 + 32);
+        tempSlider.value = String(tempF);
+        tempValueEl.textContent = String(tempF);
+        const precipIn = mmToInches(preset.precip_mm);
+        precipSlider.value = precipIn.toFixed(2);
+        precipValueEl.textContent = precipIn.toFixed(1);
+        scheduleWeatherRerender();
+      });
+
+      tempSlider.addEventListener('input', event => {
+        const f = Number(event.target.value);
+        tempValueEl.textContent = String(f);
+        state.investigatorState.weatherScenario.temp_c = fahrenheitToCelsius(f);
+        scheduleWeatherRerender();
+      });
+
+      precipSlider.addEventListener('input', event => {
+        const inches = Number(event.target.value);
+        precipValueEl.textContent = inches.toFixed(1);
+        state.investigatorState.weatherScenario.precip_mm = inchesToMm(inches);
+        scheduleWeatherRerender();
+      });
+    } else {
+      document.getElementById('weather-scenario-wrap').classList.add('hidden');
     }
 
     // Period options built from flows.json's own granularity block, never a
@@ -1678,6 +1915,8 @@ if (typeof globalThis !== 'undefined') {
     setModelEvalExpanded,
     setInvestigatorExpanded, computeEquityCounts, renderEquityCounts, setEquityThreshold,
     renderFleetStats, applyFleetScenarioToRoute, setFleetSize,
+    fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
+    isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,
     getState: () => state,
     ready,
   };

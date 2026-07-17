@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from pipeline.download import RAW_DATA_DIR, load_trips
-from pipeline.flows import add_season, compute_net_flow, compute_throughput, export_flows
+from pipeline.flows import add_season, compute_daily_net_flow, compute_net_flow, compute_throughput, export_flows
 from pipeline.qc import run_qc
 
 BASE_ROW = {
@@ -135,6 +135,65 @@ def test_throughput_per_day_normalizes_by_distinct_dates():
     assert dep_row["n_days"].iloc[0] == 2
     assert dep_row["count"].iloc[0] == 2
     assert dep_row["throughput_per_day"].iloc[0] == 1.0
+
+
+def test_daily_net_flow_counts_arrivals_and_departures_correctly():
+    # Mirrors test_net_flow_counts_arrivals_and_departures_correctly, but
+    # keyed by real calendar date, not a month label -- and no per-day
+    # normalization is needed since each row already IS one specific date.
+    clean = qc_clean(
+        [make_trip("2026-04-01 08:00:00", "2026-04-01 08:15:00", ride_id="t1")]
+    )
+    daily = compute_daily_net_flow(clean)
+
+    dep_row = daily[(daily["station_id"] == "1") & (daily["hour"] == 8)]
+    arr_row = daily[(daily["station_id"] == "2") & (daily["hour"] == 8)]
+
+    assert dep_row["date"].iloc[0] == pd.Timestamp("2026-04-01")
+    assert dep_row["net"].iloc[0] == -1
+    assert arr_row["net"].iloc[0] == 1
+
+
+def test_daily_net_flow_missing_end_station_counts_as_departure_only():
+    # Mirrors test_missing_end_station_counts_as_departure_only: a trip
+    # missing its end station still contributes to the departure side,
+    # same asymmetric-validity handling compute_net_flow relies on.
+    clean = qc_clean(
+        [
+            make_trip(
+                "2026-04-01 08:00:00",
+                "2026-04-01 08:15:00",
+                ride_id="no_end",
+                end_station_id=float("nan"),
+                end_station_name=float("nan"),
+            )
+        ]
+    )
+    daily = compute_daily_net_flow(clean)
+
+    assert set(daily["station_id"]) == {"1"}
+    assert daily["net"].iloc[0] == -1
+
+
+def test_daily_net_flow_keeps_distinct_dates_separate():
+    # The key behavioral difference from compute_net_flow: two departures
+    # from the same station on two different Wednesdays must stay as TWO
+    # separate rows here (one per real date), not get merged/averaged into
+    # one normalized net_per_day value the way compute_net_flow's monthly
+    # grain does. This is exactly what elasticity fitting needs -- real
+    # per-day variance, not a single monthly average.
+    clean = qc_clean(
+        [
+            make_trip("2026-04-01 08:00:00", "2026-04-01 08:15:00", ride_id="t1"),
+            make_trip("2026-04-08 08:00:00", "2026-04-08 08:15:00", ride_id="t2"),
+        ]
+    )
+    daily = compute_daily_net_flow(clean)
+    dep_rows = daily[(daily["station_id"] == "1") & (daily["hour"] == 8)]
+
+    assert len(dep_rows) == 2, "two distinct dates must produce two separate rows, not one merged/averaged row"
+    assert set(dep_rows["date"]) == {pd.Timestamp("2026-04-01"), pd.Timestamp("2026-04-08")}
+    assert (dep_rows["net"] == -1).all()
 
 
 def test_add_season_maps_month_to_fixed_season():

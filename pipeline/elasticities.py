@@ -4,14 +4,26 @@ Two genuinely different methods feed one output file -- see the
 "method" field elasticities.json actually writes, which names both,
 rather than implying one unified model produced everything:
 
-- temp_elasticity / precip_elasticity: real partial dependence off
-  Session 5's Feb+April HistGradientBoostingRegressor (pipeline/gbm.py).
-  This module's __main__ loads gbm.py's persisted model artifact
-  (MODEL_PATH) if present, or trains it once from real cached data and
-  saves it before continuing (gbm.py's own get_or_train_model() does the
-  same load-or-train, for other future callers) -- Session 4/5 never
-  actually persisted a model, so there was nothing to "just load" the
-  first time this ever runs (see PROGRESS.md Session 21).
+- temp_elasticity / precip_elasticity: a DIRECT linear regression of
+  real per-(station, date) daily flow magnitude against real per-date
+  temperature/precipitation, jointly (magnitude ~ b0 + b1*temp_c +
+  b2*precip_mm), NOT partial dependence off pipeline/gbm.py's GBM.
+  Session 25 found the original PDP-based approach was fit through only
+  5 distinct temp/precip values total, because gbm.py's own weather
+  features are each a per-MONTH aggregate -- the partial dependence
+  curve itself showed a sharp, likely-artifactual jump at the single
+  highest observed point. Session 27 replaced it: pipeline/flows.py's
+  new compute_daily_net_flow() reaggregates the SAME already-cached
+  Feb/April/June trip data at real calendar-date grain instead of
+  monthly grain, joined against real daily temp/precip from Open-Meteo
+  (a cheap API call, not a bulk download -- no new trip data was
+  downloaded for this fix). This gives up to 90 real distinct days
+  instead of 5 monthly-aggregate points. gbm.py's own model is no
+  longer a runtime dependency of this module at all -- it's still a
+  real, separately-useful, already-characterized artifact (Session 5's
+  own documented 49.9%-directional-accuracy backtest, still shown in
+  the dashboard's model-eval footer), just not what temp/precip
+  elasticity is computed from anymore.
 - capacity_elasticity: capacity was NEVER one of that model's trained
   features (see FEATURE_COLUMNS in gbm.py), so its partial dependence
   cannot be computed from it without adding the feature and refitting --
@@ -70,9 +82,15 @@ honestly rather than pretend otherwise: a station's by_station
 capacity_elasticity is its typology group's fitted curve evaluated at
 that station's own real capacity (a real, station-specific NUMBER), not
 a station-specific fit (which is impossible with one capacity
-observation per station). Only temp_elasticity/precip_elasticity in
-by_station are genuinely fit per-station (partial dependence restricted
-to that station's own Feb+April feature-panel rows).
+observation per station). temp_elasticity/precip_elasticity in
+by_station ARE genuinely fit per-station -- that station's own real
+daily (date, magnitude) observations, its own regression, not a group
+value evaluated locally -- but only when there are enough of them
+(MIN_DAILY_OBSERVATIONS); a station with too few real days omits these
+two fields and falls back to its by_typology value in the dashboard,
+same "by_station entries only exist for stations meeting the low-volume
+threshold" contract extended one level further (station has a real
+cluster, but not necessarily enough real days for its OWN fit).
 """
 
 from __future__ import annotations
@@ -83,25 +101,30 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.inspection import partial_dependence
 
-from pipeline.gbm import (
-    CATEGORICAL_COLUMNS,
-    DEFAULT_CATEGORIES,
-    DEFAULT_TRAIN_MONTHS,
-    FEATURE_COLUMNS,
-    MODEL_PATH,
-    apply_shared_categories,
-    build_training_data,
-    load_model,
-    save_model,
-    train_gbm,
-)
+# DEFAULT_TRAIN_MONTHS is still imported for load_station_throughput's own
+# purpose (capacity's busyness control, unchanged by this session's fix --
+# capacity's regression already used hundreds of real per-station points,
+# never had a sparse-grid problem). Nothing else from gbm.py is needed
+# anymore: temp/precip elasticity no longer goes through that model at
+# all -- see the module docstring.
+from pipeline.gbm import DEFAULT_TRAIN_MONTHS
 from pipeline.station_typology import LOW_SIGNAL_NAME, LOW_VOLUME_THRESHOLD
 
 FLOWS_PATH = Path(__file__).resolve().parent.parent / "data" / "flows.json"
 LIVE_STATUS_PATH = Path(__file__).resolve().parent.parent / "data" / "live_status.json"
 ELASTICITIES_PATH = Path(__file__).resolve().parent.parent / "data" / "elasticities.json"
+
+# ALL cached real months feed the daily weather regression, not just
+# gbm.py's Feb+April training split -- there's no train/test-holdout
+# concept to preserve here (this fits a direct historical regression, not
+# a forecast to be honestly evaluated on unseen data), so using June too
+# is strictly more real data with a wider real temperature range, at zero
+# additional download cost (already cached).
+DAILY_REGRESSION_MONTHS = ["2026-02", "2026-04", "2026-06"]
+WEATHER_FETCH_START = "2026-02-01"
+WEATHER_FETCH_END = "2026-06-30"  # matches gbm.py's own cached Open-Meteo pull -- reuses the same cache file, no new fetch
+MIN_DAILY_OBSERVATIONS = 10  # real degrees-of-freedom floor for a 3-coefficient (intercept+temp+precip) fit
 
 # Maps the real cluster_name strings station_typology.py writes onto
 # flows.json (Session 9's actual k=2 run) to the Guideline contract's
@@ -113,16 +136,20 @@ TYPOLOGY_SLUGS = {
     "Residential feeder (drains AM, fills PM)": "residential_feeder",
 }
 
-PDP_GRID_RESOLUTION = 10  # only need enough grid points to fit a robust linear slope, not a full curve
 METHOD_NOTE = (
-    "temp_elasticity/precip_elasticity: partial dependence (sklearn "
-    "partial_dependence, method='brute' so each group/station's own real "
-    "feature-panel rows are genuinely averaged over, not the global "
-    "training background) off pipeline/gbm.py's Session 5 Feb+April "
-    "HistGradientBoostingRegressor -- the only two of these three "
-    "features that model was actually trained on. "
-    "capacity_elasticity: NOT from that model -- capacity was never one "
-    "of its trained features. Instead, a separate quadratic least-squares "
+    "temp_elasticity/precip_elasticity: a direct joint linear regression "
+    "of real per-(station, date) daily flow magnitude against real daily "
+    "temp_c/precip_mm (Open-Meteo), fit once per typology group (pooling "
+    "every station's every real day -- up to ~2,000 stations x 90 days) "
+    "for by_typology, or per-station (that station's own up to 90 real "
+    "days only) for by_station when there are enough of them "
+    "(MIN_DAILY_OBSERVATIONS). Uses ALL of Feb/April/June (not just "
+    "gbm.py's Feb+April training split) -- there's no forecast to "
+    "honestly evaluate on held-out data here, just a historical "
+    "association to estimate, so more real days is strictly better. "
+    "Replaced Session 25's partial-dependence-off-a-monthly-aggregate "
+    "approach entirely -- see the module docstring. "
+    "capacity_elasticity: a separate quadratic least-squares "
     "fit of real per-station mean |weekday net flow| (flows.json) against "
     "real per-station capacity (live_status.json) AND real per-station "
     "ridership throughput (arrivals+departures/day, pipeline/flows.py's "
@@ -148,29 +175,26 @@ CONFOUND_CAVEAT = (
     "magnitude,' not as a validated forecast of what adding docks to a "
     "specific station would do."
 )
-DIRECTIONAL_ACCURACY_CAVEAT = (
-    "The underlying Feb+April GBM's own Session 5 backtest got directional "
-    "sign right only 49.9% of the time on June (a coin flip) because June's "
-    "actual mean temperature fell outside the Feb+April training range and "
-    "gradient-boosted trees cannot extrapolate past it. temp_elasticity/"
-    "precip_elasticity inherit this weakness -- treat them as illustrative "
-    "sensitivities from a directionally-unreliable model, not a validated "
-    "forecast of what a real temperature/precipitation change would do."
-)
-SPARSE_GRID_CAVEAT = (
-    "A further weakness beyond the directional-accuracy caveat above, "
-    "found while building Investigator Mode Phase 4 (weather scenarios): "
-    "temp_mean_c and precip_mm are each a per-(month, day_type) AGGREGATE, "
-    "not a per-observation feature, so the entire Feb+April training panel "
-    "contains only 5 distinct values of each (checked directly: temp_mean_c "
-    "in {-4.4, -2.6, 11.1, 13.1, 18.7} degrees C). temp_elasticity/"
-    "precip_elasticity are therefore linear-regression slopes fit through "
-    "only 5 points, not a smooth curve -- and the partial dependence curve "
-    "itself shows a sharp isolated jump at the single highest point (18.7C), "
-    "consistent with a sparse-grid artifact rather than a genuine trend. "
-    "Any consumer projecting a scenario from these elasticities should "
-    "treat values near or beyond that top point as resting on the fit's "
-    "least reliable segment, not simply 'outside the observed range.'"
+DAILY_REGRESSION_CAVEAT = (
+    "Session 25 originally found temp_elasticity/precip_elasticity fit "
+    "through only 5 sparse, monthly-aggregate points with a likely-"
+    "artifactual jump at the top one. Session 27 fixed the underlying "
+    "data granularity (real daily observations instead of monthly "
+    "aggregates), NOT just the caveat -- but real limitations remain, "
+    "stated plainly rather than implied resolved: these are still up to "
+    "90 days from 3 NON-CONTIGUOUS months (Feb/April/June), not a "
+    "continuous year, so intervening months (Jan, Mar, May, and Jul "
+    "onward) contribute nothing; and temp_c/precip_mm are each ONE "
+    "city-wide daily value (Open-Meteo's Central Park reference point, "
+    "per pipeline/weather.py), not per-station, so real local weather "
+    "variation across NYC's boroughs is not captured. A joint fit "
+    "(temp and precip together, not two separate univariate fits) "
+    "controls for the two being correlated with each other (a rainy day "
+    "is often also cooler), but not for anything else true of those "
+    "specific calendar days that isn't captured by date-of-year "
+    "position or day-of-week (already implicit in which real dates got "
+    "sampled) -- still an observational association, not a controlled "
+    "experiment."
 )
 # Rank-correlation thresholds for how confidently ceiling_effect_note() below
 # describes the diminishing-effect evidence as "clean" vs "weak/inconsistent"
@@ -214,52 +238,77 @@ def station_magnitude(weekday_curve: list[float]) -> float:
     return float(np.mean(np.abs(weekday_curve)))
 
 
-NUMERIC_FEATURE_COLUMNS = [c for c in FEATURE_COLUMNS if c not in CATEGORICAL_COLUMNS]
+def load_daily_weather_panel(months: list[str] = DAILY_REGRESSION_MONTHS) -> pd.DataFrame:
+    """Real per-(station, date) daily flow magnitude joined against real
+    daily temp_c/precip_mm -- the direct replacement for Session 25's
+    PDP-off-a-monthly-aggregate approach (see module docstring).
 
+    Reuses pipeline.flows.compute_daily_net_flow (station_id typing and
+    midnight-crossing-safe date handling already fixed in Session 5, same
+    reuse pattern load_station_throughput below already established for
+    compute_throughput) and pipeline.weather.fetch_daily_weather (the
+    exact real Open-Meteo pull gbm.py already caches, just joined at
+    daily instead of monthly grain here -- no new fetch).
 
-def clean_feature_rows(X: pd.DataFrame) -> pd.DataFrame:
-    """Drop rows with NaN in any numeric feature column.
-
-    A handful of rows carry a NaN temp_mean_c/precip_mm: the Feb/April raw
-    trip files include a few midnight-crossing trips labeled with an
-    adjacent month ('2026-01', '2026-05' -- see PROGRESS.md Sessions 3/5),
-    and the weather fetch only covers 2026-02-01..2026-06-30, so those
-    out-of-range months merge to NaN. HistGradientBoostingRegressor
-    tolerates NaN natively (why training/predicting never broke on this),
-    but partial_dependence's grid/slope fit does not -- confirmed by a real
-    crash against real data, not assumed. Filtering here (not in gbm.py's
-    training data) keeps the already-verified Session 5 model exactly as
-    trained; this only affects which rows feed a PDP estimate.
+    Magnitude per (station, date) is the mean absolute hourly net flow
+    that day -- the same "mean of |curve|" definition station_magnitude()
+    already uses, kept consistent so "how big is this station's typical
+    swing" means the same thing everywhere in this file.
     """
-    return X.dropna(subset=NUMERIC_FEATURE_COLUMNS)
+    from pipeline.download import download_month, load_trips
+    from pipeline.flows import compute_daily_net_flow
+    from pipeline.qc import run_qc
+    from pipeline.weather import fetch_daily_weather
 
+    def _load_clean_trips(year_month: str) -> pd.DataFrame:
+        zip_path = download_month(year_month)
+        trips = load_trips(zip_path)
+        clean, _report = run_qc(trips)
+        return clean
 
-def pdp_slope(model, X: pd.DataFrame, feature: str, categories: dict[str, list]) -> float | None:
-    """Linear-regression slope of `feature`'s partial dependence curve over
-    its own grid, restricted to the rows in X (method='brute' -- unlike the
-    default 'recursion' method, this genuinely marginalizes over X's own
-    other-feature values rather than the whole training set's background,
-    which is what makes a per-station or per-typology-group subset
-    meaningful here rather than nearly identical regardless of which rows
-    are passed in).
-
-    Returns None if X has fewer than 2 clean (non-NaN) rows (not enough to
-    mean anything).
-    """
-    X = clean_feature_rows(X)
-    if len(X) < 2:
-        return None
-    X_typed = apply_shared_categories(X, categories)
-    result = partial_dependence(
-        model, X_typed[FEATURE_COLUMNS], features=[feature],
-        method="brute", kind="average", grid_resolution=PDP_GRID_RESOLUTION,
+    daily = pd.concat([compute_daily_net_flow(_load_clean_trips(m)) for m in months], ignore_index=True)
+    daily_magnitude = (
+        daily.groupby(["station_id", "date"])["net"]
+        .apply(lambda x: float(np.mean(np.abs(x))))
+        .rename("magnitude")
+        .reset_index()
     )
-    grid = np.asarray(result["grid_values"][0], dtype=float)
-    average = np.asarray(result["average"][0], dtype=float)
-    if len(grid) < 2:
+
+    weather = fetch_daily_weather(WEATHER_FETCH_START, WEATHER_FETCH_END)
+    # Inner join: a handful of midnight-crossing spillover dates (e.g.
+    # 2026-01-31, outside the fetched weather range) simply have no
+    # weather match and are dropped -- graceful, not fabricated, same
+    # rule as every other NaN-adjacent gap in this project.
+    return daily_magnitude.merge(weather[["date", "temp_mean_c", "precip_mm"]], on="date", how="inner")
+
+
+def fit_daily_weather_regression(
+    magnitudes: np.ndarray, temps: np.ndarray, precips: np.ndarray, n_distinct_days: int
+) -> tuple[float, float, float] | None:
+    """Joint least-squares fit: magnitude ~ b0 + b1*temp_c + b2*precip_mm.
+
+    Joint (not two separate univariate fits) so each coefficient controls
+    for the other -- a rainy day is often also a cooler day, and fitting
+    temp alone would let some of precip's real effect leak into the temp
+    coefficient. Linear, not quadratic like fit_capacity_curve -- there's
+    no equivalent "diminishing effect" hypothesis to check here, and a
+    plain linear fit is the more auditable default per CLAUDE.md's
+    baseline-first style rule.
+
+    Returns None if fewer than MIN_DAILY_OBSERVATIONS distinct days are
+    available -- real degrees-of-freedom floor for a 3-coefficient fit,
+    checked against DISTINCT DAYS (what actually drives the weather
+    axis's variance), not row count (which could be inflated by pooling
+    many stations on the same handful of days).
+    """
+    if n_distinct_days < MIN_DAILY_OBSERVATIONS:
         return None
-    slope, _intercept = np.polyfit(grid, average, 1)
-    return float(slope)
+    X = np.column_stack([np.ones_like(temps), temps, precips])
+    coeffs, _residuals, rank, _singular_values = np.linalg.lstsq(X, magnitudes, rcond=None)
+    if rank < 3:
+        return None
+    b0, b1, b2 = coeffs
+    return float(b0), float(b1), float(b2)
 
 
 def load_station_throughput(train_months: list[str] = DEFAULT_TRAIN_MONTHS) -> pd.Series:
@@ -330,17 +379,16 @@ def capacity_local_slope(b1: float, b2: float, capacity: float) -> float:
 
 
 def build_elasticities(
-    flows_payload: dict, live_payload: dict, model, train_features: pd.DataFrame,
-    throughput_by_id: pd.Series, categories: dict[str, list] = DEFAULT_CATEGORIES,
+    flows_payload: dict, live_payload: dict, daily_panel: pd.DataFrame, throughput_by_id: pd.Series,
 ) -> dict:
-    """Build the full elasticities.json payload from real data + a fitted model.
+    """Build the full elasticities.json payload from real data.
 
     Only processes station_ids present in flows_payload["stations"] --
     that dict is the dashboard's actual station roster, so a station
-    train_features happens to include (a fresh Feb+April repull can have a
-    slightly different roster than whatever pull flows.json was last built
-    from) but flows.json doesn't know about has nowhere in the output to
-    attach to.
+    daily_panel/throughput_by_id happens to include (a fresh repull can
+    have a slightly different roster than whatever pull flows.json was
+    last built from) but flows.json doesn't know about has nowhere in the
+    output to attach to.
     """
     stations = flows_payload["stations"]
     live_stations = live_payload["stations"]
@@ -366,11 +414,15 @@ def build_elasticities(
     for slug, station_ids in groups.items():
         if not station_ids:
             continue
-        group_features = train_features[train_features["station_id"].isin(station_ids)]
+        group_panel = daily_panel[daily_panel["station_id"].isin(station_ids)]
         group_magnitude = float(np.mean([magnitude_by_id[sid] for sid in station_ids]))
 
-        temp_slope = pdp_slope(model, group_features, "temp_mean_c", categories)
-        precip_slope = pdp_slope(model, group_features, "precip_mm", categories)
+        group_curve = fit_daily_weather_regression(
+            group_panel["magnitude"].to_numpy(), group_panel["temp_mean_c"].to_numpy(),
+            group_panel["precip_mm"].to_numpy(), group_panel["date"].nunique(),
+        )
+        temp_slope = group_curve[1] if group_curve is not None else None
+        precip_slope = group_curve[2] if group_curve is not None else None
 
         # Only stations with BOTH a real capacity match and a real throughput
         # estimate can feed the capacity regression -- fewer than
@@ -401,6 +453,7 @@ def build_elasticities(
             "precip_elasticity": round(precip_slope / group_magnitude, 4) if precip_slope is not None else None,
             "n_stations": len(station_ids),
             "n_stations_with_capacity": int(len(capacity_ids)),
+            "n_daily_observations": int(len(group_panel)),
             "capacity_throughput_correlation": (
                 round(capacity_throughput_corr, 4) if capacity_throughput_corr is not None else None
             ),
@@ -412,16 +465,23 @@ def build_elasticities(
         slug = TYPOLOGY_SLUGS.get(rec.get("cluster_name"))
         if slug is None:
             continue  # low-signal (cluster -1) or unrecognized label -- no group to fall back to
-        station_features = clean_feature_rows(train_features[train_features["station_id"] == sid])
-        n_obs = len(station_features)
-        if n_obs == 0:
-            continue  # no real (non-NaN-weather) Feb+April rows for this station -- nothing to fit, skip rather than fabricate
-
-        temp_slope = pdp_slope(model, station_features, "temp_mean_c", categories)
-        precip_slope = pdp_slope(model, station_features, "precip_mm", categories)
         magnitude = magnitude_by_id[sid]
         if magnitude == 0:
             continue  # a genuinely flat curve -- dividing by zero would fabricate an infinite elasticity
+
+        # Each row of daily_panel is already one (station, date) pair (the
+        # groupby in load_daily_weather_panel collapsed hour-level rows
+        # down to one magnitude per day), so len() here IS the real
+        # distinct-day count for this specific station -- no separate
+        # nunique() needed.
+        station_panel = daily_panel[daily_panel["station_id"] == sid]
+        n_obs = len(station_panel)
+        station_curve = fit_daily_weather_regression(
+            station_panel["magnitude"].to_numpy(), station_panel["temp_mean_c"].to_numpy(),
+            station_panel["precip_mm"].to_numpy(), n_obs,
+        )
+        temp_slope = station_curve[1] if station_curve is not None else None
+        precip_slope = station_curve[2] if station_curve is not None else None
 
         entry = {
             "temp_elasticity": round(temp_slope / magnitude, 4) if temp_slope is not None else None,
@@ -479,8 +539,7 @@ def build_elasticities(
             "see the top-level 'method' field. " + CONFOUND_CAVEAT + " "
             "Ceiling-effect evidence by group (a real Spearman rank correlation between "
             "by_station capacity and capacity_elasticity, not asserted uniformly): "
-            + " ".join(ceiling_effect_notes) + " " + DIRECTIONAL_ACCURACY_CAVEAT
-            + " " + SPARSE_GRID_CAVEAT
+            + " ".join(ceiling_effect_notes) + " " + DAILY_REGRESSION_CAVEAT
         ),
     }
 
@@ -489,23 +548,13 @@ if __name__ == "__main__":
     flows_payload = json.loads(FLOWS_PATH.read_text())
     live_payload = json.loads(LIVE_STATUS_PATH.read_text())
 
-    # train_features is needed regardless (PDP requires the real feature
-    # panel, not just a fitted model), so build it once and only train+save
-    # a model if get_or_train_model() would otherwise have to rebuild the
-    # exact same panel a second time internally to do the same thing.
-    _, _, train_features, _ = build_training_data()
-    if MODEL_PATH.exists():
-        model = load_model()
-        print(f"Loaded existing model from {MODEL_PATH}")
-    else:
-        model = train_gbm(train_features, DEFAULT_CATEGORIES)
-        save_model(model)
-        print(f"Trained and saved model to {MODEL_PATH}")
-
     print("Computing real per-station ridership throughput (busyness control)...")
     throughput_by_id = load_station_throughput()
 
-    payload = build_elasticities(flows_payload, live_payload, model, train_features, throughput_by_id)
+    print("Computing real per-(station, date) daily flow magnitude vs. real daily weather...")
+    daily_panel = load_daily_weather_panel()
+
+    payload = build_elasticities(flows_payload, live_payload, daily_panel, throughput_by_id)
 
     ELASTICITIES_PATH.write_text(json.dumps(payload, indent=2))
 

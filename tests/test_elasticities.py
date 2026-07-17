@@ -4,14 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pipeline.gbm import DEFAULT_CATEGORIES, train_gbm
 from pipeline.elasticities import (
     build_elasticities,
     capacity_local_slope,
     ceiling_effect_note,
-    clean_feature_rows,
     fit_capacity_curve,
-    pdp_slope,
+    fit_daily_weather_regression,
     station_magnitude,
 )
 
@@ -20,76 +18,42 @@ def test_station_magnitude_is_mean_absolute_value():
     assert station_magnitude([1, -2, 3, -4] + [0] * 20) == pytest.approx((1 + 2 + 3 + 4) / 24)
 
 
-def test_clean_feature_rows_drops_nan_numeric_columns_only():
-    df = pd.DataFrame(
-        {
-            "lat": [40.7, 40.7, 40.7],
-            "lng": [-74.0, -74.0, -74.0],
-            "hour": [8, 9, 10],
-            "day_type": ["weekday", "weekday", "weekday"],
-            "temp_mean_c": [10.0, float("nan"), 12.0],
-            "precip_mm": [1.0, 2.0, float("nan")],
-            "holiday_fraction": [0.0, 0.0, 0.0],
-            "doy_sin": [0.1, 0.1, 0.1],
-            "doy_cos": [0.9, 0.9, 0.9],
-        }
-    )
-    cleaned = clean_feature_rows(df)
-    assert len(cleaned) == 1
-    assert cleaned["hour"].iloc[0] == 8
-
-
-def _make_model_and_features():
-    """A small real HistGradientBoostingRegressor fit on synthetic data with
-    gbm.py's exact feature schema, so pdp_slope's real sklearn call path
-    (categorical dtype handling, method='brute') is genuinely exercised,
-    not mocked.
-    """
+def test_fit_daily_weather_regression_recovers_known_direction_on_synthetic_data():
     rng = np.random.default_rng(0)
     n = 300
-    df = pd.DataFrame(
-        {
-            "station_id": rng.choice(["A", "B", "C"], n),
-            "lat": rng.uniform(40.7, 40.8, n),
-            "lng": rng.uniform(-74.0, -73.9, n),
-            "hour": rng.integers(0, 24, n),
-            "day_type": rng.choice(["weekday", "weekend"], n),
-            "temp_mean_c": rng.uniform(-5, 25, n),
-            "precip_mm": rng.uniform(0, 10, n),
-            "holiday_fraction": rng.uniform(0, 1, n),
-            "doy_sin": rng.uniform(-1, 1, n),
-            "doy_cos": rng.uniform(-1, 1, n),
-            "n_days": rng.integers(1, 10, n),
-        }
-    )
-    df["net_per_day"] = 0.5 * df["temp_mean_c"] - 0.3 * df["precip_mm"] + rng.normal(0, 1, n)
-    model = train_gbm(df, DEFAULT_CATEGORIES)
-    return model, df
+    temps = rng.uniform(-5, 25, n)
+    precips = rng.uniform(0, 10, n)
+    magnitudes = 0.5 * temps - 0.3 * precips + rng.normal(0, 1, n)
+
+    curve = fit_daily_weather_regression(magnitudes, temps, precips, n_distinct_days=90)
+    assert curve is not None
+    b0, b1, b2 = curve
+    assert b1 == pytest.approx(0.5, abs=0.1)  # true temp coefficient
+    assert b2 == pytest.approx(-0.3, abs=0.1)  # true precip coefficient
 
 
-def test_pdp_slope_recovers_known_direction_on_synthetic_data():
-    model, df = _make_model_and_features()
-    temp_slope = pdp_slope(model, df, "temp_mean_c", DEFAULT_CATEGORIES)
-    precip_slope = pdp_slope(model, df, "precip_mm", DEFAULT_CATEGORIES)
-    assert temp_slope > 0  # true coefficient +0.5
-    assert precip_slope < 0  # true coefficient -0.3
+def test_fit_daily_weather_regression_controls_for_correlated_features():
+    # temp and precip are deliberately correlated (rainy days run cooler)
+    # -- a joint fit must still recover each TRUE coefficient separately,
+    # not let one leak into the other the way two independent univariate
+    # fits would.
+    rng = np.random.default_rng(1)
+    n = 300
+    temps = rng.uniform(-5, 25, n)
+    precips = np.clip(10 - 0.3 * temps + rng.normal(0, 1, n), 0, None)  # correlated with temp
+    magnitudes = 0.4 * temps - 0.5 * precips + rng.normal(0, 0.5, n)
+
+    curve = fit_daily_weather_regression(magnitudes, temps, precips, n_distinct_days=90)
+    b0, b1, b2 = curve
+    assert b1 == pytest.approx(0.4, abs=0.15)
+    assert b2 == pytest.approx(-0.5, abs=0.15)
 
 
-def test_pdp_slope_returns_none_with_fewer_than_two_rows():
-    model, df = _make_model_and_features()
-    assert pdp_slope(model, df.iloc[:1], "temp_mean_c", DEFAULT_CATEGORIES) is None
-
-
-def test_pdp_slope_drops_nan_rows_instead_of_crashing():
-    # Real bug found against real data (PROGRESS.md Session 21): a handful
-    # of midnight-crossing-spillover rows carry NaN temp_mean_c/precip_mm,
-    # which used to crash np.polyfit with a LinAlgError.
-    model, df = _make_model_and_features()
-    df = df.copy()
-    df.loc[df.index[0], "temp_mean_c"] = float("nan")
-    df.loc[df.index[1], "precip_mm"] = float("nan")
-    slope = pdp_slope(model, df, "temp_mean_c", DEFAULT_CATEGORIES)
-    assert slope is not None
+def test_fit_daily_weather_regression_returns_none_with_too_few_distinct_days():
+    temps = np.array([10.0, 12.0, 15.0])
+    precips = np.array([1.0, 2.0, 0.5])
+    magnitudes = np.array([1.0, 1.2, 0.9])
+    assert fit_daily_weather_regression(magnitudes, temps, precips, n_distinct_days=3) is None
 
 
 def test_fit_capacity_curve_recovers_known_quadratic_and_throughput_term():
@@ -188,52 +152,54 @@ def _live_payload():
     }
 
 
-def _train_features_for(station_ids, rng):
+def _daily_panel_for(station_ids, rng, n_days=20):
+    """Synthetic replacement for the old _train_features_for helper -- real
+    per-(station, date) rows, matching load_daily_weather_panel's own
+    output schema (station_id, date, magnitude, temp_mean_c, precip_mm),
+    not the retired hourly feature-panel shape.
+    """
+    dates = pd.date_range("2026-02-01", periods=n_days, freq="D")
     rows = []
     for sid in station_ids:
-        for _ in range(20):
+        for date in dates:
+            temp = rng.uniform(-5, 25)
+            precip = rng.uniform(0, 10)
             rows.append(
                 {
                     "station_id": sid,
-                    "lat": 40.7 + rng.uniform(0, 0.1),
-                    "lng": -74.0 + rng.uniform(0, 0.1),
-                    "hour": int(rng.integers(0, 24)),
-                    "day_type": rng.choice(["weekday", "weekend"]),
-                    "temp_mean_c": rng.uniform(-5, 25),
-                    "precip_mm": rng.uniform(0, 10),
-                    "holiday_fraction": rng.uniform(0, 1),
-                    "doy_sin": rng.uniform(-1, 1),
-                    "doy_cos": rng.uniform(-1, 1),
-                    "n_days": int(rng.integers(1, 10)),
+                    "date": date,
+                    "temp_mean_c": temp,
+                    "precip_mm": precip,
+                    "magnitude": 5.0 + 0.4 * temp - 0.2 * precip + rng.normal(0, 1),
                 }
             )
-    df = pd.DataFrame(rows)
-    df["net_per_day"] = 0.4 * df["temp_mean_c"] - 0.2 * df["precip_mm"] + rng.normal(0, 1, len(df))
-    return df
+    return pd.DataFrame(rows)
 
 
 def test_build_elasticities_end_to_end_with_tiny_fixture():
     rng = np.random.default_rng(2)
     flows_payload = _flows_payload()
     live_payload = _live_payload()
-    train_features = _train_features_for(["A", "B", "C", "D"], rng)  # E deliberately has zero rows
-    model = train_gbm(train_features, DEFAULT_CATEGORIES)
+    daily_panel = _daily_panel_for(["A", "B", "C", "D"], rng)  # E deliberately has zero rows
     throughput_by_id = pd.Series({"A": 200.0, "B": 350.0, "C": 150.0, "D": 300.0})
 
-    payload = build_elasticities(flows_payload, live_payload, model, train_features, throughput_by_id)
+    payload = build_elasticities(flows_payload, live_payload, daily_panel, throughput_by_id)
 
     assert set(payload["by_typology"].keys()) == {"commuter_core", "residential_feeder"}
-    assert set(payload["by_station"].keys()) == {"A", "B", "C", "D"}  # E excluded: low-signal AND zero rows
+    assert set(payload["by_station"].keys()) == {"A", "B", "C", "D"}  # E excluded: low-signal (no group to attach to)
 
     for slug, entry in payload["by_typology"].items():
         assert "capacity_elasticity_rank_correlation" in entry
         assert entry["n_stations"] == 2
+        assert entry["n_daily_observations"] == 40  # 2 stations x 20 days
+        assert entry["temp_elasticity"] is not None
+        assert entry["precip_elasticity"] is not None
 
     for sid in ["A", "B", "C", "D"]:
         entry = payload["by_station"][sid]
-        assert "temp_elasticity" in entry
-        assert "precip_elasticity" in entry
         assert entry["n_obs"] == 20
+        assert entry["temp_elasticity"] is not None
+        assert entry["precip_elasticity"] is not None
         # This fixture only has 2 distinct capacity values per group (fewer
         # than fit_capacity_curve's 8-distinct-value degrees-of-freedom
         # floor for 4 coefficients), so capacity_elasticity is correctly
@@ -244,6 +210,31 @@ def test_build_elasticities_end_to_end_with_tiny_fixture():
     assert "Low signal (excluded from clustering)" in payload["notes"]
     assert "commuter_core" in payload["notes"]
     assert "residential_feeder" in payload["notes"]
+
+
+def test_build_elasticities_omits_temp_precip_below_min_daily_observations():
+    # A station with fewer real days than MIN_DAILY_OBSERVATIONS (10) must
+    # get a by_station entry (it still has a real cluster and real
+    # capacity), just without temp_elasticity/precip_elasticity -- the
+    # dashboard's documented fallback-to-typology contract, extended one
+    # level further than "sparse stations get no entry at all."
+    rng = np.random.default_rng(5)
+    flows_payload = _flows_payload()
+    live_payload = _live_payload()
+    daily_panel = _daily_panel_for(["A", "B", "C", "D"], rng, n_days=20)
+    # Station A gets only 5 real days -- below MIN_DAILY_OBSERVATIONS (10).
+    rows_to_drop = daily_panel[daily_panel["station_id"] == "A"].iloc[5:].index
+    daily_panel = daily_panel.drop(rows_to_drop)
+    throughput_by_id = pd.Series({"A": 200.0, "B": 350.0, "C": 150.0, "D": 300.0})
+
+    payload = build_elasticities(flows_payload, live_payload, daily_panel, throughput_by_id)
+
+    assert "A" in payload["by_station"]
+    assert payload["by_station"]["A"]["n_obs"] < 10
+    assert payload["by_station"]["A"]["temp_elasticity"] is None
+    assert payload["by_station"]["A"]["precip_elasticity"] is None
+    # B still has its full 20 days -- must still get a real fit.
+    assert payload["by_station"]["B"]["temp_elasticity"] is not None
 
 
 def test_build_elasticities_computes_capacity_elasticity_with_enough_spread():
@@ -284,11 +275,10 @@ def test_build_elasticities_computes_capacity_elasticity_with_enough_spread():
 
     flows_payload = {"granularity": {"seasons": [], "months": []}, "stations": stations}
     live_payload = {"last_updated": "2026-07-15T00:00:00+00:00", "n_dropped": 0, "stations": live_stations}
-    train_features = _train_features_for(station_ids, rng)
-    model = train_gbm(train_features, DEFAULT_CATEGORIES)
+    daily_panel = _daily_panel_for(station_ids, rng)
     throughput_by_id = pd.Series({sid: float(rng.uniform(100, 400)) for sid in station_ids})
 
-    payload = build_elasticities(flows_payload, live_payload, model, train_features, throughput_by_id)
+    payload = build_elasticities(flows_payload, live_payload, daily_panel, throughput_by_id)
 
     for slug, entry in payload["by_typology"].items():
         assert entry["n_stations_with_capacity"] == 10
@@ -298,7 +288,7 @@ def test_build_elasticities_computes_capacity_elasticity_with_enough_spread():
         assert "capacity_elasticity" in payload["by_station"][sid]
 
 
-def test_build_elasticities_skips_station_with_zero_capacity():
+def test_build_elasticities_skips_capacity_for_station_with_zero_capacity():
     # Station E is low-signal already, so add a real-cluster station with
     # capacity 0 (live_status.json really does report this for ~52 real
     # stations, see PROGRESS.md Session 7) to confirm it gets no
@@ -310,11 +300,12 @@ def test_build_elasticities_skips_station_with_zero_capacity():
     }
     live_payload = _live_payload()
     live_payload["stations"]["F"] = {"capacity": 0, "bikes_available": 0, "docks_available": 0, "is_renting": True, "is_returning": True}
-    train_features = _train_features_for(["A", "B", "C", "D", "F"], rng)
-    model = train_gbm(train_features, DEFAULT_CATEGORIES)
+    daily_panel = _daily_panel_for(["A", "B", "C", "D", "F"], rng)
     throughput_by_id = pd.Series({"A": 200.0, "B": 350.0, "C": 150.0, "D": 300.0, "F": 250.0})
 
-    payload = build_elasticities(flows_payload, live_payload, model, train_features, throughput_by_id)
+    payload = build_elasticities(flows_payload, live_payload, daily_panel, throughput_by_id)
 
     assert "F" in payload["by_station"]
     assert "capacity_elasticity" not in payload["by_station"]["F"]
+    # F's temp/precip must still be computed independently of its missing capacity.
+    assert payload["by_station"]["F"]["temp_elasticity"] is not None

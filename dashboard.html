@@ -152,6 +152,7 @@
   #investigator-counts { margin-top: 4px; color: #52514e; line-height: 1.6; }
   #investigator-content .control-label.spaced { margin-top: 12px; } /* separates the Fleet simulator group from Equity thresholds above it, without touching .control-label's other uses elsewhere in the dashboard */
   #fleet-stats { margin-top: 4px; color: #52514e; line-height: 1.6; }
+  #fleet-sim-note { margin-top: 6px; color: #898781; line-height: 1.4; font-style: italic; }
   #weather-preset-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 11px; padding: 5px 6px; border-radius: 6px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 10px; }
   #weather-scenario-note { margin-top: 6px; color: #898781; line-height: 1.4; font-style: italic; }
   #weather-scenario-status { margin-top: 4px; color: #52514e; line-height: 1.6; }
@@ -287,6 +288,7 @@
           <input type="range" id="fleet-size-slider" min="1" max="10" step="1" value="1">
         </div>
         <div id="fleet-stats"></div>
+        <div id="fleet-sim-note">Checked against real data, not assumed: added trucks do not show smoothly diminishing returns at this scale. Every truck hits its own 45-stop shift cap before ever running out of flagged stations, so the binding constraint here is each truck's per-shift stop budget, not overall demand.</div>
       </div>
 
       <div class="control-label spaced">Weather scenario</div>
@@ -305,7 +307,7 @@
           <input type="range" id="weather-precip-slider" min="0" max="1" step="0.05" value="0">
         </div>
         <div id="weather-scenario-status"></div>
-        <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
+        <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model. A real daily-observation regression (temp/precip vs. real flow magnitude, ~90 real days from Feb/April/June), not a full-year climatology. One city-wide daily weather reading (Open-Meteo), not per-station. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
       </div>
 
       <div class="control-label spaced">Save / load / reset</div>

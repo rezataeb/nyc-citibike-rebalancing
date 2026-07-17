@@ -43,6 +43,31 @@ def _day_type(timestamps: pd.Series) -> pd.Series:
     return timestamps.dt.dayofweek.map(lambda d: "weekend" if d >= 5 else "weekday")
 
 
+def _prepare_side(
+    trips: pd.DataFrame,
+    station_id_col: str,
+    station_name_col: str,
+    lat_col: str,
+    lng_col: str,
+    time_col: str,
+    valid_flag_col: str,
+) -> pd.DataFrame:
+    """Shared row-level prep for one side (departures or arrivals) of trips,
+    before either time-bucket grouping below (monthly, for compute_net_flow/
+    compute_throughput; daily, for compute_daily_net_flow). Only rows where
+    valid_flag_col is True contribute -- e.g. a trip with no end station is
+    excluded from the arrivals side but still included on the departures
+    side.
+    """
+    side = trips.loc[
+        trips[valid_flag_col], [station_id_col, station_name_col, lat_col, lng_col, time_col]
+    ].copy()
+    side.columns = ["station_id", "station_name", "lat", "lng", "ts"]
+    side["hour"] = side["ts"].dt.hour
+    side["day_type"] = _day_type(side["ts"])
+    return side
+
+
 def _aggregate_side(
     trips: pd.DataFrame,
     station_id_col: str,
@@ -53,22 +78,41 @@ def _aggregate_side(
     valid_flag_col: str,
     sign: int,
 ) -> pd.DataFrame:
-    """Group one side of trips (departures or arrivals) into signed counts.
-
-    Only rows where valid_flag_col is True contribute -- e.g. a trip with
-    no end station is excluded from the arrivals side but still included
-    on the departures side.
+    """Group one side of trips (departures or arrivals) into signed counts,
+    at (station, month, day_type, hour) grain.
     """
-    side = trips.loc[
-        trips[valid_flag_col], [station_id_col, station_name_col, lat_col, lng_col, time_col]
-    ].copy()
-    side.columns = ["station_id", "station_name", "lat", "lng", "ts"]
-    side["hour"] = side["ts"].dt.hour
+    side = _prepare_side(trips, station_id_col, station_name_col, lat_col, lng_col, time_col, valid_flag_col)
     side["month"] = side["ts"].dt.strftime("%Y-%m")
-    side["day_type"] = _day_type(side["ts"])
 
     grouped = (
         side.groupby(["station_id", "station_name", "month", "day_type", "hour"])
+        .agg(count=("ts", "size"), lat=("lat", "median"), lng=("lng", "median"))
+        .reset_index()
+    )
+    grouped["count"] *= sign
+    return grouped
+
+
+def _aggregate_side_daily(
+    trips: pd.DataFrame,
+    station_id_col: str,
+    station_name_col: str,
+    lat_col: str,
+    lng_col: str,
+    time_col: str,
+    valid_flag_col: str,
+    sign: int,
+) -> pd.DataFrame:
+    """Same as _aggregate_side, but grouped by real calendar DATE instead of
+    a month label -- used only by compute_daily_net_flow (elasticity fitting
+    against real daily weather, see that function's own docstring), never
+    by flows.json's own export path.
+    """
+    side = _prepare_side(trips, station_id_col, station_name_col, lat_col, lng_col, time_col, valid_flag_col)
+    side["date"] = side["ts"].dt.normalize()
+
+    grouped = (
+        side.groupby(["station_id", "station_name", "date", "hour"])
         .agg(count=("ts", "size"), lat=("lat", "median"), lng=("lng", "median"))
         .reset_index()
     )
@@ -168,6 +212,43 @@ def compute_throughput(clean_trips: pd.DataFrame) -> pd.DataFrame:
     throughput = throughput.merge(n_days, on=["month", "day_type"], how="left")
     throughput["throughput_per_day"] = (throughput["count"] / throughput["n_days"].clip(lower=1)).round(3)
     return throughput
+
+
+def compute_daily_net_flow(clean_trips: pd.DataFrame) -> pd.DataFrame:
+    """Net flow per (station, date, hour) -- the SAME arrivals-minus-
+    departures definition compute_net_flow uses, just grouped by real
+    calendar date instead of a month label. No per-day normalization is
+    needed here (unlike compute_net_flow's net_per_day): each row already
+    IS one specific real date, not a month-spanning bucket that needs
+    dividing by a distinct-date count.
+
+    Built for elasticity fitting (pipeline/elasticities.py) against real
+    daily weather instead of a 5-point monthly aggregate -- see
+    PROGRESS.md Session 25's SPARSE_GRID_CAVEAT finding and Session 27's
+    fix. Deliberately NOT used by flows.json's own export path -- that
+    contract stays fixed at (station, month, day_type, hour) grain per
+    CLAUDE.md ("do not drift"). This is an additive, separate aggregation
+    of the same underlying trip data, reusing _prepare_side -- the exact
+    row-level logic compute_net_flow/compute_throughput already use
+    (station_id typing and midnight-crossing-safe date handling both
+    fixed in Session 5) -- rather than a new one-off aggregation.
+    """
+    arrivals = _aggregate_side_daily(
+        clean_trips,
+        "end_station_id", "end_station_name", "end_lat", "end_lng",
+        "ended_at", "has_valid_arrival_station", sign=+1,
+    )
+    departures = _aggregate_side_daily(
+        clean_trips,
+        "start_station_id", "start_station_name", "start_lat", "start_lng",
+        "started_at", "has_valid_departure_station", sign=-1,
+    )
+    both = pd.concat([arrivals, departures], ignore_index=True)
+    return (
+        both.groupby(["station_id", "station_name", "date", "hour"])
+        .agg(net=("count", "sum"), lat=("lat", "median"), lng=("lng", "median"))
+        .reset_index()
+    )
 
 
 def add_season(flows: pd.DataFrame) -> pd.DataFrame:

@@ -1109,6 +1109,16 @@ async function main() {
     'the Guideline-required label must be present verbatim in the actual page markup'
   );
 
+  // The fleet simulator's real "no diminishing returns" finding (Session
+  // 24) previously only lived in fleet_scenarios.json's own notes field --
+  // checked here against the raw HTML source for the same reason as the
+  // weather note above: #fleet-sim-note is static markup, invisible to
+  // the DOM stub.
+  assert.ok(
+    html.includes('added trucks do not show smoothly diminishing returns'),
+    'the fleet simulator\'s no-diminishing-returns finding must be visible on the page itself, not just in fleet_scenarios.json'
+  );
+
   // Default state is the 'ideal' reference preset itself -- exactly zero
   // adjustment by construction, not just close to it.
   assert.strictEqual(elements['weather-temp-slider'].value, '72', 'initial slider value must be set explicitly in JS from state, not left to the static value="72" attribute');

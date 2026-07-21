@@ -237,6 +237,8 @@ function makeElementStub(id) {
 
 function buildSandbox() {
   const elements = {};
+  const intervals = {}; // id -> callback, for the setInterval/clearInterval stub below
+  let intervalIdCounter = 0;
   const getElementById = id => {
     if (!elements[id]) elements[id] = makeElementStub(id);
     return elements[id];
@@ -321,6 +323,10 @@ function buildSandbox() {
     },
     divIcon(opts) { return opts; },
     point(x, y) { return { x, y }; },
+    // Only exercised for its addTo() chain -- the dashboard moves the zoom
+    // control to bottomright at map init (L.control.zoom({...}).addTo(map)),
+    // no test asserts on its actual position or behavior.
+    control: { zoom(opts) { return { _opts: opts, addTo() { return this; } }; } },
   };
 
   const sandbox = {
@@ -345,6 +351,19 @@ function buildSandbox() {
     // smoke test we only care that the callback eventually runs with the
     // latest queued value, not real frame timing.
     requestAnimationFrame(cb) { cb(); return 0; },
+    // Deliberately NOT auto-firing (unlike requestAnimationFrame above) --
+    // an hour-playback interval fires repeatedly forever until cleared, so
+    // auto-invoking it once wouldn't exercise "does it keep going" and
+    // auto-invoking it synchronously-forever would hang the test process.
+    // Instead the callback is stored (see sandbox._intervals below) so a
+    // test can manually fire exactly as many "ticks" as it wants,
+    // deterministically, with no real wall-clock wait.
+    setInterval(cb, ms) {
+      const id = ++intervalIdCounter;
+      intervals[id] = cb;
+      return id;
+    },
+    clearInterval(id) { delete intervals[id]; },
     console,
     Math,
     Object,
@@ -355,6 +374,7 @@ function buildSandbox() {
   sandbox.globalThis = sandbox;
   sandbox._elements = elements; // exposed for assertions, not read by the dashboard script itself
   sandbox._map = mapStub; // exposed for assertions -- lets tests see which layer is actually attached
+  sandbox._intervals = intervals; // exposed so a test can manually fire a "tick" (sandbox._intervals[id]()) and check clearInterval actually removed one
   return sandbox;
 }
 
@@ -400,30 +420,23 @@ async function main() {
 
   const domainMaxAt8 = stateAt8.domainMax;
   const elements = sandbox._elements;
-  assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 8:00 AM, weekday (all-period average)');
   assert.strictEqual(elements['hour-label'].textContent, '8:00 AM');
-  assert.strictEqual(elements['title-meta'].textContent, ' · 3 stations', 'station count should be merged into the subtitle line, not a separate boxed row');
+  assert.strictEqual(elements['title-meta'].textContent, '3 stations', 'station count should be merged into the subtitle line, not a separate boxed row');
+  assert.ok(elements['title-subtitle-line'].classList.contains('hidden'), 'full coverage + no weather scenario -- nothing to flag, so the subtitle line itself should be hidden by default');
   assert.ok(elements['status'].classList.contains('hidden'), 'the boxed status banner should be hidden once data has loaded successfully');
 
-  // --- Session 19: pristine state, before any station has ever been selected ---
-  assert.ok(elements['tab-legend'].classList.contains('active'), 'Legend tab should be active by default');
-  assert.ok(elements['detail'].classList.contains('hidden'), 'Station detail pane should be hidden by default');
-  assert.strictEqual(elements['detail-name'].textContent, 'No station selected', 'the detail pane must show a placeholder, not be blank, even before the first click');
+  // --- Session 23: Legend is permanent (no tab); Station detail is its
+  // own separate card, absent entirely until a station is clicked. ---
+  assert.ok(elements['detail-card'].classList.contains('hidden'), 'Station detail card should be absent by default');
+  assert.ok(dash.setDetailVisible, 'no setDetailVisible export found');
 
-  // Manually switching to the Station detail tab before ever selecting a
-  // station must work (the tab is always reachable, never disabled) and
-  // must show that same placeholder, not blank/stale content.
-  const tabDetailClick = elements['tab-detail']._listeners.click;
-  assert.ok(tabDetailClick, 'no click listener registered on the Station detail tab');
-  tabDetailClick();
-  assert.ok(!elements['detail'].classList.contains('hidden'), 'Station detail pane should show once its tab is clicked');
-  assert.ok(elements['legend'].classList.contains('hidden'), 'Legend pane should hide while Station detail is active');
-  assert.strictEqual(elements['detail-name'].textContent, 'No station selected', 'still the placeholder -- no station has been clicked on the map yet');
-
-  const tabLegendClick = elements['tab-legend']._listeners.click;
-  tabLegendClick();
-  assert.ok(!elements['legend'].classList.contains('hidden'), 'switching back to Legend should show it again');
-  assert.ok(elements['detail'].classList.contains('hidden'), 'and hide Station detail again');
+  // setDetailVisible(true) with no station ever selected must not throw --
+  // updateStationDetail() itself is a no-op with nothing selected, so the
+  // card would just show whatever static markup it already has.
+  assert.doesNotThrow(() => dash.setDetailVisible(true));
+  assert.ok(!elements['detail-card'].classList.contains('hidden'));
+  dash.setDetailVisible(false);
+  assert.ok(elements['detail-card'].classList.contains('hidden'));
 
   // --- simulate dragging the slider to 2pm (hour 14) ---
   const inputHandler = elements['hour-slider']._listeners.input;
@@ -446,8 +459,6 @@ async function main() {
     );
   }
 
-  assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 2:00 PM, weekday (all-period average)');
-  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 2:00 PM weekday, all-period average (bikes/day)');
   assert.strictEqual(elements['hour-label'].textContent, '2:00 PM');
 
   // --- simulate clicking the "Weekend" day-type toggle, still at hour 14 ---
@@ -472,8 +483,6 @@ async function main() {
     );
   }
 
-  assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 2:00 PM, weekend (all-period average)');
-  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 2:00 PM weekend, all-period average (bikes/day)');
   assert.ok(elements['day-weekend'].classList.contains('active'), 'weekend button should be marked active after toggling');
   assert.ok(!elements['day-weekday'].classList.contains('active'), 'weekday button should no longer be active after toggling to weekend');
 
@@ -500,12 +509,17 @@ async function main() {
   assert.strictEqual(elements['detail-name'].textContent, 'Station B');
   assert.strictEqual(elements['detail-cluster'].textContent, 'Test cluster B');
   assert.strictEqual(elements['detail-daylabel'].textContent, 'weekday, all-period average');
-  assert.ok(!elements['detail'].classList.contains('hidden'), 'detail pane should be visible after selecting a station');
-  assert.ok(elements['tab-detail'].classList.contains('active'), 'selecting a station should switch to the Station detail tab');
-  assert.ok(!elements['tab-legend'].classList.contains('active'), 'and away from the Legend tab');
+  assert.ok(!elements['detail-card'].classList.contains('hidden'), 'detail card should appear after selecting a station');
   assert.strictEqual(stateSelected.markers.B._opts.color, '#2a2a28', 'selected marker should get the highlight stroke color');
   assert.strictEqual(stateSelected.markers.B._opts.weight, 2, 'selected marker should get the highlight stroke weight');
 
+  // "More info" (cluster/equity context) always resets to collapsed on a
+  // fresh selection -- graph-first by default.
+  assert.strictEqual(dash.getState().detailMoreInfoExpanded, false, 'More info should start collapsed on a new selection');
+  assert.ok(elements['detail-more-content'].classList.contains('hidden'));
+
+  // Context lines are populated regardless of whether "More info" is
+  // currently expanded -- population and visibility are independent.
   const contextChildren = elements['detail-context']._children;
   assert.strictEqual(contextChildren.length, 2, 'station B is near a school and has a subway gap -- expected 2 context lines');
   assert.strictEqual(
@@ -513,6 +527,13 @@ async function main() {
     'Nearest subway: Test Subway B (900 m) — beyond the 800 m subway-gap threshold'
   );
   assert.strictEqual(contextChildren[1].textContent, 'Within 300 m of school: Test School B (150 m)');
+
+  const moreInfoToggleClick = elements['detail-more-toggle']._listeners.click;
+  assert.ok(moreInfoToggleClick, 'no click listener registered on the More info toggle');
+  moreInfoToggleClick();
+  assert.strictEqual(dash.getState().detailMoreInfoExpanded, true);
+  assert.ok(!elements['detail-more-content'].classList.contains('hidden'), 'More info content should show once expanded');
+  assert.strictEqual(elements['detail-more-chevron'].textContent, '▾');
 
   // persistent dot must be drawn from B's weekday[14] against the SAME pooled
   // domainMax used everywhere else -- checked via the actual rendered markup,
@@ -564,9 +585,7 @@ async function main() {
   dash.closeStation();
   const stateAfterClose = dash.getState();
   assert.strictEqual(stateAfterClose.selectedId, null);
-  assert.ok(elements['detail'].classList.contains('hidden'), 'detail pane should be hidden after closing');
-  assert.ok(elements['tab-legend'].classList.contains('active'), 'closing should switch back to the Legend tab');
-  assert.strictEqual(elements['detail-name'].textContent, 'No station selected', 'closing should restore the placeholder, not stale content');
+  assert.ok(elements['detail-card'].classList.contains('hidden'), 'detail card should disappear after closing');
   assert.strictEqual(stateAfterClose.markers.B._opts.color, '#ffffff', 'closing should revert the marker highlight color');
   assert.strictEqual(stateAfterClose.markers.B._opts.weight, 0.75, 'closing should revert the marker highlight weight');
 
@@ -610,12 +629,11 @@ async function main() {
   assert.strictEqual(stateMay.markers.B._opts.weight, 1, 'a no-data marker should get the heavier no-data stroke weight');
 
   assert.strictEqual(
-    elements['title-meta'].textContent, ' · 2 of 3 stations have data for May 2026',
+    elements['title-meta'].textContent, '2 of 3 stations have data for May 2026',
     'the coverage message (now merged into the subtitle, not a boxed row) must surface the coverage gap, not hide it'
   );
+  assert.ok(!elements['title-subtitle-line'].classList.contains('hidden'), 'a real coverage gap must make the subtitle line visible again');
   assert.ok(elements['status'].classList.contains('hidden'), 'the boxed status banner should stay hidden on the success path');
-  assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 8:00 PM, weekend (May 2026)');
-  assert.strictEqual(elements['legend-title'].textContent, 'Net flow at 8:00 PM weekend, May 2026 (bikes/day)');
 
   // --- selecting the no-data station during May 2026 must show an explicit no-data state ---
   const selectBDuringMay = stateMay.markers.B._listeners.click;
@@ -664,7 +682,8 @@ async function main() {
   );
   assert.strictEqual(stateBackToAll.markers.B._opts.fillOpacity, 0.85);
   assert.strictEqual(stateBackToAll.markers.B._opts.color, '#ffffff', 'station B should revert to the plain default stroke once data exists again');
-  assert.strictEqual(elements['title-meta'].textContent, ' · 3 stations');
+  assert.strictEqual(elements['title-meta'].textContent, '3 stations');
+  assert.ok(elements['title-subtitle-line'].classList.contains('hidden'), 'back to full coverage + no weather scenario -- subtitle line should hide again');
   assert.ok(!elements['detail-strip'].innerHTML.includes('No data'), 'station A (still selected) has all-period data -- no no-data message should remain');
 
   // --- Session 15: live GBFS mode. Entering with period='all', dayType='weekend', hour=20, selectedId='A'. ---
@@ -680,13 +699,9 @@ async function main() {
   assert.ok(elements['mode-live'].classList.contains('active'));
   assert.ok(!elements['mode-historical'].classList.contains('active'));
 
-  assert.strictEqual(elements['title-subtitle'].textContent, 'Live dock status');
-  assert.strictEqual(elements['legend-title'].textContent, 'Live dock status (% full)');
-  assert.strictEqual(elements['legend-label-low'].textContent, 'Empty (0% full)');
-  assert.strictEqual(elements['legend-label-mid'].textContent, '50%');
-  assert.strictEqual(elements['legend-label-high'].textContent, 'Full (100% full)');
-  assert.strictEqual(elements['legend-note'].textContent, '50% is a neutral reference point, not a per-station target.');
-  assert.strictEqual(elements['live-as-of'].textContent, `Live as of ${dash.formatAsOf(FAKE_LIVE_PAYLOAD.last_updated)}`);
+  assert.strictEqual(elements['legend-label-low'].textContent, 'Deficit (no bikes)', 'legend wording is now the same in Live mode as Historical -- same real meaning either way');
+  assert.strictEqual(elements['legend-label-high'].textContent, 'Surplus (no docks)');
+  assert.strictEqual(elements['live-as-of-timestamp'].textContent, `Live as of ${dash.formatAsOf(FAKE_LIVE_PAYLOAD.last_updated)} · via GBFS`);
 
   // A: 10/20 = 50% full -> neutral gray (deviation 0). B: 2/20 = 10% full -> red end. C: no live match -> hollow.
   assert.strictEqual(
@@ -705,10 +720,15 @@ async function main() {
   assert.strictEqual(stateLive.markers.A._opts.color, '#2a2a28', 'station A keeps the selection stroke in live mode too');
   assert.strictEqual(stateLive.markers.A._opts.fillOpacity, 0.85, 'station A has live data -- not hollow, even while selected');
 
+  // Live coverage now lives next to "Live as of ..." in the Map controls
+  // card, not the hero -- the hero subtitle line stays hidden
+  // unconditionally in Live mode.
   assert.strictEqual(
-    elements['title-meta'].textContent, ' · 2 of 3 stations have live data',
+    elements['live-coverage-note'].textContent, '2 of 3 stations have live data',
     'the coverage message must state live coverage explicitly, computed from the real fake payload, not hardcoded'
   );
+  assert.ok(!elements['live-coverage-note'].classList.contains('hidden'), 'a real live-data coverage gap must make the coverage note visible');
+  assert.ok(elements['title-subtitle-line'].classList.contains('hidden'), 'the hero subtitle line must stay hidden in Live mode regardless of coverage');
 
   // Detail panel should already reflect A's live reading (updateStationDetail runs from renderHour's hook).
   assert.strictEqual(elements['detail-daylabel'].textContent, `live, as of ${dash.formatAsOf(FAKE_LIVE_PAYLOAD.last_updated)}`);
@@ -742,12 +762,7 @@ async function main() {
   assert.ok(!elements['historical-controls'].classList.contains('hidden'), 'historical controls card should reappear');
   assert.ok(elements['live-as-of'].classList.contains('hidden'), 'the live as-of card should hide again');
   assert.strictEqual(elements['legend-label-low'].textContent, 'Deficit (no bikes)');
-  assert.strictEqual(elements['legend-label-mid'].textContent, '0');
   assert.strictEqual(elements['legend-label-high'].textContent, 'Surplus (no docks)');
-  assert.strictEqual(
-    elements['title-subtitle'].textContent, 'Net flow at 8:00 PM, weekend (all-period average)',
-    'historical text should reflect whatever hour/dayType/period were already set, unchanged by the live-mode detour'
-  );
 
   // Station C (no live match, but flows.json always has all-period data) should recolor normally again.
   assert.strictEqual(
@@ -756,7 +771,8 @@ async function main() {
     'station C should recolor from its historical weekend curve again, now that mode is historical'
   );
   assert.strictEqual(stateBackToHistorical.markers.C._opts.fillOpacity, 0.85);
-  assert.strictEqual(elements['title-meta'].textContent, ' · 3 stations', 'coverage message should revert to the plain historical count (period is still "all")');
+  assert.strictEqual(elements['title-meta'].textContent, '3 stations', 'coverage message should revert to the plain historical count (period is still "all")');
+  assert.ok(elements['title-subtitle-line'].classList.contains('hidden'), 'back to historical mode, full coverage, no weather scenario -- subtitle line should hide again');
   assert.ok(
     elements['detail-strip'].innerHTML.includes('id="strip-dot"'),
     'station C (still selected) has all-period historical data -- the rhythm strip should draw normally again'
@@ -846,10 +862,11 @@ async function main() {
   dash.setPeriod('month:2026-05');
   assert.strictEqual(dash.getState().clusterLayer._refreshCount, refreshCountBefore2 + 1, 'setPeriod must call refreshClusters() exactly once');
 
-  // Also confirms issue 3's fix: the header/legend text and the underlying
-  // state.period used for coloring come from the exact same value -- there
-  // is no separate "displayed period" to drift out of sync with it.
-  assert.strictEqual(elements['title-subtitle'].textContent, 'Net flow at 8:00 AM, weekend (May 2026)');
+  // Also confirms issue 3's fix: state.period itself is what setPeriod
+  // actually updated, the same value everything else in this test derives
+  // marker coloring from -- there's no separate "displayed period" to
+  // drift out of sync with it.
+  assert.strictEqual(dash.getState().period, 'month:2026-05');
 
   icon = dash.clusterIconCreateFunction(fakeCluster(['B']));
   assert.strictEqual(icon.html, dash.clusterIconHTML(null, 1), 'a cluster whose only child has no data for the period should render hollow');
@@ -946,7 +963,7 @@ async function main() {
   assert.ok(routeStopClick, 'no click listener registered on a route stop marker');
   routeStopClick();
   assert.strictEqual(dash.getState().selectedId, 'B', 'clicking a route stop should select its station, same as any other marker click');
-  assert.strictEqual(dash.getState().infoTab, 'detail', 'clicking a route stop should switch to the Station detail tab too, same as any other selection');
+  assert.ok(!sandbox._elements['detail-card'].classList.contains('hidden'), 'clicking a route stop should reveal the detail card too, same as any other selection');
 
   // --- route toggle: off by default ---
   assert.strictEqual(routeState.routeVisible, false, 'route should be off by default');
@@ -976,36 +993,54 @@ async function main() {
   assert.ok(!sandbox._map._layers.includes(routeState.routeLayer));
   assert.strictEqual(elements['route-toggle-btn'].textContent, 'Show route');
 
-  // --- Session 20, Part B: model-eval footer, collapsed by default ---
-  assert.strictEqual(dash.getState().modelEvalExpanded, false, 'model-eval footer should be collapsed by default');
-  assert.ok(elements['model-eval-content'].classList.contains('hidden'), 'model-eval content should be hidden by default');
+  // --- Session 25: Model performance is a small standalone collapsed
+  // disclosure again (not a tab), and Investigator mode is its own
+  // standalone collapsible too, not paired with Model in a tab bar.
+  // Map controls (#historical-controls) stays visible regardless of
+  // either's expand state, same as before. ---
+  assert.strictEqual(dash.getState().modelEvalExpanded, false, 'Model performance should be collapsed by default');
+  assert.ok(elements['tab-panel-model'].classList.contains('hidden'), 'model content should be hidden by default');
   assert.strictEqual(elements['model-eval-toggle'].textContent, 'Model performance ▸');
 
   const modelEvalClick = elements['model-eval-toggle']._listeners.click;
   assert.ok(modelEvalClick, 'no click listener registered on the model-eval toggle');
   modelEvalClick();
   assert.strictEqual(dash.getState().modelEvalExpanded, true);
-  assert.ok(!elements['model-eval-content'].classList.contains('hidden'), 'model-eval content should show once expanded');
+  assert.ok(!elements['tab-panel-model'].classList.contains('hidden'), 'model content should show once expanded');
   assert.strictEqual(elements['model-eval-toggle'].textContent, 'Model performance ▾');
-
   modelEvalClick();
   assert.strictEqual(dash.getState().modelEvalExpanded, false);
-  assert.ok(elements['model-eval-content'].classList.contains('hidden'), 'model-eval content should collapse again on a second click');
-  assert.strictEqual(elements['model-eval-toggle'].textContent, 'Model performance ▸');
+  assert.ok(elements['tab-panel-model'].classList.contains('hidden'), 'model content should collapse again on a second click');
+
+  assert.ok(!elements['historical-controls'].classList.contains('hidden'), 'Map controls must stay visible regardless of Model/Investigator expand state');
 
   // --- Investigator Mode Phase 2: equity threshold sliders ---
   // FAKE_PAYLOAD's real context values: A nycha=120/school=900/subway=200,
   // B nycha=1000/school=150/subway=900, C nycha=2000/school=2000/subway=100.
-  assert.strictEqual(dash.getState().investigatorExpanded, false, 'investigator panel should be collapsed by default');
-  assert.ok(elements['investigator-content'].classList.contains('hidden'), 'investigator content should be hidden by default');
-  assert.strictEqual(elements['investigator-toggle'].textContent, 'Investigator mode ▸');
+  assert.strictEqual(dash.getState().investigatorExpanded, false, 'Investigator should be collapsed by default');
+  assert.ok(elements['tab-panel-investigator'].classList.contains('hidden'), 'investigator content should be hidden by default');
+  assert.strictEqual(elements['investigator-chevron'].textContent, '▸');
 
   const investigatorClick = elements['investigator-toggle']._listeners.click;
-  assert.ok(investigatorClick, 'no click listener registered on the investigator toggle');
-  investigatorClick();
+  assert.ok(investigatorClick, 'no click listener registered on the Investigator toggle');
+  investigatorClick(); // the rest of this test drives investigator controls
   assert.strictEqual(dash.getState().investigatorExpanded, true);
-  assert.ok(!elements['investigator-content'].classList.contains('hidden'));
-  assert.strictEqual(elements['investigator-toggle'].textContent, 'Investigator mode ▾');
+  assert.ok(!elements['tab-panel-investigator'].classList.contains('hidden'));
+  assert.strictEqual(elements['investigator-chevron'].textContent, '▾');
+  assert.ok(!elements['historical-controls'].classList.contains('hidden'), 'Map controls must stay visible even with Investigator expanded');
+
+  // Equity thresholds accordion: collapsed by default, same standing
+  // "zero extra height budget" rule as everywhere else in this sidebar.
+  assert.strictEqual(dash.getState().investigatorAccordions.equity, false, 'equity accordion should be collapsed by default');
+  assert.ok(elements['equity-accordion-content'].classList.contains('hidden'));
+  assert.strictEqual(elements['equity-accordion-chevron'].textContent, '▸');
+
+  const equityAccordionClick = elements['equity-accordion-toggle']._listeners.click;
+  assert.ok(equityAccordionClick, 'no click listener registered on the equity accordion toggle');
+  equityAccordionClick();
+  assert.strictEqual(dash.getState().investigatorAccordions.equity, true);
+  assert.ok(!elements['equity-accordion-content'].classList.contains('hidden'), 'equity accordion content should show once expanded');
+  assert.strictEqual(elements['equity-accordion-chevron'].textContent, '▾');
 
   // Regression check for the standing "default state must be set in JS, not
   // implied by markup" bug (recurred in Sessions 19/20A/20B) -- the stub
@@ -1095,7 +1130,7 @@ async function main() {
   // by_typology group (its cluster_name doesn't match the real typology
   // slugs) -- deliberately, to exercise the "no elasticity data at all ->
   // stays unadjusted" path.
-  assert.ok(!elements['weather-scenario-wrap'].classList.contains('hidden'), 'weather scenario section must show once both elasticities.json and scenario_presets.json load');
+  assert.ok(!elements['weather-accordion'].classList.contains('hidden'), 'weather scenario accordion must show once both elasticities.json and scenario_presets.json load');
   // The Guideline's own required label, verbatim, actually on the page --
   // not just in elasticities.json's notes field or PROGRESS.md. Checked
   // against the RAW HTML SOURCE (`html`, read at the top of main()), not
@@ -1155,6 +1190,7 @@ async function main() {
   // investigator panel could be collapsed -- recolored markers should
   // never be silently unexplained.
   assert.ok(elements['title-meta'].textContent.includes('Snow event (projected)'), `expected a Snow event suffix in title-meta, got: ${elements['title-meta'].textContent}`);
+  assert.ok(!elements['title-subtitle-line'].classList.contains('hidden'), 'an active weather scenario must make the subtitle line visible even at full coverage');
 
   // Manually dragging a slider away from every preset's exact values is a
   // genuinely custom scenario -- presetId isn't invalidated (it's just
@@ -1175,6 +1211,7 @@ async function main() {
   assert.strictEqual(dash.isBaselineWeatherScenario(), true);
   assert.strictEqual(dash.weatherMultiplierFor('A'), 1);
   assert.ok(!elements['title-meta'].textContent.includes('projected'));
+  assert.ok(elements['title-subtitle-line'].classList.contains('hidden'), 'back to baseline weather + full coverage -- subtitle line should hide again');
 
   console.log('All dashboard slider smoke tests passed.');
 }
@@ -1388,8 +1425,8 @@ async function testRouteAndFleetScenariosMissing() {
     'the route toggle control must not appear when NEITHER route.json nor fleet_scenarios.json is available'
   );
   assert.ok(
-    sandbox._elements['fleet-sim-wrap'].classList.contains('hidden'),
-    'the fleet-sim sub-section must not appear when fleet_scenarios.json is missing'
+    sandbox._elements['fleet-accordion'].classList.contains('hidden'),
+    'the fleet-sim accordion must not appear when fleet_scenarios.json is missing'
   );
   assert.strictEqual(Object.keys(state.markers).length, 3, 'the rest of the dashboard should load completely normally even though both failed');
   assert.ok(
@@ -1435,7 +1472,7 @@ async function testRouteJsonMissingButFleetScenariosPresent() {
   assert.strictEqual(state.route, null, 'route.json failing must still resolve to null');
   assert.strictEqual(state.routeLayer, null);
   assert.ok(!elements['route-toggle-wrap'].classList.contains('hidden'), 'the route toggle must appear when fleet_scenarios.json alone succeeded');
-  assert.ok(!elements['fleet-sim-wrap'].classList.contains('hidden'));
+  assert.ok(!elements['fleet-accordion'].classList.contains('hidden'));
 
   // Fleet slider's own initial state must be explicit (same standing-rule
   // check as the equity sliders).
@@ -1443,7 +1480,8 @@ async function testRouteJsonMissingButFleetScenariosPresent() {
   assert.strictEqual(elements['fleet-size-value'].textContent, '1');
   assert.strictEqual(
     elements['fleet-stats'].textContent,
-    '7 of 10 deficit stations still unserved (3 cleared); 4 of 6 surplus stations still unserved (2 cleared).'
+    '7 of 10 deficit stations still unserved (3 cleared); 4 of 6 surplus stations still unserved (2 cleared). '
+    + 'Of the 2 stations serviced, 2 are within your equity thresholds.'
   );
 
   // Moving the fleet slider is what actually populates state.route/
@@ -1458,7 +1496,8 @@ async function testRouteJsonMissingButFleetScenariosPresent() {
   assert.strictEqual(state.routeVisible, true, 'moving the fleet slider must auto-show the route, same as clicking Simulate would');
   assert.strictEqual(
     elements['fleet-stats'].textContent,
-    '5 of 10 deficit stations still unserved (5 cleared); 2 of 6 surplus stations still unserved (4 cleared).'
+    '5 of 10 deficit stations still unserved (5 cleared); 2 of 6 surplus stations still unserved (4 cleared). '
+    + 'Of the 3 stations serviced, 2 are within your equity thresholds.'
   );
 
   console.log('route.json-missing-but-fleet-scenarios-present smoke test passed.');
@@ -1535,12 +1574,12 @@ async function testInvestigatorModeDiffBarAndPresets() {
   const dash = context.__dashboard;
   const elements = sandbox._elements;
 
-  // Untouched AND collapsed: diff bar must not exist visually (zero
-  // height), same "don't cost vertical space in the common case" rule as
-  // every other card in this sidebar.
+  // Untouched AND on the Historical tab: diff bar must not exist visually
+  // (zero height), same "don't cost vertical space in the common case"
+  // rule as every other card in this sidebar.
   assert.ok(elements['investigator-diff-bar'].classList.contains('hidden'), 'diff bar must be hidden before anything is adjusted');
 
-  // Discoverability check: EXPANDING the panel alone (nothing adjusted
+  // Discoverability check: EXPANDING Investigator alone (nothing adjusted
   // yet) must reveal the diff bar too, showing real baseline==scenario
   // lines -- otherwise a reviewer who never touches a control first has
   // zero visual cue this feature exists at all. Confirmed real numbers
@@ -1548,20 +1587,48 @@ async function testInvestigatorModeDiffBarAndPresets() {
   // baseline and scenario union counts are both 2.
   const investigatorClick = elements['investigator-toggle']._listeners.click;
   investigatorClick();
-  assert.ok(!elements['investigator-diff-bar'].classList.contains('hidden'), 'expanding the panel alone must reveal the diff bar, even at baseline');
-  assert.strictEqual(elements['diff-equity'].textContent, 'Equity (≤300m/800m default): 2 baseline → 2 scenario');
-  // Collapsing again, still untouched, must hide it again -- expansion
-  // alone doesn't permanently pin it open.
+  assert.ok(!elements['investigator-diff-bar'].classList.contains('hidden'), 'expanding Investigator alone must reveal the diff bar, even at baseline');
+  assert.strictEqual(elements['scenario-baseline-equity'].textContent, '2 baseline');
+  assert.strictEqual(elements['scenario-scenario-equity'].textContent, '2 scenario');
+  assert.strictEqual(elements['scenario-pill-equity'].textContent, 'No change');
+  // Regression guard: fleetSize defaults to 1 (never a real 0-truck
+  // state), and scenario 1 in this fixture already clears 3 real
+  // stations -- an earlier draft of the summary logic gated the fleet
+  // clause on "cleared !== 0", which fired even here, at the genuinely
+  // untouched default. It must gate on fleetSize differing from ITS OWN
+  // default instead.
+  assert.strictEqual(elements['scenario-summary'].textContent, 'Currently at baseline — no adjustments applied yet.');
+  // Collapsing again, still untouched, must hide it again -- expanding
+  // Investigator once doesn't permanently pin it open.
   investigatorClick();
-  assert.ok(elements['investigator-diff-bar'].classList.contains('hidden'), 'collapsing while still at baseline must hide the diff bar again');
+  assert.ok(elements['investigator-diff-bar'].classList.contains('hidden'), 'collapsing Investigator while still at baseline must hide the diff bar again');
   investigatorClick(); // re-expand for the rest of this test, which drives real slider/select interactions
+
+  // --- True accordion: expanding a second section collapses the first,
+  // so total height can't compound from several sections being open at
+  // once (the actual cause of Investigator "going down a lot"). ---
+  const equityAccordionClick = elements['equity-accordion-toggle']._listeners.click;
+  const fleetAccordionClick = elements['fleet-accordion-toggle']._listeners.click;
+  equityAccordionClick();
+  assert.strictEqual(dash.getState().investigatorAccordions.equity, true);
+  assert.ok(!elements['equity-accordion-content'].classList.contains('hidden'));
+  fleetAccordionClick();
+  assert.strictEqual(dash.getState().investigatorAccordions.fleet, true, 'expanding fleet should open it');
+  assert.strictEqual(dash.getState().investigatorAccordions.equity, false, 'expanding fleet should collapse equity, not stack on top of it');
+  assert.ok(elements['equity-accordion-content'].classList.contains('hidden'), 'equity content should hide once fleet takes over');
+  assert.ok(!elements['fleet-sim-wrap'].classList.contains('hidden'));
+  fleetAccordionClick(); // collapse it again -- leaves accordion state clean for the rest of this test
+  assert.strictEqual(dash.getState().investigatorAccordions.fleet, false);
 
   // --- Equity: default (300m) union count is 2 (A, B -- see the main()
   // equity assertions), moving the slider to 2000m makes it 3.
   const nychaSchoolInput = elements['nycha-school-slider']._listeners.input;
   nychaSchoolInput({ target: { value: '2000' } });
   assert.ok(!elements['investigator-diff-bar'].classList.contains('hidden'), 'diff bar must appear once equity threshold changes');
-  assert.strictEqual(elements['diff-equity'].textContent, 'Equity (≤300m/800m default): 2 baseline → 3 scenario');
+  assert.strictEqual(elements['scenario-baseline-equity'].textContent, '2 baseline');
+  assert.strictEqual(elements['scenario-scenario-equity'].textContent, '3 scenario');
+  assert.strictEqual(elements['scenario-pill-equity'].textContent, '+1 flagged');
+  assert.strictEqual(elements['scenario-summary'].textContent, 'Equity threshold change flagged 1 station (2 → 3).');
 
   // --- Fleet: FAKE_FLEET_SCENARIOS_PAYLOAD scenario 1 has
   // n_deficit_flagged=10/n_deficit_serviced=3 (remaining 7); scenario 2
@@ -1569,12 +1636,45 @@ async function testInvestigatorModeDiffBarAndPresets() {
   // count (0 trucks), not scenario 1.
   const fleetInput = elements['fleet-size-slider']._listeners.input;
   fleetInput({ target: { value: '2' } });
-  assert.strictEqual(elements['diff-fleet'].textContent, 'Fleet (0 trucks default): 10 baseline → 5 scenario (2 truck(s))');
+  assert.strictEqual(elements['scenario-baseline-fleet'].textContent, '10 baseline');
+  assert.strictEqual(elements['scenario-scenario-fleet'].textContent, '5 scenario (2 truck(s))');
+  assert.strictEqual(elements['scenario-pill-fleet'].textContent, '−5 unserved');
+  // Equity threshold is 2000m at this point (set above) -- at that
+  // threshold, all 3 of scenario 2's real serviced stations (A/B/C) fall
+  // within it (station C's own nycha_dist_m is exactly 2000m), so the
+  // overlap clause should read 3 of 3, not the 300m-default figure.
+  assert.strictEqual(
+    elements['scenario-summary'].textContent,
+    'Equity threshold change flagged 1 station (2 → 3). 2 trucks cleared 5 of 10 flagged deficit stations, including 3 of 3 serviced stations within equity thresholds.'
+  );
+  // The fleet accordion's own #fleet-stats line (a separate surface from
+  // the diff bar) must report the same real overlap, not a second,
+  // possibly-drifting computation.
+  assert.strictEqual(
+    elements['fleet-stats'].textContent,
+    '5 of 10 deficit stations still unserved (5 cleared); 2 of 6 surplus stations still unserved (4 cleared). '
+    + 'Of the 3 stations serviced, 3 are within your equity thresholds.'
+  );
+  // computeServicedEquityOverlap() directly, against the real scenario 2
+  // fixture and the 2000m threshold now in effect.
+  const overlapCheck = dash.computeServicedEquityOverlap(
+    dash.getState().fleetScenarios.scenarios['2'],
+    dash.getState().investigatorState.equityThresholds
+  );
+  assert.strictEqual(overlapCheck.totalServiced, 3, 'scenario 2 services stations A, B, and C');
+  assert.strictEqual(overlapCheck.equityServiced, 3, 'all three fall within a 2000m threshold, including C at exactly 2000m (<=, not <)');
 
   // --- Weather: selecting snow_day.
   const presetChange = elements['weather-preset-select']._listeners.change;
   presetChange({ target: { value: 'snow_day' } });
-  assert.strictEqual(elements['diff-weather'].textContent, 'Weather (ideal default): Snow event');
+  assert.strictEqual(elements['scenario-baseline-weather'].textContent, 'ideal baseline');
+  assert.strictEqual(elements['scenario-scenario-weather'].textContent, 'Snow event scenario');
+  assert.strictEqual(elements['scenario-pill-weather'].textContent, 'Snow event');
+  assert.strictEqual(
+    elements['scenario-summary'].textContent,
+    'Equity threshold change flagged 1 station (2 → 3). 2 trucks cleared 5 of 10 flagged deficit stations, including 3 of 3 serviced stations within equity thresholds. '
+    + 'Weather scenario "Snow event" is projected onto historical flow using real fitted elasticities (not a live forecast).'
+  );
 
   // --- Save preset: URL contains the real current state, round-trips
   // through JSON exactly.
@@ -1587,13 +1687,19 @@ async function testInvestigatorModeDiffBarAndPresets() {
 
   // --- Reset to baseline: every control must return to its own default,
   // not just visually but in state. The diff bar itself STAYS visible
-  // here (not hidden) because the panel is still expanded from the
-  // discoverability check earlier in this test -- expanding pins it
+  // here (not hidden) because Investigator is still expanded from the
+  // discoverability check earlier in this test -- being expanded pins it
   // visible regardless of baseline state, by design (see renderDiffBar()).
   // Content should read baseline==scenario for all three now.
   dash.resetToBaseline();
-  assert.ok(!elements['investigator-diff-bar'].classList.contains('hidden'), 'diff bar must stay visible after reset while the panel is still expanded');
-  assert.strictEqual(elements['diff-equity'].textContent, 'Equity (≤300m/800m default): 2 baseline → 2 scenario', 'reset equity threshold must read as unchanged from baseline');
+  assert.ok(!elements['investigator-diff-bar'].classList.contains('hidden'), 'diff bar must stay visible after reset while Investigator is still expanded');
+  assert.strictEqual(elements['scenario-baseline-equity'].textContent, '2 baseline', 'reset equity threshold must read as unchanged from baseline');
+  assert.strictEqual(elements['scenario-scenario-equity'].textContent, '2 scenario');
+  assert.strictEqual(elements['scenario-pill-equity'].textContent, 'No change');
+  assert.strictEqual(
+    elements['scenario-summary'].textContent, 'Currently at baseline — no adjustments applied yet.',
+    'reset must clear every summary clause, not just the individual bar/pill values'
+  );
   const state = dash.getState();
   assert.strictEqual(state.investigatorState.equityThresholds.nycha_school_m, 300);
   assert.strictEqual(state.investigatorState.fleetSize, 1);
@@ -1603,7 +1709,8 @@ async function testInvestigatorModeDiffBarAndPresets() {
   assert.strictEqual(elements['weather-preset-select'].value, 'ideal');
 
   // Collapsing NOW (at baseline, post-reset) must hide the bar -- the
-  // other half of the "expanded OR non-default" visibility rule.
+  // other half of the "Investigator expanded OR non-default" visibility
+  // rule.
   investigatorClick();
   assert.ok(elements['investigator-diff-bar'].classList.contains('hidden'), 'collapsed + at baseline must hide the diff bar even after having been shown before');
   investigatorClick(); // re-expand for the remainder of this test
@@ -1696,6 +1803,70 @@ async function testInvestigatorModeDiffBarAndPresets() {
   console.log('Investigator Mode Phase 6 diff bar/presets smoke test passed.');
 }
 
+// Hour playback (Play button next to the hour slider): auto-advances
+// through the day so a weather scenario's -- or just the base historical
+// pattern's -- hour-by-hour effect is visible without manually dragging.
+async function testHourPlayback() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, hour playback)' });
+
+  await context.__dashboard.ready;
+  const dash = context.__dashboard;
+  const elements = sandbox._elements;
+
+  assert.strictEqual(dash.getState().hourPlaying, false, 'playback should be off by default');
+  assert.ok(!elements['hour-play-btn'].classList.contains('active'));
+  assert.strictEqual(Object.keys(sandbox._intervals).length, 0, 'no interval should be registered before playback ever starts');
+
+  const playClick = elements['hour-play-btn']._listeners.click;
+  assert.ok(playClick, 'no click listener registered on the play button');
+  const hourBefore = dash.getState().currentHour;
+  playClick();
+  assert.strictEqual(dash.getState().hourPlaying, true);
+  assert.ok(elements['hour-play-btn'].classList.contains('active'));
+  let intervalIds = Object.keys(sandbox._intervals);
+  assert.strictEqual(intervalIds.length, 1, 'exactly one interval should be registered while playing');
+
+  // Manually firing one "tick" (the test's substitute for real wall-clock
+  // time passing) must advance the hour by exactly one, through the same
+  // renderHour() path a manual drag uses.
+  sandbox._intervals[intervalIds[0]]();
+  const afterFirstTick = dash.getState().currentHour;
+  assert.strictEqual(afterFirstTick, (hourBefore + 1) % 24);
+  assert.strictEqual(elements['hour-slider'].value, String(afterFirstTick));
+
+  // 24 more ticks is exactly one full day -- the hour must land back on
+  // precisely the same value, proving the wraparound is a real %24, not
+  // just "stays in bounds by luck."
+  for (let i = 0; i < 24; i++) sandbox._intervals[intervalIds[0]]();
+  assert.strictEqual(dash.getState().currentHour, afterFirstTick, 'exactly 24 ticks later must land back on the same hour');
+
+  // A manual drag while playing must pause it, not fight it -- and the
+  // interval must actually be cleared, not just hidden behind the flag.
+  const sliderInput = elements['hour-slider']._listeners.input;
+  sliderInput({ target: { value: '5' } });
+  assert.strictEqual(dash.getState().hourPlaying, false, 'a manual drag must pause playback');
+  assert.ok(!elements['hour-play-btn'].classList.contains('active'));
+  assert.strictEqual(Object.keys(sandbox._intervals).length, 0, 'clearInterval must actually run, not just the .hourPlaying flag flipping');
+
+  // Switching to Live mode while playing must stop it too -- there's no
+  // hour concept there at all, and the button becomes unreachable
+  // (#historical-controls hides), so leaving it running would silently
+  // waste ticks nobody can see or stop.
+  playClick();
+  assert.strictEqual(dash.getState().hourPlaying, true);
+  const modeLiveClick = elements['mode-live']._listeners.click;
+  modeLiveClick();
+  assert.strictEqual(dash.getState().hourPlaying, false, 'switching to Live mode must stop playback');
+  assert.strictEqual(Object.keys(sandbox._intervals).length, 0);
+
+  console.log('hour-playback smoke test passed.');
+}
+
 // Separate scenario: a shared scenario URL applied automatically on page
 // load (not via a button click) -- "reload the page, load the preset
 // back, confirm state restores exactly" (Guideline's own verify step)
@@ -1732,6 +1903,7 @@ main()
   .then(testRouteJsonMissingButFleetScenariosPresent)
   .then(testWeatherScenarioFallsBackToTypologyElasticity)
   .then(testInvestigatorModeDiffBarAndPresets)
+  .then(testHourPlayback)
   .then(testSharedScenarioUrlAppliesOnLoad)
   .then(testFlowsJsonFailureOnly)
   .then(testLiveJsonFailureOnly)

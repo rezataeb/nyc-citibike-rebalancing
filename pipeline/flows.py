@@ -251,6 +251,53 @@ def compute_daily_net_flow(clean_trips: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def compute_daily_flow_components(clean_trips: pd.DataFrame) -> pd.DataFrame:
+    """Net flow per (station, date, hour), same grain as compute_daily_net_flow,
+    but keeping arrivals_count and departures_count as separate unsigned
+    columns alongside net instead of only the signed sum.
+
+    Built for pipeline/build_full_year.py's persisted daily table: once a
+    month's raw trip archive is deleted after aggregation, arrivals and
+    departures can no longer be recovered separately from net alone without
+    re-downloading. This is deliberately additive -- reuses the same
+    _aggregate_side_daily/_prepare_side row-level logic compute_daily_net_flow
+    already uses, not a new one-off aggregation -- and does not replace
+    compute_daily_net_flow, which stays the simpler net-only path
+    elasticities.py already relies on.
+    """
+    arrivals = _aggregate_side_daily(
+        clean_trips,
+        "end_station_id", "end_station_name", "end_lat", "end_lng",
+        "ended_at", "has_valid_arrival_station", sign=+1,
+    ).rename(columns={"count": "arrivals_count"})
+    departures = _aggregate_side_daily(
+        clean_trips,
+        "start_station_id", "start_station_name", "start_lat", "start_lng",
+        "started_at", "has_valid_departure_station", sign=+1,
+    ).rename(columns={"count": "departures_count"})
+
+    merged = pd.merge(
+        arrivals,
+        departures,
+        on=["station_id", "station_name", "date", "hour"],
+        how="outer",
+        suffixes=("_arr", "_dep"),
+    )
+    merged["arrivals_count"] = merged["arrivals_count"].fillna(0).astype(int)
+    merged["departures_count"] = merged["departures_count"].fillna(0).astype(int)
+    merged["net"] = merged["arrivals_count"] - merged["departures_count"]
+    # lat/lng come from whichever side had the row; fall back to the other
+    # side when a station has arrivals but no departures in this bucket or
+    # vice versa (the outer join leaves the missing side's lat/lng as NaN).
+    merged["lat"] = merged["lat_arr"].fillna(merged["lat_dep"])
+    merged["lng"] = merged["lng_arr"].fillna(merged["lng_dep"])
+
+    return merged[
+        ["station_id", "station_name", "date", "hour", "lat", "lng",
+         "arrivals_count", "departures_count", "net"]
+    ]
+
+
 def add_season(flows: pd.DataFrame) -> pd.DataFrame:
     """Add a season column derived from month, using the fixed SEASON_OF map."""
     flows = flows.copy()

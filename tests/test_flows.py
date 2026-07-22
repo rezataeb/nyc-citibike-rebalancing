@@ -4,7 +4,14 @@ import pandas as pd
 import pytest
 
 from pipeline.download import RAW_DATA_DIR, load_trips
-from pipeline.flows import add_season, compute_daily_net_flow, compute_net_flow, compute_throughput, export_flows
+from pipeline.flows import (
+    add_season,
+    compute_daily_flow_components,
+    compute_daily_net_flow,
+    compute_net_flow,
+    compute_throughput,
+    export_flows,
+)
 from pipeline.qc import run_qc
 
 BASE_ROW = {
@@ -194,6 +201,64 @@ def test_daily_net_flow_keeps_distinct_dates_separate():
     assert len(dep_rows) == 2, "two distinct dates must produce two separate rows, not one merged/averaged row"
     assert set(dep_rows["date"]) == {pd.Timestamp("2026-04-01"), pd.Timestamp("2026-04-08")}
     assert (dep_rows["net"] == -1).all()
+
+
+def test_daily_flow_components_splits_arrivals_and_departures():
+    # Same one-trip fixture as test_daily_net_flow_counts_arrivals_and_departures_correctly,
+    # but this time arrivals_count/departures_count must be visible separately,
+    # not just netted together.
+    clean = qc_clean(
+        [make_trip("2026-04-01 08:00:00", "2026-04-01 08:15:00", ride_id="t1")]
+    )
+    daily = compute_daily_flow_components(clean)
+
+    dep_row = daily[(daily["station_id"] == "1") & (daily["hour"] == 8)]
+    arr_row = daily[(daily["station_id"] == "2") & (daily["hour"] == 8)]
+
+    assert dep_row["arrivals_count"].iloc[0] == 0
+    assert dep_row["departures_count"].iloc[0] == 1
+    assert dep_row["net"].iloc[0] == -1
+
+    assert arr_row["arrivals_count"].iloc[0] == 1
+    assert arr_row["departures_count"].iloc[0] == 0
+    assert arr_row["net"].iloc[0] == 1
+
+
+def test_daily_flow_components_net_matches_daily_net_flow():
+    # compute_daily_flow_components' net column must agree exactly with
+    # compute_daily_net_flow's -- it's the same underlying definition, just
+    # with the two sides also kept visible separately.
+    clean = qc_clean(
+        [
+            make_trip("2026-04-01 08:00:00", "2026-04-01 08:15:00", ride_id="t1"),
+            make_trip("2026-04-01 08:05:00", "2026-04-02 09:00:00", ride_id="t2", start_station_id="2", end_station_id="1"),
+        ]
+    )
+    components = compute_daily_flow_components(clean)
+    reference = compute_daily_net_flow(clean)
+
+    merged = components.merge(
+        reference[["station_id", "date", "hour", "net"]],
+        on=["station_id", "date", "hour"],
+        suffixes=("_components", "_reference"),
+    )
+    assert (merged["net_components"] == merged["net_reference"]).all()
+
+
+def test_daily_flow_components_station_with_only_arrivals_has_zero_departures():
+    # A station that only ever receives trips in this window must still get
+    # departures_count == 0, not a missing/NaN row from the outer join.
+    clean = qc_clean(
+        [make_trip("2026-04-01 08:00:00", "2026-04-01 08:15:00", ride_id="t1")]
+    )
+    daily = compute_daily_flow_components(clean)
+    arr_only_row = daily[daily["station_id"] == "2"]
+
+    assert len(arr_only_row) == 1
+    assert arr_only_row["departures_count"].iloc[0] == 0
+    assert arr_only_row["arrivals_count"].iloc[0] == 1
+    assert not pd.isna(arr_only_row["lat"].iloc[0])
+    assert not pd.isna(arr_only_row["lng"].iloc[0])
 
 
 def test_add_season_maps_month_to_fixed_season():

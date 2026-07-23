@@ -301,7 +301,7 @@ def test_run_walk_forward_end_to_end_smoke(monkeypatch, tmp_path):
     monkeypatch.setattr("pipeline.demand_model.load_daily_table", lambda path=None: daily)
     monkeypatch.setattr(
         "pipeline.demand_model.compute_weather_zones",
-        lambda stations, n_zones=4: ({sid: 0 for sid in stations}, [(40.0, -74.0)]),
+        lambda stations, cell_km=6.0: ({sid: 0 for sid in stations}, [(40.0, -74.0)]),
     )
     monkeypatch.setattr("pipeline.demand_model.fetch_weather_at_points", lambda points, start, end: [weather])
     monkeypatch.setattr("pipeline.demand_model.MODEL_PERFORMANCE_PATH", tmp_path / "model_performance.json")

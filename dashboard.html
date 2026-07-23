@@ -580,7 +580,7 @@
               <input type="range" id="weather-precip-slider" min="0" max="1" step="0.05" value="0">
             </div>
             <div id="weather-scenario-status"></div>
-            <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model. A real daily-observation regression (temp/precip vs. real flow magnitude, ~90 real days from Feb/April/June), not a full-year climatology. One city-wide daily weather reading (Open-Meteo), not per-station. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
+            <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model. A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Jul 2025-Jun 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading -- each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
           </div>
         </div>
 

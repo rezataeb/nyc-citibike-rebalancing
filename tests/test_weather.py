@@ -68,15 +68,16 @@ def test_fetch_daily_weather_caches_different_points_separately(tmp_path, monkey
 
 
 def test_compute_weather_zones_groups_nearby_stations_together():
-    # Two tight geographic clusters, far apart -- k=2 must recover them as
-    # two zones, not split a tight cluster across zones or merge the two.
+    # Two tight geographic clusters, far apart -- a coarse grid (cell bigger
+    # than either cluster, smaller than the gap between them) must recover
+    # them as two zones, not split a tight cluster across zones or merge them.
     stations = {
         "a1": {"lat": 40.70, "lng": -74.00}, "a2": {"lat": 40.701, "lng": -74.001},
         "a3": {"lat": 40.699, "lng": -73.999},
         "b1": {"lat": 40.85, "lng": -73.90}, "b2": {"lat": 40.851, "lng": -73.901},
         "b3": {"lat": 40.849, "lng": -73.899},
     }
-    assignments, centroids = compute_weather_zones(stations, n_zones=2)
+    assignments, centroids = compute_weather_zones(stations, cell_km=5.0)
 
     assert len(centroids) == 2
     assert assignments["a1"] == assignments["a2"] == assignments["a3"]
@@ -86,10 +87,31 @@ def test_compute_weather_zones_groups_nearby_stations_together():
 
 def test_compute_weather_zones_is_deterministic():
     stations = {f"s{i}": {"lat": 40.6 + i * 0.01, "lng": -74.0 + i * 0.01} for i in range(20)}
-    assignments_1, centroids_1 = compute_weather_zones(stations, n_zones=4)
-    assignments_2, centroids_2 = compute_weather_zones(stations, n_zones=4)
+    assignments_1, centroids_1 = compute_weather_zones(stations, cell_km=5.0)
+    assignments_2, centroids_2 = compute_weather_zones(stations, cell_km=5.0)
     assert assignments_1 == assignments_2
     assert centroids_1 == centroids_2
+
+
+def test_compute_weather_zones_ignores_sparse_areas_density():
+    # The equity-motivated regression test: a dense cluster of stations must
+    # NOT pull a sparse, distant cluster's zone assignment off course. With a
+    # fixed grid, a lone station far from the dense cluster gets its own zone
+    # point near its own location, not one dragged toward the dense cluster.
+    dense = {f"d{i}": {"lat": 40.70 + (i % 5) * 0.001, "lng": -74.00 + (i % 5) * 0.001} for i in range(50)}
+    sparse = {"far1": {"lat": 40.85, "lng": -73.80}}
+    stations = {**dense, **sparse}
+
+    assignments, centroids = compute_weather_zones(stations, cell_km=5.0)
+
+    far_zone = assignments["far1"]
+    far_centroid = centroids[far_zone]
+    # The far station's assigned zone point must be near its own real
+    # location, not dragged toward the 50-station dense cluster ~20km away.
+    from pipeline.weather import haversine_km
+
+    assert haversine_km(40.85, -73.80, *far_centroid) < 5.0
+    assert all(assignments[sid] != far_zone for sid in dense)
 
 
 def test_fetch_weather_at_points_returns_one_frame_per_point(tmp_path, monkeypatch):

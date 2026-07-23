@@ -268,9 +268,11 @@ def load_daily_weather_panel(
     Session 36: weather is joined per-station-zone, not one uniform
     city-wide value -- see pipeline/weather.py's compute_weather_zones()
     module docstring for why real spatial variation matters here and how
-    the zones themselves are derived (k-means on real station lat/lng, not
-    hand-picked boroughs). `stations` (flows.json's stations dict) is now
-    a required argument specifically to compute those zones.
+    the zones themselves are derived (Session 38: a fixed geographic grid,
+    not k-means -- k-means was found to skew sparse peripheral areas like
+    East Queens and Southern Brooklyn toward distant, station-dense zone
+    centroids). `stations` (flows.json's stations dict) is now a required
+    argument specifically to compute those zones.
 
     Magnitude per (station, date) is the mean absolute hourly net flow
     that day -- the same "mean of |curve|" definition station_magnitude()

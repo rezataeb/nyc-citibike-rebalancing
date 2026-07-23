@@ -41,7 +41,7 @@ def test_load_daily_weather_panel_reads_persisted_table_not_raw_trips(tmp_path, 
         ],
     )
     stations = {"1": {"lat": 40.0, "lng": -74.0}}
-    monkeypatch.setattr("pipeline.weather.compute_weather_zones", lambda stations, n_zones=4: ({"1": 0}, [(40.0, -74.0)]))
+    monkeypatch.setattr("pipeline.weather.compute_weather_zones", lambda stations, cell_km=6.0: ({"1": 0}, [(40.0, -74.0)]))
     weather_zone_0 = pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [22.0], "precip_mm": [0.0]})
     monkeypatch.setattr("pipeline.weather.fetch_weather_at_points", lambda points, start, end: [weather_zone_0])
 
@@ -70,7 +70,7 @@ def test_load_daily_weather_panel_joins_per_station_zone_not_one_uniform_value(t
     stations = {"north": {"lat": 40.85, "lng": -73.90}, "south": {"lat": 40.65, "lng": -74.00}}
     monkeypatch.setattr(
         "pipeline.weather.compute_weather_zones",
-        lambda stations, n_zones=4: ({"north": 0, "south": 1}, [(40.85, -73.90), (40.65, -74.00)]),
+        lambda stations, cell_km=6.0: ({"north": 0, "south": 1}, [(40.85, -73.90), (40.65, -74.00)]),
     )
     zone_0_weather = pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [30.0], "precip_mm": [0.0]})
     zone_1_weather = pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [22.0], "precip_mm": [5.0]})

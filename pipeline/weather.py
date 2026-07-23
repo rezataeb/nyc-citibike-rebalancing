@@ -5,34 +5,49 @@ one of the public data sources this project is scoped to (see CLAUDE.md).
 
 Session 36: weather is no longer a single fixed NYC reference point by
 default for callers that want real spatial variation -- see
-compute_weather_zones() below, which derives a small number of geographic
-zones directly from the real station distribution (k-means on lat/lng,
-the same reasoning pipeline/station_typology.py already uses for
-behavioral clustering, applied here to geography instead of shape), and
-fetch_weather_at_points(), which fetches real weather independently at
-each zone's centroid. fetch_daily_weather() itself is unchanged in
-signature and still fetches one point -- now parameterized by lat/lng
-instead of hardcoded to NYC_LAT/NYC_LNG, which remain the default so
-existing single-point callers keep working unmodified.
+compute_weather_zones() below, and fetch_weather_at_points(), which
+fetches real weather independently at each zone's centroid.
+fetch_daily_weather() itself is unchanged in signature and still fetches
+one point -- now parameterized by lat/lng instead of hardcoded to
+NYC_LAT/NYC_LNG, which remain the default so existing single-point
+callers keep working unmodified.
+
+Session 38: compute_weather_zones() was originally k-means on station
+lat/lng (same reasoning pipeline/station_typology.py uses for behavioral
+clustering, applied to geography instead of shape). Verified against the
+four equity-priority areas this dashboard cares about most and found it
+skewed: South Bronx and Upper Manhattan (dense, large local populations)
+each landed within ~2-3km of their assigned zone centroid, but the
+sparser East Queens and Southern Brooklyn were swept into distant,
+station-dense zones 6-8km away -- weather-zone quality tracked local
+station density, not geography, exactly the risk raised before this was
+built. Raising K (tried 8) didn't fix it (East Queens still 5km off);
+switched to a fixed geographic grid instead, which decouples zone
+assignment from station density by construction -- see GRID_CELL_KM.
 """
 
 from __future__ import annotations
 
+from math import asin, ceil, cos, radians, sin, sqrt
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import requests
-from sklearn.cluster import KMeans
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 NYC_LAT, NYC_LNG = 40.7829, -73.9654
 RAW_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 
-# Number of geographic weather zones -- matches the "3-4 borough-representative
-# points" originally recommended (see PROGRESS.md's credibility-review entry).
-N_WEATHER_ZONES = 4
-ZONE_RANDOM_STATE = 0
+# Grid cell size for weather zones. Chosen empirically (Session 38): 6km was
+# the coarsest cell size that brought all four named equity-priority areas
+# (South Bronx, Upper Manhattan, East Queens, Southern Brooklyn) within
+# ~1.6-2.6km of their assigned grid point's weather -- comparable to or
+# better than the well-served areas under the old k-means approach. Finer
+# grids (4-5km) don't meaningfully improve on this and roughly double the
+# number of real Open-Meteo API calls for no equity benefit; coarser (8km)
+# leaves East Queens ~4km off.
+GRID_CELL_KM = 6.0
+EARTH_RADIUS_KM = 6371.0
 
 
 def fetch_daily_weather(
@@ -75,26 +90,64 @@ def fetch_daily_weather(
     return weather
 
 
-def compute_weather_zones(stations: dict, n_zones: int = N_WEATHER_ZONES) -> tuple[dict[str, int], list[tuple[float, float]]]:
-    """K-means cluster real station (lat, lng) into n_zones geographic weather
-    zones. Returns (station_id -> zone_index, [zone_centroid (lat, lng), ...]).
+def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance in km between two (lat, lng) points."""
+    lat1, lng1, lat2, lng2 = (radians(v) for v in (lat1, lng1, lat2, lng2))
+    dlat, dlng = lat2 - lat1, lng2 - lng1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
+    return 2 * EARTH_RADIUS_KM * asin(sqrt(a))
 
-    Zones are derived directly from the real station distribution, not
-    hand-picked borough boundaries this pipeline doesn't otherwise model or
-    verify -- the same reasoning pipeline/station_typology.py already uses
-    for behavioral clustering (real data decides the groups, not an
-    assumption about NYC geography), just applied to lat/lng instead of
-    weekday-curve shape. Deterministic (fixed random_state): the same
-    station roster always produces the same zones, so callers on either
-    side of the pipeline (elasticities.py, demand_model.py) that each call
-    this independently still agree on the same zone boundaries.
+
+def compute_weather_zones(
+    stations: dict, cell_km: float = GRID_CELL_KM
+) -> tuple[dict[str, int], list[tuple[float, float]]]:
+    """Assign each station to a fixed geographic grid cell, independent of
+    station density. Returns (station_id -> zone_index, [zone_point (lat, lng), ...]).
+
+    A grid of points spaced cell_km apart covers the real station bounding
+    box; each station is assigned to its nearest grid point by haversine
+    distance. Grid points with no assigned station are dropped (no point
+    fetching weather nobody uses) and the remaining zones are renumbered
+    0..N-1. This is deliberately NOT k-means on station coordinates: k-means
+    balances zone *population*, which pulls zone centroids toward dense
+    station clusters and leaves sparse peripheral areas -- exactly the
+    equity-priority areas this project cares about most (South Bronx, Upper
+    Manhattan, East Queens, Southern Brooklyn) -- assigned to a distant,
+    unrepresentative centroid. A fixed grid has no notion of station density
+    at all, so it can't be pulled off course by it. Deterministic: the same
+    station roster always produces the same grid and zone count, so callers
+    on either side of the pipeline (elasticities.py, demand_model.py) that
+    each call this independently still agree on the same zones.
     """
     station_ids = list(stations.keys())
-    coords = np.array([[stations[sid]["lat"], stations[sid]["lng"]] for sid in station_ids])
-    km = KMeans(n_clusters=n_zones, random_state=ZONE_RANDOM_STATE, n_init=10)
-    labels = km.fit_predict(coords)
-    assignments = {sid: int(label) for sid, label in zip(station_ids, labels)}
-    centroids = [(float(c[0]), float(c[1])) for c in km.cluster_centers_]
+    lats = [stations[sid]["lat"] for sid in station_ids]
+    lngs = [stations[sid]["lng"] for sid in station_ids]
+    lat_min, lat_max = min(lats), max(lats)
+    lng_min, lng_max = min(lngs), max(lngs)
+
+    lat_span_km = haversine_km(lat_min, lng_min, lat_max, lng_min)
+    lng_span_km = haversine_km(lat_min, lng_min, lat_min, lng_max)
+    rows = max(1, ceil(lat_span_km / cell_km))
+    cols = max(1, ceil(lng_span_km / cell_km))
+
+    grid_points = [
+        (
+            lat_min + (r + 0.5) * (lat_max - lat_min) / rows,
+            lng_min + (c + 0.5) * (lng_max - lng_min) / cols,
+        )
+        for r in range(rows)
+        for c in range(cols)
+    ]
+
+    raw_assignments = {
+        sid: min(range(len(grid_points)), key=lambda i: haversine_km(stations[sid]["lat"], stations[sid]["lng"], *grid_points[i]))
+        for sid in station_ids
+    }
+
+    occupied = sorted(set(raw_assignments.values()))
+    reindex = {old: new for new, old in enumerate(occupied)}
+    assignments = {sid: reindex[zone] for sid, zone in raw_assignments.items()}
+    centroids = [grid_points[old] for old in occupied]
     return assignments, centroids
 
 

@@ -187,6 +187,23 @@ const FAKE_SCENARIO_PRESETS_PAYLOAD = {
   notes: 'fake scenario presets for testing',
 };
 
+// Fake model_performance.json (pipeline/demand_model.py's walk-forward run,
+// Session 30) -- real payload shape (aggregate/significance/months/folds),
+// small enough to hand-check: guarded is deliberately the tier that beats
+// naive here (opposite of the real project's actual result), specifically
+// so formatSignificance's direction logic gets tested against BOTH
+// directions somewhere, not just "naive always wins" the way the real data
+// happens to look.
+const FAKE_MODEL_PERFORMANCE_PAYLOAD = {
+  months: ['2025-07', '2025-08', '2025-09'],
+  aggregate: { naive_mean_mae: 2.0, gam_mean_mae: 2.3, guarded_mean_mae: 1.5 },
+  significance: {
+    gam_vs_naive: { statistic: 3.0, p_value: 0.01 },
+    guarded_vs_naive: { statistic: 8.0, p_value: 0.02 },
+  },
+  folds: [{}, {}, {}],
+};
+
 // Fake elasticities.json (Investigator Mode Phase 4) -- deliberately gives
 // station A its own by_station entry, station B a different by_station
 // entry, and station C NEITHER a by_station entry NOR a matching
@@ -343,6 +360,7 @@ function buildSandbox() {
       if (url.includes('live_status')) payload = FAKE_LIVE_PAYLOAD;
       else if (url.includes('fleet_scenarios')) payload = FAKE_FLEET_SCENARIOS_PAYLOAD;
       else if (url.includes('scenario_presets')) payload = FAKE_SCENARIO_PRESETS_PAYLOAD;
+      else if (url.includes('model_performance')) payload = FAKE_MODEL_PERFORMANCE_PAYLOAD;
       else if (url.includes('elasticities')) payload = FAKE_ELASTICITIES_PAYLOAD;
       else if (url.includes('route')) payload = FAKE_ROUTE_PAYLOAD;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
@@ -417,6 +435,24 @@ async function main() {
       `marker ${id} fillColor at hour 8 should come from divergingColor(weekday[8], domainMax)`
     );
   }
+
+  // --- Session 30/31 wiring: model_performance.json is fetched and
+  // rendered, not left as Session 7.5's old hardcoded table. ---
+  assert.deepStrictEqual(stateAt8.modelPerformance, FAKE_MODEL_PERFORMANCE_PAYLOAD, 'model_performance.json should be fetched alongside flows.json at load');
+  assert.ok(!sandbox._elements['model-eval'].classList.contains('hidden'), 'Model performance panel must be visible once model_performance.json loads successfully');
+  const modelEvalRows = sandbox._elements['model-eval-tbody']._children;
+  assert.strictEqual(modelEvalRows.length, 3, 'one row per tier: naive, GAM, guarded');
+  assert.ok(modelEvalRows[0].innerHTML.includes('2.000'), 'naive row should show its real mean MAE from the fixture');
+  assert.ok(modelEvalRows[2].innerHTML.includes('1.500'), 'guarded row should show its real mean MAE from the fixture');
+  // FAKE_MODEL_PERFORMANCE_PAYLOAD deliberately has guarded (1.5) beat naive
+  // (2.0) -- opposite of this project's real current result -- specifically
+  // to prove formatSignificance names the actual winner rather than
+  // hardcoding "naive better" for every significant row.
+  assert.ok(modelEvalRows[2].innerHTML.includes('this tier better'), 'guarded beats naive in this fixture, so the label must say so, not assume naive always wins');
+  assert.strictEqual(
+    dash.formatSignificance({ p_value: null }, 1.0, 2.0), 'n/a',
+    'a null p_value (identical fold MAEs, nothing to test) must not be reported as a real result'
+  );
 
   const domainMaxAt8 = stateAt8.domainMax;
   const elements = sandbox._elements;
@@ -1287,6 +1323,7 @@ async function testFlowsJsonFailureOnly() {
     const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
       : url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
       : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('model_performance') ? FAKE_MODEL_PERFORMANCE_PAYLOAD
       : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD
       : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
@@ -1331,6 +1368,7 @@ async function testLiveJsonFailureOnly() {
     if (url.includes('live_status')) return Promise.reject(new Error('live feed down'));
     const payload = url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
       : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('model_performance') ? FAKE_MODEL_PERFORMANCE_PAYLOAD
       : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD
       : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
@@ -1368,6 +1406,7 @@ async function testBothFlowsAndLiveFailure() {
     if (url.includes('flows') || url.includes('live_status')) return Promise.reject(new Error('network down'));
     const payload = url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
       : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('model_performance') ? FAKE_MODEL_PERFORMANCE_PAYLOAD
       : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD : FAKE_ROUTE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
@@ -1407,6 +1446,7 @@ async function testRouteAndFleetScenariosMissing() {
     }
     const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
       : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('model_performance') ? FAKE_MODEL_PERFORMANCE_PAYLOAD
       : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
@@ -1457,6 +1497,7 @@ async function testRouteJsonMissingButFleetScenariosPresent() {
     }
     const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
       : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('model_performance') ? FAKE_MODEL_PERFORMANCE_PAYLOAD
       : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
   };
@@ -1534,6 +1575,7 @@ async function testWeatherScenarioFallsBackToTypologyElasticity() {
     const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
       : url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
       : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('model_performance') ? FAKE_MODEL_PERFORMANCE_PAYLOAD
       : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD
       : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
@@ -1897,8 +1939,190 @@ async function testSharedScenarioUrlAppliesOnLoad() {
   console.log('shared-scenario-URL-applies-on-load smoke test passed.');
 }
 
+// Separate scenario: a real full-year granularity block (all four seasons
+// plus twelve real months, matching data/flows.json's actual post-Session-29
+// shape) instead of FAKE_PAYLOAD's original one-season/two-month fixture --
+// FAKE_PAYLOAD itself is deliberately left untouched here since dozens of
+// other tests already assert exact values against its specific shape.
+// Verifies the period-select dropdown genuinely scales to a real year (not
+// just that the code "looks generic"), that season/month labels format
+// correctly, and that selecting a real season actually changes what's
+// rendered from that season's own bucket -- not a silent fallback to the
+// all-period average.
+async function testFullYearPeriodSelector() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const ALL_MONTHS = [
+    '2025-07', '2025-08', '2025-09', '2025-10', '2025-11', '2025-12',
+    '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06',
+  ];
+  const ALL_SEASONS = ['winter', 'spring', 'summer', 'fall'];
+
+  const FULL_YEAR_PAYLOAD = {
+    granularity: { months: ALL_MONTHS, seasons: ALL_SEASONS },
+    stations: {
+      A: {
+        name: 'Station A', lat: 40.75, lng: -73.98,
+        weekday: makeCurve({ 8: 5, 18: -5 }), weekend: makeCurve({ 8: 1, 18: -1 }),
+        cluster: 0, cluster_name: 'Test cluster A',
+        context: {
+          near_nycha: 0, near_school: 0, nycha_dist_m: 900, nycha_nearest: 'N',
+          school_dist_m: 900, school_nearest: 'S', subway_dist_m: 300, subway_nearest: 'Sub', transit_gap: 0,
+        },
+        seasons: {
+          winter: { weekday: makeCurve({ 8: 2, 18: -2 }), weekend: makeCurve({ 8: 0.5, 18: -0.5 }) },
+          spring: { weekday: makeCurve({ 8: 4, 18: -4 }), weekend: makeCurve({ 8: 1, 18: -1 }) },
+          summer: { weekday: makeCurve({ 8: 8, 18: -8 }), weekend: makeCurve({ 8: 2, 18: -2 }) },
+          fall: { weekday: makeCurve({ 8: 5, 18: -5 }), weekend: makeCurve({ 8: 1.5, 18: -1.5 }) },
+        },
+        // Deliberately partial month coverage -- mirrors the real full-year
+        // data, where 847 of 2,519 stations don't have all 12 months
+        // (Session 29's own months_present finding), so this exercises the
+        // real "granularity lists a month this station has no bucket for"
+        // case, not just the happy path.
+        months: {
+          '2025-07': { weekday: makeCurve({ 8: 7, 18: -7 }), weekend: makeCurve({ 8: 2, 18: -2 }) },
+          '2026-01': { weekday: makeCurve({ 8: 1, 18: -1 }), weekend: makeCurve({ 8: 0.2, 18: -0.2 }) },
+        },
+      },
+      // A second, much busier station -- purely to widen computeDomainMax's
+      // 95th-percentile pool to a realistic size. Without it, Station A's
+      // own curves are ~90% zero-hours (only 2 of 24 hours are nonzero per
+      // bucket, see makeCurve), so the percentile domain clamps EVERY real
+      // value here to the same fully-saturated color, making the
+      // winter-vs-summer color comparison below meaningless by construction
+      // -- not a real dashboard bug, just an artifact of a single sparse
+      // test station. Not otherwise referenced in assertions.
+      B: {
+        name: 'Station B', lat: 40.76, lng: -73.99,
+        weekday: makeCurve({ 8: 40, 18: -40 }), weekend: makeCurve({ 8: 10, 18: -10 }),
+        cluster: 1, cluster_name: 'Test cluster B',
+        context: {
+          near_nycha: 0, near_school: 0, nycha_dist_m: 900, nycha_nearest: 'N',
+          school_dist_m: 900, school_nearest: 'S', subway_dist_m: 300, subway_nearest: 'Sub', transit_gap: 0,
+        },
+        seasons: {
+          winter: { weekday: makeCurve({ 8: 30, 18: -30 }), weekend: makeCurve({ 8: 8, 18: -8 }) },
+          spring: { weekday: makeCurve({ 8: 40, 18: -40 }), weekend: makeCurve({ 8: 10, 18: -10 }) },
+          summer: { weekday: makeCurve({ 8: 45, 18: -45 }), weekend: makeCurve({ 8: 12, 18: -12 }) },
+          fall: { weekday: makeCurve({ 8: 35, 18: -35 }), weekend: makeCurve({ 8: 9, 18: -9 }) },
+        },
+        months: {},
+      },
+    },
+  };
+
+  const sandbox = buildSandbox();
+  sandbox.fetch = url => {
+    let payload = FULL_YEAR_PAYLOAD;
+    if (url.includes('live_status')) payload = FAKE_LIVE_PAYLOAD;
+    else if (url.includes('fleet_scenarios')) payload = FAKE_FLEET_SCENARIOS_PAYLOAD;
+    else if (url.includes('scenario_presets')) payload = FAKE_SCENARIO_PRESETS_PAYLOAD;
+    else if (url.includes('model_performance')) payload = FAKE_MODEL_PERFORMANCE_PAYLOAD;
+    else if (url.includes('elasticities')) payload = FAKE_ELASTICITIES_PAYLOAD;
+    else if (url.includes('route')) payload = FAKE_ROUTE_PAYLOAD;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
+  };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, full-year period selector)' });
+  const dash = context.__dashboard;
+  await dash.ready;
+
+  const options = sandbox._elements['period-select']._children;
+  assert.strictEqual(
+    options.length, 1 + ALL_SEASONS.length + ALL_MONTHS.length,
+    'period-select must have one option per real season/month plus the all-period average -- not still assuming a single season'
+  );
+
+  const optionValues = options.map(o => o.value);
+  assert.deepStrictEqual(
+    optionValues,
+    ['all', ...ALL_SEASONS.map(s => `season:${s}`), ...ALL_MONTHS.map(m => `month:${m}`)],
+    'option order must be all, then every real season, then every real month in flows.json granularity order'
+  );
+
+  const seasonLabels = options.filter(o => o.value.startsWith('season:')).map(o => o.textContent);
+  assert.deepStrictEqual(
+    seasonLabels, ['Winter', 'Spring', 'Summer', 'Fall'],
+    'season labels must be capitalized, not the raw lowercase granularity keys'
+  );
+
+  const julyOption = options.find(o => o.value === 'month:2025-07');
+  assert.strictEqual(julyOption.textContent, 'July 2025');
+  const juneOption = options.find(o => o.value === 'month:2026-06');
+  assert.strictEqual(juneOption.textContent, 'June 2026');
+
+  // Selecting a real season must actually change what's rendered, reading
+  // that season's own bucket -- not silently fall back to the all-period
+  // curve just because there are now four options instead of one.
+  dash.setPeriod('season:winter');
+  let state = dash.getState();
+  assert.strictEqual(state.period, 'season:winter');
+  const winterColor = state.markers['A']._opts.fillColor;
+  const expectedWinterColor = dash.divergingColor(FULL_YEAR_PAYLOAD.stations.A.seasons.winter.weekday[8], state.domainMax);
+  assert.strictEqual(winterColor, expectedWinterColor, "selecting a real season must color markers from that season's own bucket");
+
+  dash.setPeriod('season:summer');
+  state = dash.getState();
+  const summerColor = state.markers['A']._opts.fillColor;
+  assert.notStrictEqual(summerColor, winterColor, 'winter and summer have deliberately different magnitudes and must render as visibly different colors');
+
+  // A month present in granularity.months (so it's a real dropdown option)
+  // but absent from this specific station's own months{} bucket must be a
+  // real, correctly-detected no-data case -- not a crash, and not silently
+  // treated as if the station had zero flow that month.
+  assert.strictEqual(dash.hasPeriodData(FULL_YEAR_PAYLOAD.stations.A, 'month:2025-08'), false);
+  assert.strictEqual(dash.hasPeriodData(FULL_YEAR_PAYLOAD.stations.A, 'month:2025-07'), true);
+
+  console.log('full-year period-selector smoke test passed.');
+}
+
+// Separate scenario: model_performance.json specifically 404s while
+// everything else succeeds -- the Model performance panel must hide
+// entirely (same graceful-degradation rule as route.json/
+// fleet_scenarios.json above), not throw trying to read .aggregate off a
+// missing payload and take the whole dashboard load down with it.
+async function testModelPerformanceMissing() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  sandbox.fetch = url => {
+    if (url.includes('model_performance')) {
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new Error('not found')) });
+    }
+    const payload = url.includes('live_status') ? FAKE_LIVE_PAYLOAD
+      : url.includes('fleet_scenarios') ? FAKE_FLEET_SCENARIOS_PAYLOAD
+      : url.includes('scenario_presets') ? FAKE_SCENARIO_PRESETS_PAYLOAD
+      : url.includes('elasticities') ? FAKE_ELASTICITIES_PAYLOAD
+      : url.includes('route') ? FAKE_ROUTE_PAYLOAD : FAKE_PAYLOAD;
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) });
+  };
+
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, model_performance.json missing)' });
+
+  await context.__dashboard.ready;
+
+  const state = context.__dashboard.getState();
+  assert.strictEqual(state.modelPerformance, null, 'a model_performance.json fetch failure should resolve to null, not throw or reject the whole load');
+  assert.ok(
+    sandbox._elements['model-eval'].classList.contains('hidden'),
+    'Model performance panel must be hidden entirely when model_performance.json is missing, not shown empty or broken'
+  );
+  // Nothing else on the page should be affected by this one optional file missing.
+  assert.strictEqual(Object.keys(state.markers).length, 3, 'flows.json-driven markers must still render normally');
+  assert.ok(sandbox._elements['status'].classList.contains('hidden'), 'no fatal error banner should appear just because one optional file 404s');
+
+  console.log('model_performance.json-missing graceful-degradation smoke test passed.');
+}
+
 main()
   .then(testFileProtocolFetchFailure)
+  .then(testFullYearPeriodSelector)
+  .then(testModelPerformanceMissing)
   .then(testRouteAndFleetScenariosMissing)
   .then(testRouteJsonMissingButFleetScenariosPresent)
   .then(testWeatherScenarioFallsBackToTypologyElasticity)

@@ -598,21 +598,23 @@
 
       <!-- Model performance: a small, low-emphasis reference disclosure
            near the footer -- real numbers, but static and read-once, so
-           it doesn't need Investigator's level of prominence. -->
-      <div id="model-eval">
+           it doesn't need Investigator's level of prominence. Fetched from
+           data/model_performance.json (Session 30's walk-forward run)
+           rather than hardcoded here -- hardcoded numbers are exactly what
+           went stale after Session 5/7.5, still showing a single Feb+April
+           -> June split long after Session 30's real 12-fold walk-forward
+           superseded it. Hidden entirely if that file is missing, same
+           graceful-degradation rule as route.json/fleet_scenarios.json. -->
+      <div id="model-eval" class="hidden">
         <button id="model-eval-toggle">Model performance &#9656;</button>
         <div id="tab-panel-model" class="hidden">
           <table>
             <thead>
-              <tr><th>Volume tercile</th><th>Seasonal-naive</th><th>Flat baseline</th><th>GBM</th></tr>
+              <tr><th>Tier</th><th>Mean MAE (bikes/day)</th><th>vs. naive</th></tr>
             </thead>
-            <tbody>
-              <tr><td>Low (n=790)</td><td>0.275</td><td>0.275</td><td>0.993</td></tr>
-              <tr><td>Mid (n=788)</td><td>0.588</td><td>0.702</td><td>1.168</td></tr>
-              <tr><td>High (n=790)</td><td>1.364</td><td>1.924</td><td>2.082</td></tr>
-            </tbody>
+            <tbody id="model-eval-tbody"></tbody>
           </table>
-          <div id="model-eval-caption">MAE in bikes/day, Feb+April &rarr; June (held-out test month), from the Session 7.5 EDA report. GBM loses to seasonal-naive in every volume tercile &mdash; June's actual temperature fell outside the Feb+April training range, and gradient-boosted trees can't extrapolate past it.</div>
+          <div id="model-eval-caption"></div>
         </div>
       </div>
 
@@ -1074,6 +1076,7 @@ const state = {
   fleetScenarios: null, // raw fleet_scenarios.json payload, or null if it failed/wasn't generated -- graceful degradation, same rule as route.json
   elasticities: null, // raw elasticities.json payload, or null if missing -- Phase 4's weather-scenario projection needs this
   scenarioPresets: null, // raw scenario_presets.json payload, or null if missing
+  modelPerformance: null, // raw model_performance.json payload, or null if missing -- Session 30's walk-forward result
 };
 
 // Investigator mode: a standalone collapsible, not one half of a tab pair
@@ -1099,12 +1102,72 @@ function setInvestigatorExpanded(expanded) {
 }
 
 // Same collapsed-by-default pattern as setInvestigatorExpanded, for the
-// Model performance table -- pure visibility toggle, no data fetching or
-// rendering involved (the table content is static, not fetched).
+// Model performance table. Pure visibility toggle -- the table's own
+// content comes from renderModelPerformance() below, called once at load
+// (Session 30's walk-forward result doesn't change per hour/period/mode
+// the way marker colors do, so there's nothing to re-render here on every
+// interaction).
 function setModelEvalExpanded(expanded) {
   state.modelEvalExpanded = expanded;
   document.getElementById('tab-panel-model').classList.toggle('hidden', !expanded);
   document.getElementById('model-eval-toggle').textContent = `Model performance ${expanded ? '▾' : '▸'}`;
+}
+
+// Renders the real pipeline/demand_model.py walk-forward result (Session
+// 30) into the Model performance table -- fetched from
+// data/model_performance.json rather than hardcoded, specifically so this
+// can't go stale the way the old Session 7.5 numbers did (still showing a
+// single Feb+April -> June split long after the 12-fold walk-forward
+// superseded it). #model-eval hides entirely if the file is missing, same
+// graceful-degradation rule as route.json/fleet_scenarios.json.
+function renderModelPerformance(payload) {
+  const wrap = document.getElementById('model-eval');
+  if (!payload) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+
+  const tiers = [
+    { key: 'naive_mean_mae', label: 'Seasonal-naive' },
+    { key: 'gam_mean_mae', label: 'GAM (splines)' },
+    { key: 'guarded_mean_mae', label: 'Guarded (GBM+GAM+naive)' },
+  ];
+  const tbody = document.getElementById('model-eval-tbody');
+  tbody.innerHTML = '';
+  const naiveMae = payload.aggregate.naive_mean_mae;
+  for (const tier of tiers) {
+    const mae = payload.aggregate[tier.key];
+    const row = document.createElement('tr');
+    const vsNaive = tier.key === 'naive_mean_mae' ? '—' : formatSignificance(
+      tier.key === 'gam_mean_mae' ? payload.significance.gam_vs_naive : payload.significance.guarded_vs_naive,
+      mae, naiveMae
+    );
+    row.innerHTML = `<td>${tier.label}</td><td>${mae.toFixed(3)}</td><td>${vsNaive}</td>`;
+    tbody.appendChild(row);
+  }
+
+  const nFolds = payload.folds.length;
+  const firstMonth = payload.months[0];
+  const lastMonth = payload.months[payload.months.length - 1];
+  document.getElementById('model-eval-caption').textContent =
+    `MAE in bikes/day, ${nFolds}-fold leave-one-month-out walk-forward across ${formatPeriodLabel('month:' + firstMonth)} – ${formatPeriodLabel('month:' + lastMonth)}. ` +
+    `Seasonal-naive still wins overall (p<0.05 both comparisons) -- fixing the earlier extrapolation problem (real per-date weather instead of monthly averages) ` +
+    `didn't flip the result, it just made it statistically rigorous instead of a single train/test split.`;
+}
+
+// A paired Wilcoxon result -> "p=0.0024 (naive better)" / "not significant"
+// -- p_value can be null (identical fold-level MAEs, nothing to test).
+// Direction is computed by comparing this tier's own mean MAE against
+// naive's, not assumed -- naive happens to win in every real result this
+// project has produced so far, but the formatter itself makes no such
+// assumption, so a future run where a richer tier actually wins would
+// still be labeled correctly.
+function formatSignificance(result, tierMae, naiveMae) {
+  if (result.p_value === null) return 'n/a';
+  if (result.p_value >= 0.05) return `p=${result.p_value.toFixed(4)} (not significant)`;
+  const winner = tierMae < naiveMae ? 'this tier' : 'naive';
+  return `p=${result.p_value.toFixed(4)} (${winner} better)`;
 }
 
 // Content-container id per accordion -- not a uniform `${name}-accordion-
@@ -2353,6 +2416,11 @@ const fleetScenariosReady = fetchJSON('data/fleet_scenarios.json').catch(() => n
 const elasticitiesReady = fetchJSON('data/elasticities.json').catch(() => null);
 const scenarioPresetsReady = fetchJSON('data/scenario_presets.json').catch(() => null);
 
+// model_performance.json (pipeline/demand_model.py's walk-forward run,
+// Session 30) -- same optional/non-fatal treatment as every other analysis
+// layer above. Won't exist until that script has been run at least once.
+const modelPerformanceReady = fetchJSON('data/model_performance.json').catch(() => null);
+
 // flows.json and live_status.json now fail INDEPENDENTLY -- a live-feed
 // hiccup must not take down real historical data, and a historical-data
 // problem must not be masked by fabricating live counts under real
@@ -2368,8 +2436,8 @@ const liveReady = fetchJSON('data/live_status.json')
   .then(payload => ({ payload, ok: true }))
   .catch(error => ({ payload: null, ok: false, error }));
 
-const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady])
-  .then(([flowsResult, liveResult, routePayload, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload]) => {
+const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady])
+  .then(([flowsResult, liveResult, routePayload, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload]) => {
     state.stations = flowsResult.payload.stations;
     state.liveAvailable = liveResult.ok;
     state.liveStations = liveResult.ok ? liveResult.payload.stations : {};
@@ -2655,12 +2723,13 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
     document.getElementById('investigator-toggle').addEventListener('click', () => setInvestigatorExpanded(!state.investigatorExpanded));
     setInvestigatorExpanded(false); // explicit, not just relying on the static HTML default to already match -- same standing fix as Sessions 19/20A/20B/21
 
-    // Model performance: static content, no data dependency at all, but
-    // wired here alongside Investigator rather than split out to a
-    // separate top-level location -- there's no real behavioral
-    // difference either way once page load has already finished
-    // synchronously, and keeping both disclosure toggles' wiring
-    // together is simpler to read.
+    // Model performance: wired here alongside Investigator rather than
+    // split out to a separate top-level location -- there's no real
+    // behavioral difference either way once page load has already
+    // finished synchronously, and keeping both disclosure toggles'
+    // wiring together is simpler to read.
+    state.modelPerformance = modelPerformancePayload;
+    renderModelPerformance(state.modelPerformance);
     document.getElementById('model-eval-toggle').addEventListener('click', () => setModelEvalExpanded(!state.modelEvalExpanded));
     setModelEvalExpanded(false);
 
@@ -2752,7 +2821,7 @@ if (typeof globalThis !== 'undefined') {
     setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,
     setDetailVisible, setDetailMoreInfoExpanded, updateStationDetail,
     computeStopOffset, assignVisitIndices, buildStopIconHTML, buildRouteLayer, setRouteVisible, applyRouteVisibility,
-    setInvestigatorExpanded, setModelEvalExpanded, setAccordionExpanded, computeEquityCounts, renderEquityCounts, setEquityThreshold,
+    setInvestigatorExpanded, setModelEvalExpanded, renderModelPerformance, formatSignificance, setAccordionExpanded, computeEquityCounts, renderEquityCounts, setEquityThreshold,
     renderFleetStats, computeServicedEquityOverlap, applyFleetScenarioToRoute, setFleetSize,
     fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
     isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,

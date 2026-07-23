@@ -23,7 +23,13 @@ rather than implying one unified model produced everything:
   real, separately-useful, already-characterized artifact (Session 5's
   own documented 49.9%-directional-accuracy backtest, still shown in
   the dashboard's model-eval footer), just not what temp/precip
-  elasticity is computed from anymore.
+  elasticity is computed from anymore. Session 31 extended this further:
+  pipeline/build_full_year.py (Session 29) now persists this same daily
+  grain for a full real contiguous year (Jul 2025-Jun 2026), and this
+  module reads that persisted table directly instead of re-downloading
+  raw trips at all -- roughly 4x the real days this regression fits on,
+  and every reported coefficient now carries a 95% confidence interval
+  alongside its point estimate, not just the point estimate alone.
 - capacity_elasticity: capacity was NEVER one of that model's trained
   features (see FEATURE_COLUMNS in gbm.py), so its partial dependence
   cannot be computed from it without adding the feature and refitting --
@@ -98,33 +104,30 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 
-# DEFAULT_TRAIN_MONTHS is still imported for load_station_throughput's own
-# purpose (capacity's busyness control, unchanged by this session's fix --
-# capacity's regression already used hundreds of real per-station points,
-# never had a sparse-grid problem). Nothing else from gbm.py is needed
-# anymore: temp/precip elasticity no longer goes through that model at
-# all -- see the module docstring.
-from pipeline.gbm import DEFAULT_TRAIN_MONTHS
+from pipeline.build_full_year import DAILY_NET_FLOW_PATH
 from pipeline.station_typology import LOW_SIGNAL_NAME, LOW_VOLUME_THRESHOLD
 
 FLOWS_PATH = Path(__file__).resolve().parent.parent / "data" / "flows.json"
 LIVE_STATUS_PATH = Path(__file__).resolve().parent.parent / "data" / "live_status.json"
 ELASTICITIES_PATH = Path(__file__).resolve().parent.parent / "data" / "elasticities.json"
 
-# ALL cached real months feed the daily weather regression, not just
-# gbm.py's Feb+April training split -- there's no train/test-holdout
-# concept to preserve here (this fits a direct historical regression, not
-# a forecast to be honestly evaluated on unseen data), so using June too
-# is strictly more real data with a wider real temperature range, at zero
-# additional download cost (already cached).
-DAILY_REGRESSION_MONTHS = ["2026-02", "2026-04", "2026-06"]
-WEATHER_FETCH_START = "2026-02-01"
-WEATHER_FETCH_END = "2026-06-30"  # matches gbm.py's own cached Open-Meteo pull -- reuses the same cache file, no new fetch
+# Session 31: both loaders below now read data/daily_net_flow.parquet
+# (Session 29) instead of re-downloading raw trip archives -- those
+# archives are deleted immediately after aggregation by
+# pipeline/build_full_year.py, so re-downloading them here was both
+# wasteful and, now that they're gone by design, the wrong dependency to
+# have at all. This also takes the daily weather regression from ~90 days
+# (3 non-contiguous months) to ~365 real contiguous days, for free -- no
+# new download, just reading data already on disk.
+WEATHER_FETCH_START = "2025-07-01"
+WEATHER_FETCH_END = "2026-06-30"  # matches build_full_year's own window -- reuses the same cached Open-Meteo pull
 MIN_DAILY_OBSERVATIONS = 10  # real degrees-of-freedom floor for a 3-coefficient (intercept+temp+precip) fit
+CI_Z_SCORE = 1.96  # normal approximation for a 95% CI -- appropriate here since every real fit in this module has well over 30 degrees of freedom, so t and normal critical values are indistinguishable to 2 decimal places
 
 # Maps the real cluster_name strings station_typology.py writes onto
 # flows.json (Session 9's actual k=2 run) to the Guideline contract's
@@ -140,13 +143,18 @@ METHOD_NOTE = (
     "temp_elasticity/precip_elasticity: a direct joint linear regression "
     "of real per-(station, date) daily flow magnitude against real daily "
     "temp_c/precip_mm (Open-Meteo), fit once per typology group (pooling "
-    "every station's every real day -- up to ~2,000 stations x 90 days) "
-    "for by_typology, or per-station (that station's own up to 90 real "
-    "days only) for by_station when there are enough of them "
-    "(MIN_DAILY_OBSERVATIONS). Uses ALL of Feb/April/June (not just "
-    "gbm.py's Feb+April training split) -- there's no forecast to "
-    "honestly evaluate on held-out data here, just a historical "
-    "association to estimate, so more real days is strictly better. "
+    "every station's every real day across the full Jul 2025-Jun 2026 "
+    "year) for by_typology, or per-station (that station's own real days "
+    "only) for by_station when there are enough of them "
+    "(MIN_DAILY_OBSERVATIONS). Reads pipeline/build_full_year.py's "
+    "persisted daily table (Session 29) directly -- no raw trip "
+    "re-download, and no forecast-holdout concept to preserve here (this "
+    "fits a direct historical regression, not a forecast evaluated on "
+    "unseen data), so using the full year is strictly more real data with "
+    "a wider real temperature range than any subset of it. Every "
+    "coefficient is reported with a 95% confidence interval (normal "
+    "approximation, see CI_Z_SCORE) alongside its point estimate -- not "
+    "just the point estimate alone. "
     "Replaced Session 25's partial-dependence-off-a-monthly-aggregate "
     "approach entirely -- see the module docstring. "
     "capacity_elasticity: a separate quadratic least-squares "
@@ -180,21 +188,24 @@ DAILY_REGRESSION_CAVEAT = (
     "through only 5 sparse, monthly-aggregate points with a likely-"
     "artifactual jump at the top one. Session 27 fixed the underlying "
     "data granularity (real daily observations instead of monthly "
-    "aggregates), NOT just the caveat -- but real limitations remain, "
-    "stated plainly rather than implied resolved: these are still up to "
-    "90 days from 3 NON-CONTIGUOUS months (Feb/April/June), not a "
-    "continuous year, so intervening months (Jan, Mar, May, and Jul "
-    "onward) contribute nothing; and temp_c/precip_mm are each ONE "
-    "city-wide daily value (Open-Meteo's Central Park reference point, "
-    "per pipeline/weather.py), not per-station, so real local weather "
-    "variation across NYC's boroughs is not captured. A joint fit "
-    "(temp and precip together, not two separate univariate fits) "
-    "controls for the two being correlated with each other (a rainy day "
-    "is often also cooler), but not for anything else true of those "
-    "specific calendar days that isn't captured by date-of-year "
-    "position or day-of-week (already implicit in which real dates got "
-    "sampled) -- still an observational association, not a controlled "
-    "experiment."
+    "aggregates); Session 31 extended the window from 90 non-contiguous "
+    "days (Feb/April/June 2026 only) to the full real Jul 2025-Jun 2026 "
+    "year -- real limitations remain, stated plainly rather than implied "
+    "resolved: temp_c/precip_mm are each ONE city-wide daily value "
+    "(Open-Meteo's Central Park reference point, per pipeline/weather.py), "
+    "not per-station, so real local weather variation across NYC's "
+    "boroughs is not captured. A joint fit (temp and precip together, not "
+    "two separate univariate fits) controls for the two being correlated "
+    "with each other (a rainy day is often also cooler), but not for "
+    "anything else true of those specific calendar days that isn't "
+    "captured by date-of-year position or day-of-week (already implicit "
+    "in which real dates got sampled) -- still an observational "
+    "association, not a controlled experiment. The reported 95% "
+    "confidence intervals reflect real sampling uncertainty in the "
+    "regression coefficients themselves; they do not, and cannot, widen "
+    "to reflect this observational-vs-causal gap -- a narrow CI here "
+    "means 'this association is precisely estimated,' not 'this is a "
+    "causal effect.'"
 )
 # Rank-correlation thresholds for how confidently ceiling_effect_note() below
 # describes the diminishing-effect evidence as "clean" vs "weak/inconsistent"
@@ -238,35 +249,29 @@ def station_magnitude(weekday_curve: list[float]) -> float:
     return float(np.mean(np.abs(weekday_curve)))
 
 
-def load_daily_weather_panel(months: list[str] = DAILY_REGRESSION_MONTHS) -> pd.DataFrame:
+def load_daily_weather_panel(daily_net_flow_path: Path = DAILY_NET_FLOW_PATH) -> pd.DataFrame:
     """Real per-(station, date) daily flow magnitude joined against real
     daily temp_c/precip_mm -- the direct replacement for Session 25's
     PDP-off-a-monthly-aggregate approach (see module docstring).
 
-    Reuses pipeline.flows.compute_daily_net_flow (station_id typing and
-    midnight-crossing-safe date handling already fixed in Session 5, same
-    reuse pattern load_station_throughput below already established for
-    compute_throughput) and pipeline.weather.fetch_daily_weather (the
-    exact real Open-Meteo pull gbm.py already caches, just joined at
-    daily instead of monthly grain here -- no new fetch).
+    Session 31: reads pipeline/build_full_year.py's persisted daily table
+    (Session 29) directly, instead of re-downloading and re-aggregating
+    raw trip archives that no longer exist on disk by design (deleted
+    immediately after aggregation to keep peak disk usage low -- see
+    PROGRESS.md's Session 29 entry). This is strictly a data-source swap:
+    the table's own (station_id, date, hour, net) columns are exactly
+    compute_daily_net_flow's old output shape, just read from disk instead
+    of recomputed from scratch every call.
 
     Magnitude per (station, date) is the mean absolute hourly net flow
     that day -- the same "mean of |curve|" definition station_magnitude()
     already uses, kept consistent so "how big is this station's typical
     swing" means the same thing everywhere in this file.
     """
-    from pipeline.download import download_month, load_trips
-    from pipeline.flows import compute_daily_net_flow
-    from pipeline.qc import run_qc
     from pipeline.weather import fetch_daily_weather
 
-    def _load_clean_trips(year_month: str) -> pd.DataFrame:
-        zip_path = download_month(year_month)
-        trips = load_trips(zip_path)
-        clean, _report = run_qc(trips)
-        return clean
-
-    daily = pd.concat([compute_daily_net_flow(_load_clean_trips(m)) for m in months], ignore_index=True)
+    daily = pd.read_parquet(daily_net_flow_path, columns=["station_id", "date", "hour", "net"])
+    daily["date"] = pd.to_datetime(daily["date"])
     daily_magnitude = (
         daily.groupby(["station_id", "date"])["net"]
         .apply(lambda x: float(np.mean(np.abs(x))))
@@ -276,15 +281,57 @@ def load_daily_weather_panel(months: list[str] = DAILY_REGRESSION_MONTHS) -> pd.
 
     weather = fetch_daily_weather(WEATHER_FETCH_START, WEATHER_FETCH_END)
     # Inner join: a handful of midnight-crossing spillover dates (e.g.
-    # 2026-01-31, outside the fetched weather range) simply have no
-    # weather match and are dropped -- graceful, not fabricated, same
-    # rule as every other NaN-adjacent gap in this project.
+    # 2026-06-30 23:xx trips landing on 2026-07-01, outside the fetched
+    # weather range) simply have no weather match and are dropped --
+    # graceful, not fabricated, same rule as every other NaN-adjacent gap
+    # in this project.
     return daily_magnitude.merge(weather[["date", "temp_mean_c", "precip_mm"]], on="date", how="inner")
+
+
+def _ols_fit_with_covariance(X: np.ndarray, y: np.ndarray, min_rank: int) -> tuple[np.ndarray, np.ndarray] | None:
+    """Plain OLS: coefficients plus their full covariance matrix, via the
+    closed-form sigma^2 * (X'X)^-1 -- shared by both fit functions below so
+    the standard-error formula exists in exactly one place, not duplicated
+    once per fit shape.
+
+    Returns None if the fit is rank-deficient (columns too collinear to
+    separate their individual effects, e.g. capacity and throughput
+    tracking each other too closely) -- checked against min_rank, the
+    number of coefficients being fit, so a caller with p columns can't
+    silently accept a fit with fewer than p real degrees of freedom.
+    """
+    coeffs, residuals, rank, _singular_values = np.linalg.lstsq(X, y, rcond=None)
+    if rank < min_rank:
+        return None
+    n, p = X.shape
+    if n <= p:
+        return None
+    fitted = X @ coeffs
+    sigma_squared = float(np.sum((y - fitted) ** 2)) / (n - p)
+    xtx_inv = np.linalg.inv(X.T @ X)
+    covariance = sigma_squared * xtx_inv
+    return coeffs, covariance
+
+
+class WeatherRegressionResult(NamedTuple):
+    """magnitude ~ b0 + b1*temp_c + b2*precip_mm, plus each slope's own
+    standard error -- a NamedTuple (not a plain tuple) so downstream code
+    reads curve.b1/curve.se_b1 instead of curve[1]/an easily-miscounted
+    index, the same self-documenting reasoning pipeline/qc.py's QCReport
+    and pipeline/gbfs_logger.py's SnapshotResult already use elsewhere in
+    this project.
+    """
+
+    b0: float
+    b1: float  # temp_c coefficient
+    b2: float  # precip_mm coefficient
+    se_b1: float
+    se_b2: float
 
 
 def fit_daily_weather_regression(
     magnitudes: np.ndarray, temps: np.ndarray, precips: np.ndarray, n_distinct_days: int
-) -> tuple[float, float, float] | None:
+) -> WeatherRegressionResult | None:
     """Joint least-squares fit: magnitude ~ b0 + b1*temp_c + b2*precip_mm.
 
     Joint (not two separate univariate fits) so each coefficient controls
@@ -304,47 +351,66 @@ def fit_daily_weather_regression(
     if n_distinct_days < MIN_DAILY_OBSERVATIONS:
         return None
     X = np.column_stack([np.ones_like(temps), temps, precips])
-    coeffs, _residuals, rank, _singular_values = np.linalg.lstsq(X, magnitudes, rcond=None)
-    if rank < 3:
+    fit = _ols_fit_with_covariance(X, magnitudes, min_rank=3)
+    if fit is None:
         return None
+    coeffs, covariance = fit
     b0, b1, b2 = coeffs
-    return float(b0), float(b1), float(b2)
+    se_b1, se_b2 = float(np.sqrt(covariance[1, 1])), float(np.sqrt(covariance[2, 2]))
+    return WeatherRegressionResult(float(b0), float(b1), float(b2), se_b1, se_b2)
 
 
-def load_station_throughput(train_months: list[str] = DEFAULT_TRAIN_MONTHS) -> pd.Series:
-    """station_id -> n_days-weighted mean throughput_per_day across train_months.
+def load_station_throughput(daily_net_flow_path: Path = DAILY_NET_FLOW_PATH) -> pd.Series:
+    """station_id -> mean real daily throughput (arrivals+departures/day)
+    across the full persisted year.
 
     A busyness proxy independent of net-flow DIRECTION (throughput sums
     both sides; net flow differences them), used only as a regression
     control for the capacity/magnitude confound -- see module docstring.
-    Reuses pipeline.flows.compute_throughput, which itself reuses the
-    exact aggregation compute_net_flow relies on (station_id typing,
-    midnight-crossing-safe date handling, both real bugs fixed in
-    Sessions 3/5) -- not a new one-off aggregation.
+
+    Session 31: reads data/daily_net_flow.parquet directly instead of
+    re-downloading raw trips for pipeline.flows.compute_throughput (same
+    reasoning as load_daily_weather_panel above). Every parquet row is
+    already one real (station, date, hour), so summing arrivals_count +
+    departures_count per (station, date) and then averaging across dates
+    is the direct real-data equivalent of the old n_days-weighted mean --
+    no separate weighting needed, since there's no month-spanning
+    aggregate here to weight, just real individual days.
     """
-    from pipeline.download import download_month, load_trips
-    from pipeline.flows import compute_throughput
-    from pipeline.qc import run_qc
-
-    def _load_clean_trips(year_month: str) -> pd.DataFrame:
-        zip_path = download_month(year_month)
-        trips = load_trips(zip_path)
-        clean, _report = run_qc(trips)
-        return clean
-
-    all_throughput = pd.concat(
-        [compute_throughput(_load_clean_trips(m)) for m in train_months], ignore_index=True
+    daily = pd.read_parquet(
+        daily_net_flow_path, columns=["station_id", "date", "arrivals_count", "departures_count"]
     )
+    daily["date"] = pd.to_datetime(daily["date"])
+    per_day_throughput = (
+        daily.groupby(["station_id", "date"])[["arrivals_count", "departures_count"]]
+        .sum()
+        .sum(axis=1)
+        .rename("throughput")
+        .reset_index()
+    )
+    return per_day_throughput.groupby("station_id")["throughput"].mean()
 
-    def _weighted_mean(group: pd.DataFrame) -> float:
-        return (group["throughput_per_day"] * group["n_days"]).sum() / group["n_days"].sum()
 
-    return all_throughput.groupby("station_id").apply(_weighted_mean, include_groups=False)
+class CapacityRegressionResult(NamedTuple):
+    """magnitude ~ b0 + b1*capacity + b2*capacity^2 + b3*throughput, plus
+    the (capacity, capacity^2) block of the coefficient covariance matrix
+    -- var_b1/var_b2/cov_b1_b2 are exactly what capacity_local_slope_se
+    needs (via the delta method) to report a standard error for a
+    *derivative* of the fit, not just for a raw coefficient.
+    """
+
+    b0: float
+    b1: float
+    b2: float
+    b3: float
+    var_b1: float
+    var_b2: float
+    cov_b1_b2: float
 
 
 def fit_capacity_curve(
     capacities: np.ndarray, magnitudes: np.ndarray, throughput: np.ndarray
-) -> tuple[float, float, float, float] | None:
+) -> CapacityRegressionResult | None:
     """Least-squares fit: magnitude ~ b0 + b1*capacity + b2*capacity^2 + b3*throughput.
 
     The quadratic capacity term is deliberate, not decoration -- a
@@ -365,17 +431,46 @@ def fit_capacity_curve(
     if len(np.unique(capacities)) < 8:
         return None
     X = np.column_stack([np.ones_like(capacities), capacities, capacities**2, throughput])
-    coeffs, _residuals, rank, _singular_values = np.linalg.lstsq(X, magnitudes, rcond=None)
-    if rank < 4:
+    fit = _ols_fit_with_covariance(X, magnitudes, min_rank=4)
+    if fit is None:
         return None
+    coeffs, covariance = fit
     b0, b1, b2, b3 = coeffs
-    return float(b0), float(b1), float(b2), float(b3)
+    return CapacityRegressionResult(
+        float(b0), float(b1), float(b2), float(b3),
+        var_b1=float(covariance[1, 1]), var_b2=float(covariance[2, 2]), cov_b1_b2=float(covariance[1, 2]),
+    )
 
 
 def capacity_local_slope(b1: float, b2: float, capacity: float) -> float:
     """d(magnitude)/d(capacity) of the quadratic fit, evaluated at `capacity`
     (throughput's own term drops out of a partial derivative w.r.t. capacity)."""
     return b1 + 2 * b2 * capacity
+
+
+def capacity_local_slope_se(var_b1: float, var_b2: float, cov_b1_b2: float, capacity: float) -> float:
+    """Standard error of capacity_local_slope's derivative b1 + 2*b2*capacity,
+    via the delta method: Var(b1 + 2c*b2) = Var(b1) + 4c^2*Var(b2) + 4c*Cov(b1,b2),
+    for a fixed evaluation point c = capacity (not itself a random variable).
+    A derivative of a fitted curve is a LINEAR COMBINATION of b1 and b2, so
+    its variance needs their covariance too, not just each one's own
+    variance in isolation -- the two are correlated in a quadratic fit
+    (capacity and capacity^2 share the same underlying regressor), and
+    ignoring that covariance would report an overconfident (too-narrow) CI.
+    """
+    return float(np.sqrt(var_b1 + 4 * capacity**2 * var_b2 + 4 * capacity * cov_b1_b2))
+
+
+def elasticity_ci95(slope: float, se: float, denominator: float) -> list[float]:
+    """95% CI for an elasticity (slope/denominator), from the slope's own
+    standard error -- both bounds are divided by the same denominator the
+    point estimate itself uses, so the CI is on the identical unitless
+    scale reported for the point estimate, not the raw (unnormalized)
+    slope's own CI.
+    """
+    low = (slope - CI_Z_SCORE * se) / denominator
+    high = (slope + CI_Z_SCORE * se) / denominator
+    return [round(low, 4), round(high, 4)]
 
 
 def build_elasticities(
@@ -409,7 +504,7 @@ def build_elasticities(
     magnitude_by_id = {sid: station_magnitude(stations[sid]["weekday"]) for sid in stations}
 
     by_typology: dict[str, dict] = {}
-    capacity_curve_by_slug: dict[str, tuple[float, float, float] | None] = {}
+    capacity_curve_by_slug: dict[str, CapacityRegressionResult | None] = {}
 
     for slug, station_ids in groups.items():
         if not station_ids:
@@ -421,8 +516,6 @@ def build_elasticities(
             group_panel["magnitude"].to_numpy(), group_panel["temp_mean_c"].to_numpy(),
             group_panel["precip_mm"].to_numpy(), group_panel["date"].nunique(),
         )
-        temp_slope = group_curve[1] if group_curve is not None else None
-        precip_slope = group_curve[2] if group_curve is not None else None
 
         # Only stations with BOTH a real capacity match and a real throughput
         # estimate can feed the capacity regression -- fewer than
@@ -443,14 +536,31 @@ def build_elasticities(
 
         curve = fit_capacity_curve(capacities, magnitudes_for_capacity, throughput_for_capacity)
         capacity_curve_by_slug[slug] = curve
+        mean_capacity = float(np.mean(capacities)) if len(capacities) else None
 
         entry = {
             "capacity_elasticity": (
-                round(capacity_local_slope(curve[1], curve[2], float(np.mean(capacities))) / group_magnitude, 4)
+                round(capacity_local_slope(curve.b1, curve.b2, mean_capacity) / group_magnitude, 4)
                 if curve is not None else None
             ),
-            "temp_elasticity": round(temp_slope / group_magnitude, 4) if temp_slope is not None else None,
-            "precip_elasticity": round(precip_slope / group_magnitude, 4) if precip_slope is not None else None,
+            "capacity_elasticity_ci95": (
+                elasticity_ci95(
+                    capacity_local_slope(curve.b1, curve.b2, mean_capacity),
+                    capacity_local_slope_se(curve.var_b1, curve.var_b2, curve.cov_b1_b2, mean_capacity),
+                    group_magnitude,
+                )
+                if curve is not None else None
+            ),
+            "temp_elasticity": round(group_curve.b1 / group_magnitude, 4) if group_curve is not None else None,
+            "temp_elasticity_ci95": (
+                elasticity_ci95(group_curve.b1, group_curve.se_b1, group_magnitude)
+                if group_curve is not None else None
+            ),
+            "precip_elasticity": round(group_curve.b2 / group_magnitude, 4) if group_curve is not None else None,
+            "precip_elasticity_ci95": (
+                elasticity_ci95(group_curve.b2, group_curve.se_b2, group_magnitude)
+                if group_curve is not None else None
+            ),
             "n_stations": len(station_ids),
             "n_stations_with_capacity": int(len(capacity_ids)),
             "n_daily_observations": int(len(group_panel)),
@@ -480,18 +590,30 @@ def build_elasticities(
             station_panel["magnitude"].to_numpy(), station_panel["temp_mean_c"].to_numpy(),
             station_panel["precip_mm"].to_numpy(), n_obs,
         )
-        temp_slope = station_curve[1] if station_curve is not None else None
-        precip_slope = station_curve[2] if station_curve is not None else None
 
         entry = {
-            "temp_elasticity": round(temp_slope / magnitude, 4) if temp_slope is not None else None,
-            "precip_elasticity": round(precip_slope / magnitude, 4) if precip_slope is not None else None,
+            "temp_elasticity": round(station_curve.b1 / magnitude, 4) if station_curve is not None else None,
+            "temp_elasticity_ci95": (
+                elasticity_ci95(station_curve.b1, station_curve.se_b1, magnitude)
+                if station_curve is not None else None
+            ),
+            "precip_elasticity": round(station_curve.b2 / magnitude, 4) if station_curve is not None else None,
+            "precip_elasticity_ci95": (
+                elasticity_ci95(station_curve.b2, station_curve.se_b2, magnitude)
+                if station_curve is not None else None
+            ),
             "n_obs": n_obs,
         }
         curve = capacity_curve_by_slug.get(slug)
         if curve is not None and sid in capacity_by_id:
+            station_capacity = float(capacity_by_id[sid])
             entry["capacity_elasticity"] = round(
-                capacity_local_slope(curve[1], curve[2], float(capacity_by_id[sid])) / magnitude, 4
+                capacity_local_slope(curve.b1, curve.b2, station_capacity) / magnitude, 4
+            )
+            entry["capacity_elasticity_ci95"] = elasticity_ci95(
+                capacity_local_slope(curve.b1, curve.b2, station_capacity),
+                capacity_local_slope_se(curve.var_b1, curve.var_b2, curve.cov_b1_b2, station_capacity),
+                magnitude,
             )
         by_station[sid] = entry
 

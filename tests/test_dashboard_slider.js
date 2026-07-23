@@ -41,6 +41,16 @@ const FAKE_PAYLOAD = {
   // stations have 2026-05). Station B below deliberately has no '2026-05'
   // bucket, so it can exercise the no-data path.
   granularity: { months: ['2026-04', '2026-05'], seasons: ['spring'] },
+  equity_join: {
+    layers: {
+      nycha: { domain: 'data.cityofnewyork.us', dataset_id: 'phvi-damg', n_records: 216, threshold_m: 300 },
+      school: {
+        domain: 'data.cityofnewyork.us', dataset_id: 'wg9x-4ke6', n_records: 1899, threshold_m: 300,
+        vintage_label: 'Test school vintage label',
+      },
+      subway: { domain: 'data.ny.gov', dataset_id: 'i9wp-a4ja', n_records: 2120, threshold_m: 800 },
+    },
+  },
   stations: {
     A: {
       name: 'Station A', lat: 40.75, lng: -73.98,
@@ -563,6 +573,13 @@ async function main() {
     'Nearest subway: Test Subway B (900 m) — beyond the 800 m subway-gap threshold'
   );
   assert.strictEqual(contextChildren[1].textContent, 'Within 300 m of school: Test School B (150 m)');
+
+  // Session 37: school-proximity dataset vintage caveat must actually be
+  // shown, not just computed -- station B is near a school, so the note
+  // must be visible and carry the real vintage_label from flows.json's
+  // equity_join.layers.school block.
+  assert.ok(!elements['detail-context-note'].classList.contains('hidden'), 'school vintage note must show for a station near a school');
+  assert.strictEqual(elements['detail-context-note'].textContent, 'School data: Test school vintage label');
 
   const moreInfoToggleClick = elements['detail-more-toggle']._listeners.click;
   assert.ok(moreInfoToggleClick, 'no click listener registered on the More info toggle');
@@ -2119,10 +2136,56 @@ async function testModelPerformanceMissing() {
   console.log('model_performance.json-missing graceful-degradation smoke test passed.');
 }
 
+// Separate scenario: schoolVintageNote()'s pure-function edge cases, plus a
+// real selectStation() run confirming the note is hidden (not left over
+// from a previous selection) for a station with no nearby school.
+async function testSchoolVintageNoteEdgeCases() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const script = extractInlineScript(html);
+
+  const sandbox = buildSandbox();
+  const context = vm.createContext(sandbox);
+  vm.runInContext(script, context, { filename: 'dashboard.html (inline script, school vintage note)' });
+  const dash = context.__dashboard;
+
+  // Pure-function edge cases, no fetch/state involved.
+  assert.strictEqual(
+    dash.schoolVintageNote({ near_school: false }, { layers: { school: { vintage_label: 'x' } } }), null,
+    'no note for a station that is not near a school, even if vintage metadata is available'
+  );
+  assert.strictEqual(
+    dash.schoolVintageNote({ near_school: true }, null), null,
+    'no note (not a crash) when equityJoinMeta itself failed to load'
+  );
+  assert.strictEqual(
+    dash.schoolVintageNote({ near_school: true }, { layers: {} }), null,
+    'no note when equityJoinMeta loaded but has no school layer entry'
+  );
+  assert.strictEqual(
+    dash.schoolVintageNote({ near_school: true }, { layers: { school: { vintage_label: 'real label' } } }),
+    'School data: real label'
+  );
+
+  await dash.ready;
+
+  // Station A (near_school: false in FAKE_PAYLOAD) must show no note at all
+  // -- confirms selectStation() actually hides it, not just that the pure
+  // function returns null in isolation.
+  const markerAClick = dash.getState().markers.A._listeners.click;
+  markerAClick();
+  assert.ok(
+    sandbox._elements['detail-context-note'].classList.contains('hidden'),
+    'school vintage note must be hidden for a station with no nearby school'
+  );
+
+  console.log('school-vintage-note edge cases smoke test passed.');
+}
+
 main()
   .then(testFileProtocolFetchFailure)
   .then(testFullYearPeriodSelector)
   .then(testModelPerformanceMissing)
+  .then(testSchoolVintageNoteEdgeCases)
   .then(testRouteAndFleetScenariosMissing)
   .then(testRouteJsonMissingButFleetScenariosPresent)
   .then(testWeatherScenarioFallsBackToTypologyElasticity)

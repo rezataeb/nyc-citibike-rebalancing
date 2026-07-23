@@ -16,6 +16,25 @@ total -- catches silent truncation before it corrupts distances downstream.
   label travels with the layer's metadata (equity_join.layers.school) and
   must be surfaced anywhere school-proximity numbers are shown, not just
   noted here.
+
+  Re-verified 2026-07-23 (Session 37), not assumed still true: no newer
+  row-queryable, coordinate-bearing school-location dataset exists on NYC
+  Open Data. Checked directly, not just re-read from an old note --
+  (1) 3bkj-34v2 still returns HTTP 403 ("no row or column access to
+  non-tabular tables"); (2) i2i8-9vjc ("NYC School Locations", a
+  non-year-versioned, current-sounding name) IS row-queryable but has
+  exactly one field (address, no coordinates) and is itself a 2017
+  vintage -- older than wg9x-4ke6, not a real candidate; (3) jfju-ynrr
+  ("School Point Locations") is file/GIS-only, the same failure mode as
+  the reference implementation's broken hardcoded id (see the live
+  Socrata check elsewhere in this module); (4) cmjf-yawu ("School Zones
+  2024-2025") is real and current but contains attendance-ZONE polygons,
+  not individual school point locations; (5) the year-versioned "20XX-20XX
+  School Locations" series that produced wg9x-4ke6 (2012-2013 through
+  2019-2020 all exist) has no entry after 2019-2020 -- DOE appears to
+  have stopped publishing this specific series entirely, not just paused
+  it. wg9x-4ke6 remains not just the best available option but the only
+  one that actually works for this pipeline's needs.
 - Subway entrances: data.ny.gov/i9wp-a4ja, "MTA Subway Entrances and Exits:
   2024". Not on data.cityofnewyork.us -- migrated to the state portal, but
   still MTA-authoritative Socrata data.
@@ -47,7 +66,10 @@ SUBWAY_DOMAIN = "data.ny.gov"
 SUBWAY_DATASET_ID = "i9wp-a4ja"
 
 SCHOOL_VINTAGE_LABEL = (
-    "2019-2020 school locations (most recent queryable Socrata dataset as of build time)"
+    "2019-2020 school locations -- confirmed the only row-queryable, "
+    "coordinate-bearing school-location dataset on NYC Open Data as of "
+    "2026-07-23 (re-checked, not assumed; no newer edition of this "
+    "dataset series has ever been published)"
 )
 
 NYCHA_THRESHOLD_M = 300

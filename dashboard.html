@@ -197,7 +197,7 @@
   .equity-count-breakdown { padding-left: 12px; color: #898781; font-size: 11px; line-height: 1.6; }
   .equity-count-separate { margin-top: 8px; padding-top: 8px; border-top: 1px solid #f3f2f0; }
   #fleet-stats { margin-top: 6px; color: #52514e; line-height: 1.6; font-size: 12px; }
-  #fleet-sim-note, #weather-scenario-note { margin-top: 8px; color: #898781; line-height: 1.4; font-style: italic; font-size: 11px; }
+  #fleet-sim-note, #weather-scenario-note, #detail-context-note { margin-top: 8px; color: #898781; line-height: 1.4; font-style: italic; font-size: 11px; }
   #weather-preset-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 12px; }
   #weather-scenario-status { margin-top: 6px; color: #52514e; line-height: 1.6; font-size: 12px; }
 
@@ -411,6 +411,7 @@
       <div id="detail-more-content" class="hidden">
         <div class="meta" id="detail-cluster"></div>
         <div class="meta" id="detail-context"></div>
+        <div id="detail-context-note" class="hidden"></div>
       </div>
     </div>
   </div>
@@ -1077,6 +1078,7 @@ const state = {
   elasticities: null, // raw elasticities.json payload, or null if missing -- Phase 4's weather-scenario projection needs this
   scenarioPresets: null, // raw scenario_presets.json payload, or null if missing
   modelPerformance: null, // raw model_performance.json payload, or null if missing -- Session 30's walk-forward result
+  equityJoinMeta: null, // flows.json's own equity_join{} metadata block (layer vintage labels etc.), or null if flows.json failed to load
 };
 
 // Investigator mode: a standalone collapsible, not one half of a tab pair
@@ -2066,6 +2068,23 @@ function contextLines(context) {
   return lines;
 }
 
+// Session 37: the school-proximity dataset's vintage caveat (computed by
+// pipeline/equity_join.py, carried in flows.json's equity_join.layers.school
+// block) was being computed but never actually shown anywhere in this
+// dashboard -- a real gap between what that module's own docstring claimed
+// ("must be surfaced anywhere school-proximity numbers are shown") and what
+// the UI actually did. Only relevant when a school-proximity line is
+// actually shown (near_school) -- no note for a station with no nearby
+// school to begin with, and no note if equityJoinMeta itself failed to
+// load (graceful, same as every other optional layer).
+function schoolVintageNote(context, equityJoinMeta) {
+  if (!context.near_school) return null;
+  const vintage = equityJoinMeta && equityJoinMeta.layers && equityJoinMeta.layers.school
+    ? equityJoinMeta.layers.school.vintage_label
+    : null;
+  return vintage ? `School data: ${vintage}` : null;
+}
+
 // Opens (or switches) the detail card for `id`. Populates the fields that
 // don't depend on hour/dayType/period once here; updateStationDetail()
 // (called at the end of this function, and again from renderHour whenever a
@@ -2093,6 +2112,11 @@ function selectStation(id) {
     div.textContent = line;
     contextEl.appendChild(div);
   }
+
+  const noteEl = document.getElementById('detail-context-note');
+  const note = schoolVintageNote(s.context, state.equityJoinMeta);
+  noteEl.textContent = note || '';
+  noteEl.classList.toggle('hidden', !note);
 
   updateStationDetail();
   setDetailVisible(true);
@@ -2439,6 +2463,7 @@ const liveReady = fetchJSON('data/live_status.json')
 const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady])
   .then(([flowsResult, liveResult, routePayload, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload]) => {
     state.stations = flowsResult.payload.stations;
+    state.equityJoinMeta = flowsResult.payload.equity_join || null;
     state.liveAvailable = liveResult.ok;
     state.liveStations = liveResult.ok ? liveResult.payload.stations : {};
     state.liveAsOf = liveResult.ok ? liveResult.payload.last_updated : null;
@@ -2819,7 +2844,7 @@ if (typeof globalThis !== 'undefined') {
     setPeriod, formatPeriodLabel, curveForPeriod, hasPeriodData, setHourPlaying,
     setMode, hasLiveData, formatAsOf,
     setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,
-    setDetailVisible, setDetailMoreInfoExpanded, updateStationDetail,
+    setDetailVisible, setDetailMoreInfoExpanded, updateStationDetail, contextLines, schoolVintageNote,
     computeStopOffset, assignVisitIndices, buildStopIconHTML, buildRouteLayer, setRouteVisible, applyRouteVisibility,
     setInvestigatorExpanded, setModelEvalExpanded, renderModelPerformance, formatSignificance, setAccordionExpanded, computeEquityCounts, renderEquityCounts, setEquityThreshold,
     renderFleetStats, computeServicedEquityOverlap, applyFleetScenarioToRoute, setFleetSize,

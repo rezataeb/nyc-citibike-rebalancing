@@ -26,6 +26,10 @@ def test_load_daily_weather_panel_reads_persisted_table_not_raw_trips(tmp_path, 
     # Session 31 regression guard: this must never touch pipeline.download
     # again -- the raw trip archives it used to re-download are deleted by
     # design after pipeline/build_full_year.py aggregates them.
+    # compute_weather_zones/fetch_weather_at_points are mocked here --
+    # they have their own dedicated tests in test_weather.py; this test is
+    # about the parquet-reading and per-zone-join wiring, not re-testing
+    # k-means.
     parquet_path = tmp_path / "daily_net_flow.parquet"
     _write_daily_net_flow_parquet(
         parquet_path,
@@ -36,15 +40,49 @@ def test_load_daily_weather_panel_reads_persisted_table_not_raw_trips(tmp_path, 
              "arrivals_count": 6, "departures_count": 0, "net": 6},
         ],
     )
-    weather = pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [22.0], "precip_mm": [0.0]})
-    monkeypatch.setattr("pipeline.weather.fetch_daily_weather", lambda start, end: weather)
+    stations = {"1": {"lat": 40.0, "lng": -74.0}}
+    monkeypatch.setattr("pipeline.weather.compute_weather_zones", lambda stations, n_zones=4: ({"1": 0}, [(40.0, -74.0)]))
+    weather_zone_0 = pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [22.0], "precip_mm": [0.0]})
+    monkeypatch.setattr("pipeline.weather.fetch_weather_at_points", lambda points, start, end: [weather_zone_0])
 
-    panel = load_daily_weather_panel(daily_net_flow_path=parquet_path)
+    panel = load_daily_weather_panel(stations, daily_net_flow_path=parquet_path)
 
     assert len(panel) == 1  # one (station, date) row
     assert panel["station_id"].iloc[0] == "1"
     assert panel["magnitude"].iloc[0] == pytest.approx((4 + 6) / 2)  # mean(|-4|, |6|)
     assert panel["temp_mean_c"].iloc[0] == 22.0
+
+
+def test_load_daily_weather_panel_joins_per_station_zone_not_one_uniform_value(tmp_path, monkeypatch):
+    # The actual point of Session 36: two stations in different zones on
+    # the SAME real date must each get their OWN zone's weather, not one
+    # city-wide value broadcast to both.
+    parquet_path = tmp_path / "daily_net_flow.parquet"
+    _write_daily_net_flow_parquet(
+        parquet_path,
+        [
+            {"station_id": "north", "station_name": "N", "date": "2025-07-01", "hour": 8, "lat": 40.85, "lng": -73.90,
+             "arrivals_count": 5, "departures_count": 0, "net": 5},
+            {"station_id": "south", "station_name": "S", "date": "2025-07-01", "hour": 8, "lat": 40.65, "lng": -74.00,
+             "arrivals_count": 3, "departures_count": 0, "net": 3},
+        ],
+    )
+    stations = {"north": {"lat": 40.85, "lng": -73.90}, "south": {"lat": 40.65, "lng": -74.00}}
+    monkeypatch.setattr(
+        "pipeline.weather.compute_weather_zones",
+        lambda stations, n_zones=4: ({"north": 0, "south": 1}, [(40.85, -73.90), (40.65, -74.00)]),
+    )
+    zone_0_weather = pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [30.0], "precip_mm": [0.0]})
+    zone_1_weather = pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [22.0], "precip_mm": [5.0]})
+    monkeypatch.setattr(
+        "pipeline.weather.fetch_weather_at_points", lambda points, start, end: [zone_0_weather, zone_1_weather]
+    )
+
+    panel = load_daily_weather_panel(stations, daily_net_flow_path=parquet_path).set_index("station_id")
+
+    assert panel.loc["north", "temp_mean_c"] == 30.0
+    assert panel.loc["south", "temp_mean_c"] == 22.0
+    assert panel.loc["north", "temp_mean_c"] != panel.loc["south", "temp_mean_c"]
 
 
 def test_load_station_throughput_sums_both_sides_per_real_day(tmp_path):

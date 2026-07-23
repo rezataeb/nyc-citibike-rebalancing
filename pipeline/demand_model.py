@@ -45,7 +45,7 @@ from sklearn.preprocessing import OneHotEncoder, SplineTransformer
 from pipeline.build_full_year import DAILY_NET_FLOW_PATH, TARGET_MONTHS
 from pipeline.flows import SEASON_OF
 from pipeline.station_typology import LOW_SIGNAL_NAME, build_typology
-from pipeline.weather import fetch_daily_weather
+from pipeline.weather import compute_weather_zones, fetch_weather_at_points
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MODEL_PERFORMANCE_PATH = DATA_DIR / "model_performance.json"
@@ -122,16 +122,43 @@ def add_calendar_features(daily: pd.DataFrame, holidays: set) -> pd.DataFrame:
     return daily
 
 
-def join_weather(daily: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
-    """Real per-date temp/precip -- an inner join, so a date outside the
-    fetched weather range is dropped rather than fabricated.
+def station_coords_from_daily(daily: pd.DataFrame) -> dict:
+    """station_id -> {"lat": ..., "lng": ...}, one representative coordinate
+    per station taken directly from the persisted daily table (which
+    already carries lat/lng per row) -- avoids a separate dependency on
+    flows.json just to get station geography for weather-zone assignment.
     """
-    return daily.merge(weather[["date", "temp_mean_c", "precip_mm"]], on="date", how="inner")
+    coords = daily.groupby("station_id")[["lat", "lng"]].median()
+    return {sid: {"lat": row["lat"], "lng": row["lng"]} for sid, row in coords.iterrows()}
 
 
-def build_feature_frame(daily: pd.DataFrame, holidays: set, weather: pd.DataFrame) -> pd.DataFrame:
-    """Full real-per-date feature frame, before per-fold typology is attached."""
-    return join_weather(add_calendar_features(daily, holidays), weather)
+def join_weather(daily: pd.DataFrame, weather_by_zone: list[pd.DataFrame], zone_by_station: dict) -> pd.DataFrame:
+    """Real per-(station-zone, date) temp/precip -- an inner join, so a
+    (zone, date) combination outside the fetched weather range is dropped
+    rather than fabricated. Session 36: joined per real geographic zone
+    (see pipeline/weather.py's compute_weather_zones), not one uniform
+    city-wide value broadcast to every station.
+    """
+    daily = daily.copy()
+    daily["zone"] = daily["station_id"].map(zone_by_station)
+    daily = daily.dropna(subset=["zone"])
+    daily["zone"] = daily["zone"].astype(int)
+
+    weather_frames = []
+    for zone_idx, zone_weather in enumerate(weather_by_zone):
+        zone_weather = zone_weather.copy()
+        zone_weather["zone"] = zone_idx
+        weather_frames.append(zone_weather)
+    weather = pd.concat(weather_frames, ignore_index=True)
+
+    return daily.merge(weather[["zone", "date", "temp_mean_c", "precip_mm"]], on=["zone", "date"], how="inner")
+
+
+def build_feature_frame(
+    daily: pd.DataFrame, holidays: set, weather_by_zone: list[pd.DataFrame], zone_by_station: dict
+) -> pd.DataFrame:
+    """Full real-per-date, per-zone feature frame, before per-fold typology is attached."""
+    return join_weather(add_calendar_features(daily, holidays), weather_by_zone, zone_by_station)
 
 
 # ---------------------------------------------------------------------------
@@ -503,8 +530,10 @@ def run_walk_forward(months: list[str] = TARGET_MONTHS) -> dict:
     """12-fold leave-one-month-out walk-forward across the full year."""
     daily = load_daily_table()
     holidays = get_holidays()
-    weather = fetch_daily_weather(WEATHER_START, WEATHER_END)
-    all_features = build_feature_frame(daily, holidays, weather)
+    station_coords = station_coords_from_daily(daily)
+    zone_by_station, zone_centroids = compute_weather_zones(station_coords)
+    weather_by_zone = fetch_weather_at_points(zone_centroids, WEATHER_START, WEATHER_END)
+    all_features = build_feature_frame(daily, holidays, weather_by_zone, zone_by_station)
 
     folds = []
     for test_month in months:

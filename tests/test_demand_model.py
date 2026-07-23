@@ -20,10 +20,12 @@ from pipeline.demand_model import (
     UNKNOWN_TYPOLOGY_CLUSTER,
     add_calendar_features,
     add_typology,
+    build_feature_frame,
     build_flat_baseline,
     build_naive_forecast,
     daily_to_flow_rows,
     extrapolation_tier,
+    join_weather,
     paired_significance,
     predict_baseline,
     predict_gam,
@@ -31,6 +33,7 @@ from pipeline.demand_model import (
     refit_typology,
     run_walk_forward,
     score,
+    station_coords_from_daily,
     train_baselines,
     train_gam,
     train_gbm,
@@ -115,6 +118,47 @@ def test_add_typology_flags_station_unseen_in_training():
 
     assert result.loc[result["station_id"] == "1", "typology_cluster"].iloc[0] == "0"
     assert result.loc[result["station_id"] == "2", "typology_cluster"].iloc[0] == str(UNKNOWN_TYPOLOGY_CLUSTER)
+
+
+def test_station_coords_from_daily_reads_lat_lng_already_in_the_table():
+    daily = pd.DataFrame(
+        [_daily_row("1", "2025-12-25", 8, 3, lat=40.70, lng=-74.00), _daily_row("1", "2025-12-26", 9, 1, lat=40.70, lng=-74.00)]
+    )
+    coords = station_coords_from_daily(daily)
+    assert coords["1"]["lat"] == 40.70
+    assert coords["1"]["lng"] == -74.00
+
+
+def test_join_weather_uses_each_stations_own_zone_not_a_uniform_value():
+    daily = pd.DataFrame(
+        [
+            _daily_row("north", "2025-07-01", 8, 5, lat=40.85, lng=-73.90),
+            _daily_row("south", "2025-07-01", 8, 3, lat=40.65, lng=-74.00),
+        ]
+    )
+    daily = add_calendar_features(daily, holidays=set())
+    zone_by_station = {"north": 0, "south": 1}
+    weather_by_zone = [
+        pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [30.0], "precip_mm": [0.0]}),
+        pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [20.0], "precip_mm": [5.0]}),
+    ]
+
+    result = join_weather(daily, weather_by_zone, zone_by_station).set_index("station_id")
+
+    assert result.loc["north", "temp_mean_c"] == 30.0
+    assert result.loc["south", "temp_mean_c"] == 20.0
+
+
+def test_build_feature_frame_drops_stations_with_no_zone_assignment():
+    # A station absent from zone_by_station (e.g. never seen when zones
+    # were computed) must be dropped, not fabricated a zone.
+    daily = pd.DataFrame([_daily_row("known", "2025-07-01", 8, 5), _daily_row("unknown", "2025-07-01", 8, 3)])
+    zone_by_station = {"known": 0}
+    weather_by_zone = [pd.DataFrame({"date": [pd.Timestamp("2025-07-01")], "temp_mean_c": [25.0], "precip_mm": [0.0]})]
+
+    result = build_feature_frame(daily, holidays=set(), weather_by_zone=weather_by_zone, zone_by_station=zone_by_station)
+
+    assert set(result["station_id"]) == {"known"}
 
 
 def test_daily_to_flow_rows_sets_n_days_to_one():
@@ -249,8 +293,17 @@ def test_run_walk_forward_end_to_end_smoke(monkeypatch, tmp_path):
             weather_rows.append({"date": pd.Timestamp(f"{m}-{day:02d}"), "temp_mean_c": base_temp, "precip_mm": 0.0})
     weather = pd.DataFrame(weather_rows)
 
+    # All synthetic stations here share the same (lat, lng) (see _daily_row's
+    # defaults) -- compute_weather_zones/fetch_weather_at_points are mocked
+    # to a single trivial zone rather than exercising real k-means on
+    # degenerate identical-coordinate data, which has its own dedicated
+    # tests in test_weather.py.
     monkeypatch.setattr("pipeline.demand_model.load_daily_table", lambda path=None: daily)
-    monkeypatch.setattr("pipeline.demand_model.fetch_daily_weather", lambda start, end: weather)
+    monkeypatch.setattr(
+        "pipeline.demand_model.compute_weather_zones",
+        lambda stations, n_zones=4: ({sid: 0 for sid in stations}, [(40.0, -74.0)]),
+    )
+    monkeypatch.setattr("pipeline.demand_model.fetch_weather_at_points", lambda points, start, end: [weather])
     monkeypatch.setattr("pipeline.demand_model.MODEL_PERFORMANCE_PATH", tmp_path / "model_performance.json")
 
     result = run_walk_forward(months=months)

@@ -249,7 +249,9 @@ def station_magnitude(weekday_curve: list[float]) -> float:
     return float(np.mean(np.abs(weekday_curve)))
 
 
-def load_daily_weather_panel(daily_net_flow_path: Path = DAILY_NET_FLOW_PATH) -> pd.DataFrame:
+def load_daily_weather_panel(
+    stations: dict, daily_net_flow_path: Path = DAILY_NET_FLOW_PATH
+) -> pd.DataFrame:
     """Real per-(station, date) daily flow magnitude joined against real
     daily temp_c/precip_mm -- the direct replacement for Session 25's
     PDP-off-a-monthly-aggregate approach (see module docstring).
@@ -263,12 +265,19 @@ def load_daily_weather_panel(daily_net_flow_path: Path = DAILY_NET_FLOW_PATH) ->
     compute_daily_net_flow's old output shape, just read from disk instead
     of recomputed from scratch every call.
 
+    Session 36: weather is joined per-station-zone, not one uniform
+    city-wide value -- see pipeline/weather.py's compute_weather_zones()
+    module docstring for why real spatial variation matters here and how
+    the zones themselves are derived (k-means on real station lat/lng, not
+    hand-picked boroughs). `stations` (flows.json's stations dict) is now
+    a required argument specifically to compute those zones.
+
     Magnitude per (station, date) is the mean absolute hourly net flow
     that day -- the same "mean of |curve|" definition station_magnitude()
     already uses, kept consistent so "how big is this station's typical
     swing" means the same thing everywhere in this file.
     """
-    from pipeline.weather import fetch_daily_weather
+    from pipeline.weather import compute_weather_zones, fetch_weather_at_points
 
     daily = pd.read_parquet(daily_net_flow_path, columns=["station_id", "date", "hour", "net"])
     daily["date"] = pd.to_datetime(daily["date"])
@@ -279,13 +288,30 @@ def load_daily_weather_panel(daily_net_flow_path: Path = DAILY_NET_FLOW_PATH) ->
         .reset_index()
     )
 
-    weather = fetch_daily_weather(WEATHER_FETCH_START, WEATHER_FETCH_END)
-    # Inner join: a handful of midnight-crossing spillover dates (e.g.
-    # 2026-06-30 23:xx trips landing on 2026-07-01, outside the fetched
-    # weather range) simply have no weather match and are dropped --
-    # graceful, not fabricated, same rule as every other NaN-adjacent gap
-    # in this project.
-    return daily_magnitude.merge(weather[["date", "temp_mean_c", "precip_mm"]], on="date", how="inner")
+    zone_by_station, zone_centroids = compute_weather_zones(stations)
+    daily_magnitude["zone"] = daily_magnitude["station_id"].map(zone_by_station)
+    # A station present in the daily table but absent from `stations` (a
+    # fresh flows.json pull can have a slightly different roster than
+    # whatever pull the daily table was last built from, same caveat
+    # build_elasticities' own docstring already states) has no zone to
+    # assign -- dropped here, not fabricated a zone.
+    daily_magnitude = daily_magnitude.dropna(subset=["zone"])
+    daily_magnitude["zone"] = daily_magnitude["zone"].astype(int)
+
+    weather_by_zone = fetch_weather_at_points(zone_centroids, WEATHER_FETCH_START, WEATHER_FETCH_END)
+    weather_frames = []
+    for zone_idx, zone_weather in enumerate(weather_by_zone):
+        zone_weather = zone_weather.copy()
+        zone_weather["zone"] = zone_idx
+        weather_frames.append(zone_weather)
+    weather = pd.concat(weather_frames, ignore_index=True)
+
+    # Inner join on (zone, date): a handful of midnight-crossing spillover
+    # dates (e.g. 2026-06-30 23:xx trips landing on 2026-07-01, outside the
+    # fetched weather range) simply have no weather match and are dropped
+    # -- graceful, not fabricated, same rule as every other NaN-adjacent
+    # gap in this project.
+    return daily_magnitude.merge(weather[["zone", "date", "temp_mean_c", "precip_mm"]], on=["zone", "date"], how="inner")
 
 
 def _ols_fit_with_covariance(X: np.ndarray, y: np.ndarray, min_rank: int) -> tuple[np.ndarray, np.ndarray] | None:
@@ -674,7 +700,7 @@ if __name__ == "__main__":
     throughput_by_id = load_station_throughput()
 
     print("Computing real per-(station, date) daily flow magnitude vs. real daily weather...")
-    daily_panel = load_daily_weather_panel()
+    daily_panel = load_daily_weather_panel(flows_payload["stations"])
 
     payload = build_elasticities(flows_payload, live_payload, daily_panel, throughput_by_id)
 

@@ -91,6 +91,65 @@ def test_missing_start_station_is_kept_and_flagged_not_dropped():
     assert flags["has_start"]
 
 
+def test_drops_trips_with_implausible_location():
+    # Real contamination found in the wild (Session 35): "LA Metro Demo"
+    # stations at real Los Angeles coordinates, and a warehouse/logistics
+    # record at (0, 0) -- both far outside any reasonable NYC-area box.
+    trips = pd.DataFrame(
+        [
+            make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00", ride_id="la_demo",
+                      start_lat=34.02621, start_lng=-118.25158, end_lat=34.02618, end_lng=-118.2515),
+            make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00", ride_id="null_island",
+                      start_lat=0.0, start_lng=0.0, end_lat=0.0, end_lng=0.0),
+            make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00", ride_id="ok"),
+        ]
+    )
+
+    clean, report = run_qc(trips)
+
+    assert report.dropped_bad_location == 2
+    assert report.rows_out == 1
+    assert list(clean["ride_id"]) == ["ok"]
+
+
+def test_implausible_location_check_applies_to_either_end():
+    # A trip with a real NYC start but a bogus end (or vice versa) must
+    # still be dropped -- checking only one side would let a
+    # partially-contaminated trip through.
+    trips = pd.DataFrame(
+        [
+            make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00", ride_id="bad_end_only",
+                      end_lat=34.02618, end_lng=-118.2515),
+            make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00", ride_id="bad_start_only",
+                      start_lat=34.02621, start_lng=-118.25158),
+        ]
+    )
+
+    clean, report = run_qc(trips)
+
+    assert report.dropped_bad_location == 2
+    assert report.rows_out == 0
+
+
+def test_missing_coordinates_are_not_treated_as_bad_location():
+    # A NaN coordinate is a separate, already-handled gap (has_valid_*_station
+    # below) -- this rule's job is rejecting an implausible real value, not
+    # standing in for missing-data handling. Dropping these here too would
+    # double-count the same gap under two different QC reasons.
+    trips = pd.DataFrame(
+        [
+            make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00", ride_id="no_end_coords",
+                      end_station_id=float("nan"), end_station_name=float("nan"),
+                      end_lat=float("nan"), end_lng=float("nan")),
+        ]
+    )
+
+    clean, report = run_qc(trips)
+
+    assert report.dropped_bad_location == 0
+    assert report.rows_out == 1
+
+
 def test_report_summary_documents_departure_arrival_imbalance():
     trips = pd.DataFrame([make_trip("2026-04-01 00:00:00", "2026-04-01 00:10:00")])
     _, report = run_qc(trips)
@@ -119,6 +178,12 @@ def test_qc_report_matches_known_202604_counts():
     assert report.rows_in == 3_860_371
     assert report.dropped_short == 0
     assert report.dropped_long == 3_611
-    assert report.rows_out == report.rows_in - report.dropped_long
+    assert report.rows_out == report.rows_in - report.dropped_long - report.dropped_bad_location
+    # dropped_bad_location's real count for April specifically hasn't been
+    # verified (the known contamination was found via flows.json's full-year
+    # roster, not confirmed against this one cached month) -- not asserted
+    # to an unverified number, just checked that it's a real, non-negative
+    # count and that it's consistent with the row-count equation above.
+    assert report.dropped_bad_location >= 0
     assert report.missing_start_station == 1_930
     assert report.missing_end_station == 8_750

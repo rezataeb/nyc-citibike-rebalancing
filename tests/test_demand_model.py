@@ -2,11 +2,12 @@
 
 Focused on the non-obvious behaviors: real per-date calendar features, the
 extrapolation guard's tier routing, per-fold typology never leaking a
-held-out month's data back into its own feature, baseline reuse via
-backtest.py, and a small end-to-end walk-forward smoke test wiring
-everything together on a tiny synthetic dataset (not the real 11.7M-row
-table -- that's exercised for real via pipeline/demand_model.py's own
-__main__, not in the unit suite).
+held-out month's data back into its own feature, the baseline-forecast
+functions (moved here from pipeline/backtest.py in Session 33, see
+demand_model.py's own comment on why), and a small end-to-end walk-forward
+smoke test wiring everything together on a tiny synthetic dataset (not the
+real 11.7M-row table -- that's exercised for real via
+pipeline/demand_model.py's own __main__, not in the unit suite).
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from pipeline.demand_model import (
     UNKNOWN_TYPOLOGY_CLUSTER,
     add_calendar_features,
     add_typology,
+    build_flat_baseline,
+    build_naive_forecast,
     daily_to_flow_rows,
     extrapolation_tier,
     paired_significance,
@@ -120,6 +123,46 @@ def test_daily_to_flow_rows_sets_n_days_to_one():
 
     assert flow_rows["n_days"].iloc[0] == 1
     assert flow_rows["net_per_day"].iloc[0] == 3
+
+
+# Moved from tests/test_backtest.py (Session 33) alongside
+# build_naive_forecast/build_flat_baseline themselves -- see
+# demand_model.py's comment on why those two functions moved here.
+
+def _flow_row(station_id, day_type, hour, net_per_day, n_days=20) -> dict:
+    return {
+        "station_id": station_id, "day_type": day_type, "hour": hour,
+        "net_per_day": net_per_day, "n_days": n_days,
+    }
+
+
+def test_build_naive_forecast_weights_months_by_n_days():
+    # station "1", weekday, hour 8: two contributing months with different weights.
+    train_flows = pd.DataFrame(
+        [
+            _flow_row("1", "weekday", 8, net_per_day=10.0, n_days=10),
+            _flow_row("1", "weekday", 8, net_per_day=20.0, n_days=30),
+        ]
+    )
+    forecast = build_naive_forecast(train_flows)
+
+    row = forecast[(forecast["station_id"] == "1") & (forecast["hour"] == 8)]
+    # weighted average: (10*10 + 20*30) / (10+30) = 17.5
+    assert row["predicted_net_per_day"].iloc[0] == 17.5
+
+
+def test_build_flat_baseline_ignores_hour():
+    train_flows = pd.DataFrame(
+        [
+            _flow_row("1", "weekday", 8, net_per_day=10.0, n_days=20),
+            _flow_row("1", "weekday", 18, net_per_day=-10.0, n_days=20),
+        ]
+    )
+    baseline = build_flat_baseline(train_flows)
+
+    row = baseline[baseline["station_id"] == "1"]
+    assert len(row) == 1  # one prediction per station, no hour dimension
+    assert row["predicted_net_per_day"].iloc[0] == 0.0  # average of +10 and -10
 
 
 def test_train_baselines_and_predict_baseline_broadcasts_naive_over_real_dates():

@@ -42,7 +42,6 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, SplineTransformer
 
-from pipeline.backtest import build_flat_baseline, build_naive_forecast
 from pipeline.build_full_year import DAILY_NET_FLOW_PATH, TARGET_MONTHS
 from pipeline.flows import SEASON_OF
 from pipeline.station_typology import LOW_SIGNAL_NAME, build_typology
@@ -190,16 +189,60 @@ def add_typology(frame: pd.DataFrame, assignments: dict[str, tuple[int, str]]) -
 
 
 # ---------------------------------------------------------------------------
-# Tier 1: seasonal-naive / flat baseline (reuses backtest.py)
+# Tier 1: seasonal-naive / flat baseline
+#
+# build_naive_forecast/build_flat_baseline originated in pipeline/backtest.py
+# (Session 4). Moved here (Session 33) when backtest.py and gbm.py were
+# retired -- demand_model.py's walk-forward superseded the single-split
+# workflow those two modules were built for, but these two functions
+# themselves weren't superseded, just relocated to their one remaining real
+# caller. compute_mae, backtest.py's other export, had no remaining
+# consumer once gbm.py was gone (this module scores its own predictions via
+# score()/score_by_group() instead) and was retired along with it, not
+# moved -- see PROGRESS.md's Session 33 entry.
 # ---------------------------------------------------------------------------
+
+def _weighted_average(group: pd.DataFrame, value_col: str, weight_col: str = "n_days") -> float:
+    """Average of value_col weighted by weight_col (e.g. a 31-day month counts more than 28)."""
+    return (group[value_col] * group[weight_col]).sum() / group[weight_col].sum()
+
+
+def build_naive_forecast(train_flows: pd.DataFrame) -> pd.DataFrame:
+    """Seasonal-naive forecast: predicted net_per_day per (station_id, day_type, hour).
+
+    If train_flows spans multiple months, each month's contribution is
+    weighted by its own distinct-date count, same as flows.py's curves.
+    """
+    predicted = (
+        train_flows.groupby(["station_id", "day_type", "hour"])
+        .apply(_weighted_average, value_col="net_per_day", include_groups=False)
+        .rename("predicted_net_per_day")
+        .reset_index()
+    )
+    return predicted
+
+
+def build_flat_baseline(train_flows: pd.DataFrame) -> pd.DataFrame:
+    """Dumb baseline: predicted net_per_day per station_id only, ignoring hour-of-day.
+
+    The same single number is used to predict every hour of every day for
+    that station -- no seasonal-naive structure at all.
+    """
+    predicted = (
+        train_flows.groupby("station_id")
+        .apply(_weighted_average, value_col="net_per_day", include_groups=False)
+        .rename("predicted_net_per_day")
+        .reset_index()
+    )
+    return predicted
+
 
 def daily_to_flow_rows(daily_train: pd.DataFrame) -> pd.DataFrame:
     """Reshape daily training rows into the (station_id, month, day_type,
-    hour, net_per_day, n_days) shape backtest.py's build_naive_forecast/
-    build_flat_baseline already expect. n_days=1 per row (each row already
-    IS one real day, no monthly distinct-date normalization needed) makes
-    their n_days-weighted average a plain mean here -- correct, not a
-    special case.
+    hour, net_per_day, n_days) shape build_naive_forecast/build_flat_baseline
+    above expect. n_days=1 per row (each row already IS one real day, no
+    monthly distinct-date normalization needed) makes their n_days-weighted
+    average a plain mean here -- correct, not a special case.
     """
     rows = daily_train[["station_id", "month", "day_type", "hour", "net"]].copy()
     rows = rows.rename(columns={"net": "net_per_day"})

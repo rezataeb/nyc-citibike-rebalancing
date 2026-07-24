@@ -1,5 +1,61 @@
 # Citi Bike Rebalancing Explorer
 
+## Reproducing the pipeline
+
+Every number in `data/*.json` and `data/*.parquet` is derived from public
+data (Citi Bike S3 trip archives, GBFS, NYC Open Data, Open-Meteo) by code
+in `pipeline/`, and those derived files are themselves committed to this
+repo -- a reviewer doesn't need to run anything to see the numbers the
+dashboard shows. This section is for actually re-deriving them, to check
+that they hold up.
+
+```
+python3 -m pipeline.reproduce_all --skip-download   # fast path, ~20-40 min
+python3 -m pipeline.reproduce_all                    # full path, ~1-2 hours, several GB
+```
+
+**`--skip-download` (the fast path, and the one most reviewers actually
+want):** reuses the already git-committed `data/flows.json` and
+`data/daily_net_flow.parquet` instead of re-downloading twelve months of
+real trip archives, then re-runs everything downstream of them --
+elasticities, the 12-fold walk-forward model, fleet scenarios, the route
+plan, weather presets, and finally `pipeline/spot_check.py`'s ground-truth
+checks against the freshly-reproduced output. Fails loudly (`SystemExit`)
+if those two committed files are somehow missing, rather than silently
+trying to proceed without them.
+
+**Full path (no `--skip-download`):** also re-downloads and re-aggregates
+all twelve months of real Citi Bike trip archives via
+`pipeline/build_full_year.py` first -- several GB of network traffic,
+realistically 30-60+ minutes just for that step, then the same downstream
+chain as above. This is the real end-to-end proof the pipeline reproduces
+from nothing but public data; run it if you want that proof, not
+routinely.
+
+**One real, unavoidable non-reproducibility caveat, stated plainly rather
+than implied away:** `pipeline/gbfs_logger.py --live` pulls the *live*
+GBFS feed at whatever moment you run it -- there's no way to reproduce the
+exact station roster/capacity a past run saw, because that data doesn't
+exist historically anywhere public. Every run of `reproduce_all.py`
+refreshes `data/live_status.json` fresh before elasticities, by design --
+so `elasticities.json`'s capacity-derived numbers (`capacity_elasticity`
+and related fields) will always drift slightly from whatever is currently
+committed. This is real drift, not a bug: it was found and fixed once
+already (Session 40) when the committed `elasticities.json` turned out to
+have been quietly built against a `live_status.json` snapshot 9 days
+stale. Everything else -- the raw trip archives, Open-Meteo's historical
+weather archive, the fixed 6km weather grid -- is real historical data and
+should reproduce identically.
+
+`data/gbfs_log/snapshots.csv` (the continuously-collected live-density log
+behind Investigator Mode's deferred Phase 5) is a separate artifact
+neither reproduction path touches -- it only grows via the GitHub Actions
+cron (`.github/workflows/gbfs_snapshot.yml`) accumulating real snapshots
+over real elapsed time, and ships as-is in git.
+
+See `pipeline/reproduce_all.py`'s own module docstring for the full,
+ordered step list and each step's real cost.
+
 ## Running the dashboard
 
 `dashboard.html` fetches its data files (`data/flows.json`,

@@ -15,6 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.linear_model import PoissonRegressor, Ridge
 
 from pipeline.demand_model import (
     UNKNOWN_TYPOLOGY_CLUSTER,
@@ -22,6 +23,7 @@ from pipeline.demand_model import (
     add_typology,
     build_feature_frame,
     build_flat_baseline,
+    build_gam_pipeline,
     build_naive_forecast,
     daily_to_flow_rows,
     extrapolation_tier,
@@ -30,11 +32,13 @@ from pipeline.demand_model import (
     predict_baseline,
     predict_gam,
     predict_gbm,
+    predict_recombined_with_guard,
     refit_typology,
     run_walk_forward,
     score,
     station_coords_from_daily,
     train_baselines,
+    train_component_models,
     train_gam,
     train_gbm,
     weekday_curve_dict,
@@ -251,6 +255,127 @@ def test_extrapolation_tier_near_margin_boundary():
     assert tiers[1] == "naive"  # just past it
 
 
+# --- Session 41: arrivals/departures split (Poisson loss, recombined into net) ---
+
+def _feature_frame(rows: list[dict]) -> pd.DataFrame:
+    """A minimal, already-feature-complete frame for exercising GAM/GBM
+    training directly -- add_calendar_features + join_weather already have
+    their own tests above, so this fixture skips straight to the columns
+    train_gam/train_gbm actually read.
+    """
+    frame = add_calendar_features(pd.DataFrame(rows), holidays=set())
+    frame["temp_mean_c"] = 15.0
+    frame["precip_mm"] = 0.0
+    frame["typology_cluster"] = "0"
+    return frame
+
+
+def _count_training_frame(n: int = 40) -> pd.DataFrame:
+    rows = [
+        _daily_row("1", f"2025-12-{(i % 27) + 1:02d}", i % 24, net=(3 if (i % 24) < 12 else -3))
+        for i in range(n)
+    ]
+    return _feature_frame(rows)
+
+
+TINY_GBM_GRID = [{"max_iter": 20, "learning_rate": 0.3, "max_depth": 3}]
+
+
+def test_build_gam_pipeline_uses_poisson_for_count_targets():
+    for target in ("arrivals_count", "departures_count"):
+        pipeline = build_gam_pipeline(target)
+        assert isinstance(pipeline.named_steps["model"], PoissonRegressor)
+
+
+def test_build_gam_pipeline_uses_ridge_for_net():
+    pipeline = build_gam_pipeline("net")
+    assert isinstance(pipeline.named_steps["model"], Ridge)
+
+
+def test_train_gbm_uses_poisson_loss_for_count_targets():
+    train_frame = _count_training_frame()
+    model, _, _ = train_gbm(train_frame, target_col="arrivals_count", param_grid=TINY_GBM_GRID)
+    assert model.loss == "poisson"
+
+
+def test_train_gbm_uses_squared_error_loss_for_net_by_default():
+    train_frame = _count_training_frame()
+    model, _, _ = train_gbm(train_frame, param_grid=TINY_GBM_GRID)
+    assert model.loss == "squared_error"
+
+
+def test_naive_baseline_recombination_matches_direct_net_baseline():
+    # Splitting into arrivals/departures must not change the naive/flat
+    # baselines: weighted-averaging each separately and subtracting is
+    # mathematically identical to weighted-averaging net directly (same
+    # grouping, same weights) -- this is the reasoning the module docstring
+    # uses to justify NOT duplicating the naive/flat tier per target.
+    # Verified here, not just asserted in a comment.
+    rows = [
+        _daily_row("1", "2025-12-01", 8, net=4), _daily_row("1", "2025-12-08", 8, net=6),
+        _daily_row("1", "2025-12-15", 8, net=-2),
+    ]
+    train = add_calendar_features(pd.DataFrame(rows), holidays=set())
+
+    net_naive, net_flat = train_baselines(train)
+
+    arrivals_rows = train.copy()
+    arrivals_rows["net"] = arrivals_rows["arrivals_count"]
+    departures_rows = train.copy()
+    departures_rows["net"] = departures_rows["departures_count"]
+    arrivals_naive, arrivals_flat = train_baselines(arrivals_rows)
+    departures_naive, departures_flat = train_baselines(departures_rows)
+
+    test_rows = add_calendar_features(pd.DataFrame([_daily_row("1", "2025-12-22", 8, net=999)]), holidays=set())
+    direct_pred = predict_baseline(net_naive, net_flat, test_rows).iloc[0]
+    recombined_pred = (
+        predict_baseline(arrivals_naive, arrivals_flat, test_rows).iloc[0]
+        - predict_baseline(departures_naive, departures_flat, test_rows).iloc[0]
+    )
+
+    assert direct_pred == pytest.approx(recombined_pred)
+
+
+def test_predict_recombined_with_guard_recombines_arrivals_and_departures():
+    train_frame = _count_training_frame()
+    arrivals_models = train_component_models(train_frame, "arrivals_count")
+    departures_models = train_component_models(train_frame, "departures_count")
+    naive, flat = train_baselines(train_frame)
+
+    test_frame = train_frame.iloc[:5].copy()
+    temp_range = arrivals_models["gbm_info"]["temp_range"]
+
+    predictions = predict_recombined_with_guard(arrivals_models, departures_models, naive, flat, test_frame, temp_range)
+
+    assert np.allclose(
+        predictions["recombined_net_gam"], predictions["predicted_arrivals_gam"] - predictions["predicted_departures_gam"]
+    )
+    assert np.allclose(
+        predictions["recombined_net_gbm"], predictions["predicted_arrivals_gbm"] - predictions["predicted_departures_gbm"]
+    )
+    # Every test row's temperature is inside the fold's own training range -> guard picks gbm.
+    assert (predictions["tier_used"] == "gbm").all()
+    assert np.allclose(predictions["predicted_net"], predictions["recombined_net_gbm"])
+
+
+def test_predict_recombined_with_guard_falls_back_to_naive_far_outside_temp_range():
+    train_frame = _count_training_frame()
+    arrivals_models = train_component_models(train_frame, "arrivals_count")
+    departures_models = train_component_models(train_frame, "departures_count")
+    naive, flat = train_baselines(train_frame)
+
+    test_frame = train_frame.iloc[:1].copy()
+    test_frame["temp_mean_c"] = 999.0  # absurdly far outside any real training range
+
+    predictions = predict_recombined_with_guard(
+        arrivals_models, departures_models, naive, flat, test_frame, arrivals_models["gbm_info"]["temp_range"]
+    )
+
+    assert predictions["tier_used"].iloc[0] == "naive"
+    expected_naive = predict_baseline(naive, flat, test_frame).iloc[0]
+    assert predictions["predicted_net"].iloc[0] == pytest.approx(expected_naive)
+
+
 def test_paired_significance_identical_folds_reports_no_variation():
     result = paired_significance([1.0, 1.0, 1.0], [1.0, 1.0, 1.0])
     assert result["p_value"] is None
@@ -313,6 +438,13 @@ def test_run_walk_forward_end_to_end_smoke(monkeypatch, tmp_path):
     for fold in result["folds"]:
         for tier in ("naive", "gam", "gbm", "guarded"):
             assert fold["tiers"][tier]["overall"]["mae"] >= 0
+        # Session 41: gam/gbm above are the recombined arrivals-departures
+        # predictions -- gbm_params is now per-component, and each
+        # component's own real-count accuracy is reported separately.
+        assert set(fold["gbm_params"].keys()) == {"arrivals", "departures"}
+        for target in ("arrivals", "departures"):
+            for tier in ("gam", "gbm"):
+                assert fold["component_diagnostics"][target][tier]["mae"] >= 0
     assert "naive_mean_mae" in result["aggregate"]
     assert "gam_vs_naive" in result["significance"]
     assert (tmp_path / "model_performance.json").exists()

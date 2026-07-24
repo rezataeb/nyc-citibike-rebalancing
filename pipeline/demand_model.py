@@ -23,9 +23,17 @@ Station typology is refit independently within each fold's training data
 only (not once on the full year) so a fold's held-out month never
 influences the very cluster label used to predict it.
 
-Deliberately still predicting net flow only, not arrivals/departures
-separately -- that split is real, separate work, tracked in PROGRESS.md's
-Deferred list.
+Session 41: GAM and GBM now predict arrivals_count and departures_count as
+two independent count regressions (Poisson loss -- both HistGradientBoosting
+and the GAM's linear final estimator support it natively, and unlike net,
+a real count is always non-negative, which Poisson requires), recombined
+as predicted_net = predicted_arrivals - predicted_departures. The naive/flat
+baselines are NOT duplicated per target: weighted-averaging arrivals and
+departures separately and subtracting is mathematically identical to
+weighted-averaging net directly (same grouping, same weights), so splitting
+them would add cost for zero new information -- verified by a dedicated
+test, not just asserted. Only GAM/GBM, where the split can plausibly change
+the fitted shape (not just re-derive an identity), do real new work.
 """
 
 from __future__ import annotations
@@ -38,7 +46,7 @@ import pandas as pd
 from scipy import stats
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import PoissonRegressor, Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, SplineTransformer
 
@@ -76,6 +84,12 @@ GBM_PARAM_GRID = [
 ]
 
 UNKNOWN_TYPOLOGY_CLUSTER = -2  # a station absent from this fold's training typology fit entirely
+
+# arrivals_count/departures_count are real per-(station, date, hour) counts,
+# always >= 0 -- Poisson loss/link is the statistically appropriate choice
+# for them, unlike net (arrivals - departures), which can be negative and
+# is why net itself still uses Ridge/squared-error, not Poisson.
+COUNT_TARGET_COLUMNS = {"arrivals_count", "departures_count"}
 
 
 # ---------------------------------------------------------------------------
@@ -300,13 +314,13 @@ def predict_baseline(naive: pd.DataFrame, flat: pd.DataFrame, test_frame: pd.Dat
 # Tier 2: GAM (penalized splines + Ridge)
 # ---------------------------------------------------------------------------
 
-def build_gam_pipeline() -> Pipeline:
-    """Ridge regression over a penalized-spline/one-hot feature expansion --
-    a structured, interpretable middle tier between the naive lookup and
-    the GBM. Ridge, not Poisson: the target is net flow, which can be
-    negative (arrivals - departures), and Poisson regression requires a
-    non-negative target -- that only becomes relevant if the deferred
-    arrivals/departures split (see module docstring) is built later.
+def build_gam_pipeline(target_col: str = "net") -> Pipeline:
+    """Regression over a penalized-spline/one-hot feature expansion -- a
+    structured, interpretable middle tier between the naive lookup and the
+    GBM. Ridge for net (can be negative, so Poisson's non-negative-target
+    requirement doesn't hold); PoissonRegressor for arrivals_count/
+    departures_count (real counts, always >= 0, and Poisson's log-link is
+    the statistically appropriate choice for count data specifically).
     """
     preprocess = ColumnTransformer(
         transformers=[
@@ -318,7 +332,8 @@ def build_gam_pipeline() -> Pipeline:
             ("passthrough", "passthrough", ["is_holiday", "doy_sin", "doy_cos"]),
         ]
     )
-    return Pipeline([("features", preprocess), ("ridge", Ridge(alpha=1.0))])
+    estimator = PoissonRegressor(alpha=1.0, max_iter=300) if target_col in COUNT_TARGET_COLUMNS else Ridge(alpha=1.0)
+    return Pipeline([("features", preprocess), ("model", estimator)])
 
 
 def _add_precip_bin(frame: pd.DataFrame) -> pd.DataFrame:
@@ -329,10 +344,10 @@ def _add_precip_bin(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def train_gam(train_frame: pd.DataFrame) -> Pipeline:
+def train_gam(train_frame: pd.DataFrame, target_col: str = "net") -> Pipeline:
     train_frame = _add_precip_bin(train_frame)
-    pipeline = build_gam_pipeline()
-    pipeline.fit(train_frame, train_frame["net"])
+    pipeline = build_gam_pipeline(target_col)
+    pipeline.fit(train_frame, train_frame[target_col])
     return pipeline
 
 
@@ -364,11 +379,16 @@ def _split_validation(train_frame: pd.DataFrame, validation_fraction: float) -> 
     return train_frame[train_frame["date"] < cutoff], train_frame[train_frame["date"] >= cutoff]
 
 
-def train_gbm(train_frame: pd.DataFrame, param_grid: list[dict] = GBM_PARAM_GRID) -> tuple[HistGradientBoostingRegressor, dict, dict]:
+def train_gbm(
+    train_frame: pd.DataFrame, target_col: str = "net", param_grid: list[dict] = GBM_PARAM_GRID
+) -> tuple[HistGradientBoostingRegressor, dict, dict]:
     """Fit HistGradientBoostingRegressor, selecting hyperparameters by MAE on
     a validation slice of the training months -- the original Session 5
-    model ran with defaults only (random_state=0, nothing tuned).
+    model ran with defaults only (random_state=0, nothing tuned). Poisson
+    loss for arrivals_count/departures_count (real non-negative counts);
+    squared-error (the default) for net, which can be negative.
     """
+    loss = "poisson" if target_col in COUNT_TARGET_COLUMNS else "squared_error"
     categories = _shared_categories(train_frame)
     fit_part, val_part = _split_validation(train_frame, VALIDATION_FRACTION)
     fit_part = _apply_categories(fit_part, categories)
@@ -376,10 +396,10 @@ def train_gbm(train_frame: pd.DataFrame, param_grid: list[dict] = GBM_PARAM_GRID
 
     best_model, best_params, best_mae = None, None, np.inf
     for params in param_grid:
-        model = HistGradientBoostingRegressor(categorical_features="from_dtype", random_state=0, **params)
-        model.fit(fit_part[GBM_FEATURE_COLUMNS], fit_part["net"])
+        model = HistGradientBoostingRegressor(categorical_features="from_dtype", random_state=0, loss=loss, **params)
+        model.fit(fit_part[GBM_FEATURE_COLUMNS], fit_part[target_col])
         val_pred = model.predict(val_part[GBM_FEATURE_COLUMNS])
-        mae = float(np.abs(val_pred - val_part["net"]).mean())
+        mae = float(np.abs(val_pred - val_part[target_col]).mean())
         if mae < best_mae:
             best_model, best_params, best_mae = model, params, mae
 
@@ -387,8 +407,8 @@ def train_gbm(train_frame: pd.DataFrame, param_grid: list[dict] = GBM_PARAM_GRID
     # val_part), not just the validation-carved subset, so the deployed
     # model still sees every real training day.
     full_train = _apply_categories(train_frame, categories)
-    final_model = HistGradientBoostingRegressor(categorical_features="from_dtype", random_state=0, **best_params)
-    final_model.fit(full_train[GBM_FEATURE_COLUMNS], full_train["net"])
+    final_model = HistGradientBoostingRegressor(categorical_features="from_dtype", random_state=0, loss=loss, **best_params)
+    final_model.fit(full_train[GBM_FEATURE_COLUMNS], full_train[target_col])
 
     temp_range = (float(train_frame["temp_mean_c"].min()), float(train_frame["temp_mean_c"].max()))
     return final_model, categories, {"params": best_params, "validation_mae": best_mae, "temp_range": temp_range}
@@ -412,27 +432,53 @@ def extrapolation_tier(temp_c: pd.Series, temp_range: tuple[float, float], margi
     return pd.Series(np.where(in_range, "gbm", np.where(near_range, "gam", "naive")), index=temp_c.index)
 
 
-def predict_with_guard(
-    gbm_model, gbm_categories, gam_pipeline, naive, flat, test_frame: pd.DataFrame, temp_range: tuple[float, float]
+# ---------------------------------------------------------------------------
+# Arrivals/departures split: two independent count regressions, recombined
+# into net at prediction time (Session 41 -- see module docstring)
+# ---------------------------------------------------------------------------
+
+def train_component_models(train_frame: pd.DataFrame, target_col: str) -> dict:
+    """Train GAM + GBM for one count target (arrivals_count or departures_count)."""
+    gam_pipeline = train_gam(train_frame, target_col=target_col)
+    gbm_model, gbm_categories, gbm_info = train_gbm(train_frame, target_col=target_col)
+    return {"gam": gam_pipeline, "gbm": gbm_model, "gbm_categories": gbm_categories, "gbm_info": gbm_info}
+
+
+def predict_recombined_with_guard(
+    arrivals_models: dict, departures_models: dict, naive: pd.DataFrame, flat: pd.DataFrame,
+    test_frame: pd.DataFrame, temp_range: tuple[float, float],
 ) -> pd.DataFrame:
-    """Predict every test row with the tier the extrapolation guard selects
-    for its own temperature, rather than trusting GBM everywhere.
+    """Predict every test row's net flow by recombining independently-trained
+    arrivals/departures models (predicted_net = predicted_arrivals -
+    predicted_departures), applying the same per-row extrapolation guard the
+    direct single-target model uses. temp_range doesn't depend on target
+    column (arrivals and departures models train on the exact same rows,
+    just a different target column), so one guard decision covers both
+    component predictions and their recombination -- there is no second,
+    independently-computed temp_range to reconcile.
     """
     result = test_frame.copy()
     result["tier_used"] = extrapolation_tier(result["temp_mean_c"], temp_range)
 
-    result["predicted_net"] = np.nan
-    gbm_rows = result["tier_used"] == "gbm"
-    gam_rows = result["tier_used"] == "gam"
-    naive_rows = result["tier_used"] == "naive"
+    frame_with_bin = _add_precip_bin(test_frame)
+    arrivals_gam = predict_gam(arrivals_models["gam"], frame_with_bin)
+    departures_gam = predict_gam(departures_models["gam"], frame_with_bin)
+    arrivals_gbm = predict_gbm(arrivals_models["gbm"], arrivals_models["gbm_categories"], test_frame)
+    departures_gbm = predict_gbm(departures_models["gbm"], departures_models["gbm_categories"], test_frame)
 
-    if gbm_rows.any():
-        result.loc[gbm_rows, "predicted_net"] = predict_gbm(gbm_model, gbm_categories, result[gbm_rows])
-    if gam_rows.any():
-        result.loc[gam_rows, "predicted_net"] = predict_gam(gam_pipeline, result[gam_rows])
-    if naive_rows.any():
-        result.loc[naive_rows, "predicted_net"] = predict_baseline(naive, flat, result[naive_rows]).values
+    result["predicted_arrivals_gam"] = arrivals_gam
+    result["predicted_departures_gam"] = departures_gam
+    result["predicted_arrivals_gbm"] = arrivals_gbm
+    result["predicted_departures_gbm"] = departures_gbm
+    result["recombined_net_gam"] = arrivals_gam - departures_gam
+    result["recombined_net_gbm"] = arrivals_gbm - departures_gbm
 
+    naive_pred = predict_baseline(naive, flat, test_frame).values
+    result["predicted_net"] = np.select(
+        [result["tier_used"] == "gbm", result["tier_used"] == "gam"],
+        [result["recombined_net_gbm"], result["recombined_net_gam"]],
+        default=naive_pred,
+    )
     return result
 
 
@@ -475,22 +521,27 @@ def run_fold(all_features: pd.DataFrame, test_month: str, train_months: list[str
     test_frame = add_typology(test_frame, assignments)
 
     naive, flat = train_baselines(train_frame)
-    gam_pipeline = train_gam(train_frame)
-    gbm_model, gbm_categories, gbm_info = train_gbm(train_frame)
+    arrivals_models = train_component_models(train_frame, "arrivals_count")
+    departures_models = train_component_models(train_frame, "departures_count")
 
-    predictions = predict_with_guard(
-        gbm_model, gbm_categories, gam_pipeline, naive, flat, test_frame, gbm_info["temp_range"]
+    # Both component models train on the exact same rows (only the target
+    # column differs), so their observed temperature range must agree --
+    # a real invariant worth asserting, not just assuming.
+    arrivals_temp_range = arrivals_models["gbm_info"]["temp_range"]
+    departures_temp_range = departures_models["gbm_info"]["temp_range"]
+    assert arrivals_temp_range == departures_temp_range, "arrivals/departures models trained on different rows"
+
+    predictions = predict_recombined_with_guard(
+        arrivals_models, departures_models, naive, flat, test_frame, arrivals_temp_range
     )
     predictions["season"] = predictions["month"].map(lambda m: SEASON_OF[int(m.split("-")[1])])
 
     naive_only = predict_baseline(naive, flat, test_frame)
-    gam_only = predict_gam(gam_pipeline, _add_precip_bin(test_frame))
-    gbm_only = predict_gbm(gbm_model, gbm_categories, test_frame)
 
     return {
         "test_month": test_month,
-        "gbm_temp_range": gbm_info["temp_range"],
-        "gbm_params": gbm_info["params"],
+        "gbm_temp_range": arrivals_temp_range,
+        "gbm_params": {"arrivals": arrivals_models["gbm_info"]["params"], "departures": departures_models["gbm_info"]["params"]},
         "n_typology_clusters": len({c for c, _ in assignments.values() if c not in (-1,)}),
         "tiers": {
             "naive": {
@@ -498,18 +549,31 @@ def run_fold(all_features: pd.DataFrame, test_month: str, train_months: list[str
                 "by_season": score_by_group(predictions.assign(pred=naive_only.values), "pred", "net", "season"),
             },
             "gam": {
-                "overall": score(pd.Series(gam_only, index=test_frame.index), test_frame["net"]),
-                "by_season": score_by_group(predictions.assign(pred=gam_only), "pred", "net", "season"),
+                "overall": score(predictions["recombined_net_gam"], predictions["net"]),
+                "by_season": score_by_group(predictions.assign(pred=predictions["recombined_net_gam"]), "pred", "net", "season"),
             },
             "gbm": {
-                "overall": score(pd.Series(gbm_only, index=test_frame.index), test_frame["net"]),
-                "by_season": score_by_group(predictions.assign(pred=gbm_only), "pred", "net", "season"),
+                "overall": score(predictions["recombined_net_gbm"], predictions["net"]),
+                "by_season": score_by_group(predictions.assign(pred=predictions["recombined_net_gbm"]), "pred", "net", "season"),
             },
             "guarded": {
                 "overall": score(predictions["predicted_net"], predictions["net"]),
                 "by_season": score_by_group(predictions, "predicted_net", "net", "season"),
                 "by_typology": score_by_group(predictions, "predicted_net", "net", "typology_cluster"),
                 "tier_usage": predictions["tier_used"].value_counts().to_dict(),
+            },
+        },
+        # Diagnostic only, not part of the naive/gam/gbm/guarded significance
+        # comparison above -- how well each component model predicts its OWN
+        # real count, independent of how well the recombination predicts net.
+        "component_diagnostics": {
+            "arrivals": {
+                "gam": score(predictions["predicted_arrivals_gam"], predictions["arrivals_count"]),
+                "gbm": score(predictions["predicted_arrivals_gbm"], predictions["arrivals_count"]),
+            },
+            "departures": {
+                "gam": score(predictions["predicted_departures_gam"], predictions["departures_count"]),
+                "gbm": score(predictions["predicted_departures_gbm"], predictions["departures_count"]),
             },
         },
     }

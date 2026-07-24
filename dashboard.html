@@ -566,11 +566,7 @@
             <span class="accordion-chevron" id="weather-accordion-chevron">&#9656;</span>
           </button>
           <div class="accordion-content hidden" id="weather-scenario-wrap">
-            <select id="weather-preset-select">
-              <option value="ideal">Ideal riding weather (baseline)</option>
-              <option value="rain_day">Steady rain</option>
-              <option value="snow_day">Snow event</option>
-            </select>
+            <select id="weather-preset-select"></select>
             <div class="investigator-slider">
               <label for="weather-temp-slider">Temperature: <span id="weather-temp-value">72</span>&deg;F</label>
               <input type="range" id="weather-temp-slider" min="0" max="90" step="1" value="72">
@@ -2585,6 +2581,22 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
       const tempValueEl = document.getElementById('weather-temp-value');
       const precipSlider = document.getElementById('weather-precip-slider');
       const precipValueEl = document.getElementById('weather-precip-value');
+
+      // Options built from scenario_presets.json's own preset list, never a
+      // hardcoded static markup list -- the exact same fix applied to the
+      // period selector (see periodSelect below) applied here after a real
+      // gap was found: the static HTML only ever had ideal/rain_day/snow_day,
+      // so hot_day (Session 43) would have been silently unreachable in the
+      // dropdown despite existing in the real data file.
+      presetSelect.innerHTML = '';
+      for (const preset of state.scenarioPresets.presets) {
+        const opt = document.createElement('option');
+        opt.value = preset.id;
+        opt.textContent = preset.id === state.scenarioPresets.reference_preset_id
+          ? `${preset.label} (baseline)`
+          : preset.label;
+        presetSelect.appendChild(opt);
+      }
 
       const initialScenario = state.investigatorState.weatherScenario;
       presetSelect.value = initialScenario.presetId;

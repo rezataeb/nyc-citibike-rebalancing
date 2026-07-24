@@ -17,8 +17,14 @@
       "label": "Ideal riding weather",
       "temp_c": 22.2,
       "precip_mm": 0.0
+    },
+    {
+      "id": "hot_day",
+      "label": "Hot day",
+      "temp_c": 31.0,
+      "precip_mm": 0.0
     }
   ],
   "reference_preset_id": "ideal",
-  "notes": "Units are Celsius/mm, matching every other file in this project (Open-Meteo's native units) -- NOT the Fahrenheit/inches shown in Investigator_Mode_Guideline.md's own contract example. 'ideal' (reference_preset_id) is the fixed reference point the dashboard's weather-scenario projection subtracts every other preset against; it is not itself a projected adjustment. A 'heat_wave' preset (95F/35C in the original spec) is deliberately excluded -- see PROGRESS.md's Deferred list and pipeline/elasticities.py's own SPARSE_GRID_CAVEAT: the elasticity fit it would extrapolate from has only 5 distinct training points and a sharp, likely-artifactual jump right at its own top observed value (18.7C), a qualitatively bigger problem than the milder extrapolation rain_day/snow_day already carry."
+  "notes": "Units are Celsius/mm, matching every other file in this project (Open-Meteo's native units) -- NOT the Fahrenheit/inches shown in Investigator_Mode_Guideline.md's own contract example. 'ideal' (reference_preset_id) is the fixed reference point the dashboard's weather-scenario projection subtracts every other preset against; it is not itself a projected adjustment. 'hot_day' (31.0C) was added in Session 43 after re-checking a Session 25 exclusion against the current pipeline: the original concern (pipeline/gbm.py's sparse partial-dependence curve, only 5 distinct training points) was real at the time but cannot occur with the current direct linear-regression elasticity fit, and gbm.py itself was deleted in Session 33. The real full-year daily temperature range is -14.3C to 32.3C (788,979 real observations, 435 distinct values, verified 2026-07-24) -- 31.0C sits inside that range, not beyond it."
 }

@@ -5,6 +5,7 @@ import pandas as pd
 from pipeline.spot_check import (
     am_pm_net,
     check_holiday_dip,
+    check_preset_temps_within_observed_range,
     check_seasonal_amplitude,
     check_station_direction,
     run_all_checks,
@@ -104,6 +105,21 @@ def test_check_seasonal_amplitude_fails_when_winter_is_not_actually_lower():
     assert not result.passed
 
 
+def test_check_preset_temps_within_observed_range_passes_when_real_range_covers_all_presets():
+    weather_panel = pd.DataFrame({"temp_mean_c": [-14.3, 0.0, 15.0, 32.3]})
+    result = check_preset_temps_within_observed_range(weather_panel)
+    assert result.passed
+
+
+def test_check_preset_temps_within_observed_range_fails_when_a_preset_exceeds_real_max():
+    # A narrow real range that excludes hot_day's configured 31.0C must
+    # fail loudly, not silently pass because the preset "sounds reasonable."
+    weather_panel = pd.DataFrame({"temp_mean_c": [-5.0, 0.0, 10.0, 20.0]})
+    result = check_preset_temps_within_observed_range(weather_panel)
+    assert not result.passed
+    assert "hot_day" in result.detail
+
+
 def test_run_all_checks_returns_one_result_per_configured_check():
     stations = {
         "4920.13": {"weekday": make_curve(1.0, -1.0), "seasons": {"summer": {"weekday": [1.0] * 24}, "winter": {"weekday": [1.0] * 24}}},
@@ -116,5 +132,6 @@ def test_run_all_checks_returns_one_result_per_configured_check():
             "departures_count": [1000, 1000, 1000],
         }
     )
-    results = run_all_checks(stations, daily)
-    assert len(results) == 5
+    weather_panel = pd.DataFrame({"temp_mean_c": [-14.3, 0.0, 15.0, 32.3]})
+    results = run_all_checks(stations, daily, weather_panel)
+    assert len(results) == 6

@@ -1,13 +1,20 @@
 """Tests for pipeline/scenario_presets.py."""
 
-from pipeline.scenario_presets import build_scenario_presets
+from pipeline.scenario_presets import OBSERVED_TEMP_RANGE_C, build_scenario_presets
 
 
-def test_heat_wave_is_deliberately_excluded():
+def test_hot_day_preset_exists_and_is_documented():
     result = build_scenario_presets()
     ids = {p["id"] for p in result["presets"]}
-    assert "heat_wave" not in ids
-    assert "heat_wave" in result["notes"], "the exclusion must be documented in the file's own notes, not just silent"
+    assert "hot_day" in ids
+    assert "hot_day" in result["notes"], "adding hot_day must be documented in the file's own notes, not just silent"
+
+
+def test_hot_day_is_the_warmest_preset():
+    result = build_scenario_presets()
+    by_id = {p["id"]: p for p in result["presets"]}
+    assert by_id["hot_day"]["temp_c"] > by_id["ideal"]["temp_c"]
+    assert by_id["hot_day"]["temp_c"] > by_id["rain_day"]["temp_c"]
 
 
 def test_ideal_is_the_reference_preset_with_zero_precip():
@@ -32,11 +39,17 @@ def test_snow_day_is_colder_than_rain_day():
     assert by_id["snow_day"]["temp_c"] < by_id["rain_day"]["temp_c"]
 
 
-def test_all_preset_temps_are_within_or_near_the_observed_training_range():
-    # The real Feb+April training panel's observed temp_mean_c range is
-    # -4.4C to 18.7C (pipeline/elasticities.py's own SPARSE_GRID_CAVEAT) --
-    # every REMAINING preset (heat_wave already excluded) should be at or
-    # only modestly beyond that range, not a wild extrapolation.
+def test_all_preset_temps_are_within_the_real_observed_range():
+    # OBSERVED_TEMP_RANGE_C is a dated fact (-14.3C to 32.3C, verified
+    # 2026-07-24 against the real full-year daily weather panel), not a
+    # permanent guarantee -- this must fail loudly if a future data refresh
+    # ever narrows the real range back below hot_day's configured value,
+    # not silently keep shipping a preset that's become an extrapolation.
+    low, high = OBSERVED_TEMP_RANGE_C
     result = build_scenario_presets()
     for preset in result["presets"]:
-        assert -10 <= preset["temp_c"] <= 25, f"{preset['id']} is a much bigger extrapolation than intended: {preset['temp_c']}C"
+        assert low <= preset["temp_c"] <= high, (
+            f"{preset['id']} ({preset['temp_c']}C) is outside the documented real "
+            f"observed range {OBSERVED_TEMP_RANGE_C} -- re-verify against real data "
+            "before trusting this preset is still within range, not just historically"
+        )

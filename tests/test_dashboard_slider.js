@@ -186,12 +186,13 @@ const FAKE_FLEET_SCENARIOS_PAYLOAD = {
 
 // Fake scenario_presets.json (Investigator Mode Phase 4) -- real schema,
 // real converted values (60F->15.6C, 28F->-2.2C, 72F->22.2C; 0.4in->10.2mm,
-// 0.3in->7.6mm), heat_wave deliberately absent, same as the real file.
+// 0.3in->7.6mm), plus hot_day (Session 43), matching the real current file.
 const FAKE_SCENARIO_PRESETS_PAYLOAD = {
   presets: [
     { id: 'rain_day', label: 'Steady rain', temp_c: 15.6, precip_mm: 10.2 },
     { id: 'snow_day', label: 'Snow event', temp_c: -2.2, precip_mm: 7.6 },
     { id: 'ideal', label: 'Ideal riding weather', temp_c: 22.2, precip_mm: 0.0 },
+    { id: 'hot_day', label: 'Hot day', temp_c: 31.0, precip_mm: 0.0 },
   ],
   reference_preset_id: 'ideal',
   notes: 'fake scenario presets for testing',
@@ -1184,6 +1185,25 @@ async function main() {
   // slugs) -- deliberately, to exercise the "no elasticity data at all ->
   // stays unadjusted" path.
   assert.ok(!elements['weather-accordion'].classList.contains('hidden'), 'weather scenario accordion must show once both elasticities.json and scenario_presets.json load');
+  // Session 43: #weather-preset-select's options are built from
+  // scenario_presets.json's real preset list, not hardcoded static HTML --
+  // a real gap found while adding hot_day (the static markup only ever had
+  // ideal/rain_day/snow_day, so a fourth preset would have been silently
+  // unreachable in the dropdown despite existing in the real data file).
+  // Checking the actual populated option count/values, not just that a
+  // hardcoded 'ideal' value still happens to match by coincidence.
+  assert.strictEqual(
+    elements['weather-preset-select']._children.length, 4,
+    'dropdown must have one real option per preset in scenario_presets.json, including hot_day'
+  );
+  assert.ok(
+    elements['weather-preset-select']._children.some(o => o.value === 'hot_day' && o.textContent === 'Hot day'),
+    'hot_day must actually be a selectable option, not just present in state'
+  );
+  assert.ok(
+    elements['weather-preset-select']._children.some(o => o.value === 'ideal' && o.textContent === 'Ideal riding weather (baseline)'),
+    'the reference preset must keep its "(baseline)" suffix when built dynamically'
+  );
   // The Guideline's own required label, verbatim, actually on the page --
   // not just in elasticities.json's notes field or PROGRESS.md. Checked
   // against the RAW HTML SOURCE (`html`, read at the top of main()), not

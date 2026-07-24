@@ -28,6 +28,8 @@ from typing import NamedTuple
 
 import pandas as pd
 
+from pipeline.scenario_presets import build_scenario_presets
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 FLOWS_PATH = DATA_DIR / "flows.json"
 DAILY_NET_FLOW_PATH = DATA_DIR / "daily_net_flow.parquet"
@@ -156,7 +158,29 @@ def check_seasonal_amplitude(stations: dict, station_id: str, min_ratio: float) 
     return SpotCheckResult(name, passed, detail)
 
 
-def run_all_checks(stations: dict, daily: pd.DataFrame) -> list[SpotCheckResult]:
+def check_preset_temps_within_observed_range(weather_panel: pd.DataFrame) -> SpotCheckResult:
+    """Every configured Investigator Mode weather-scenario preset (rain_day,
+    snow_day, ideal, hot_day) must sit within the REAL current observed
+    daily temperature range, checked against live data at run time -- not
+    just pipeline/scenario_presets.py's own dated OBSERVED_TEMP_RANGE_C
+    constant, which could itself go stale if a future data refresh narrows
+    the real range. This is the check that actually fails loudly against
+    that scenario, added in Session 43 alongside the hot_day preset.
+    """
+    name = "scenario preset temps within real observed range"
+    presets = build_scenario_presets()["presets"]
+    real_min, real_max = weather_panel["temp_mean_c"].min(), weather_panel["temp_mean_c"].max()
+
+    out_of_range = [f"{p['id']}={p['temp_c']}C" for p in presets if not (real_min <= p["temp_c"] <= real_max)]
+    passed = not out_of_range
+
+    detail = f"real observed range=[{real_min:.1f}C, {real_max:.1f}C], presets={[(p['id'], p['temp_c']) for p in presets]}"
+    if out_of_range:
+        detail += f" -- OUT OF RANGE: {out_of_range}"
+    return SpotCheckResult(name, passed, detail)
+
+
+def run_all_checks(stations: dict, daily: pd.DataFrame, weather_panel: pd.DataFrame) -> list[SpotCheckResult]:
     """Run every spot check and return all results, passing or failing."""
     results = []
     for fact in KNOWN_STATION_FACTS:
@@ -169,14 +193,18 @@ def run_all_checks(stations: dict, daily: pd.DataFrame) -> list[SpotCheckResult]
             stations, SEASONAL_AMPLITUDE_CHECK["station_id"], SEASONAL_AMPLITUDE_CHECK["min_summer_to_winter_ratio"]
         )
     )
+    results.append(check_preset_temps_within_observed_range(weather_panel))
     return results
 
 
 if __name__ == "__main__":
+    from pipeline.elasticities import load_daily_weather_panel
+
     flows_payload = json.loads(FLOWS_PATH.read_text())
     daily_panel = pd.read_parquet(DAILY_NET_FLOW_PATH)
+    weather_panel = load_daily_weather_panel(flows_payload["stations"])
 
-    results = run_all_checks(flows_payload["stations"], daily_panel)
+    results = run_all_checks(flows_payload["stations"], daily_panel, weather_panel)
 
     print(f"{'PASS' if all(r.passed for r in results) else 'FAIL'} -- {sum(r.passed for r in results)}/{len(results)} checks passed\n")
     for r in results:

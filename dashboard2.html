@@ -93,11 +93,15 @@
      (and only takes stack space) whenever it's not .hidden. Mobile
      override switches this to column (not reversed) static flow --
      Legend first, Detail below it, top-to-bottom reading order. */
-  /* bottom offset cleared to sit above #timebar (task 07) instead of
-     overlapping it -- both are absolute against the same #body-row
-     ancestor. Verified visually, not just computed on paper: #timebar's
-     own real height (padding + a 26px play button) plus a real gap. */
-  #map-corner-stack { position: absolute; left: 16px; bottom: 78px; z-index: 500; display: flex; flex-direction: column-reverse; gap: 12px; width: 300px; max-width: calc(100% - 32px); }
+  /* User-reported gap, not from the critique: legend used to sit stacked
+     ABOVE #timebar (bottom:78px, clearing its height) -- moved down to
+     the same bottom:16px level instead, so legend (bottom-left) and
+     timebar (bottom-center, since the previous request narrowed and
+     centered it) read as one shared bottom row, the same way the zoom
+     control already sits at bottom-right. Both are absolute against the
+     same #body-row ancestor, so this really is the same vertical level,
+     not just a visually-close approximation. */
+  #map-corner-stack { position: absolute; left: 16px; bottom: 16px; z-index: 500; display: flex; flex-direction: column-reverse; gap: 12px; width: 300px; max-width: calc(100% - 32px); }
   #legend-card, #detail-card { background: #fff; border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15); padding: 14px; box-sizing: border-box; font-size: 12px; }
   /* Design critique task 10: numeric anchors so the legend states real
      units instead of leaving "how big is a deficit" to guesswork -- the
@@ -234,22 +238,29 @@
   #period-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; }
   #controls-row #period-select { font-size: 12px; padding: 7px 8px; }
 
-  /* Design critique task 07: the hour scrubber's own real estate. Full-
-     width dock along the bottom of the map (not the cramped ~160px range
-     that used to sit inside the 280px floating card) -- same absolute-
-     positioning ancestor (#body-row) as #map-controls-bar/#map-corner-
-     stack, so it lines up with them the same way. #map-corner-stack
-     (legend/detail) shifts up to sit above it instead of overlapping --
-     see its own bottom offset below.
+  /* Design critique task 07 originally made this a full-width dock along
+     the bottom of the map. User-reported gap, not from the critique:
+     that read as too wide -- narrowed to a fixed max width and centered
+     under the map instead, closer to #map-controls-bar/#legend-card's own
+     scale. Still positioned relative to #body-row (not #map-col) for the
+     same reason #map-controls-bar/#map-corner-stack are too -- #map-col
+     needs to stay free of absolutely-positioned descendants so the mobile
+     breakpoint below can turn all three into normal static blocks between
+     the map and the sidebar (#map itself is position:absolute and would
+     otherwise just paint over static children living inside #map-col).
 
-     left/width (not right) are set by positionTimebar() in the script
-     below, not fixed here -- #body-row (the positioning ancestor) spans
-     BOTH the map and the sidebar, so a plain CSS right:Npx measures from
-     the sidebar's right edge, not the map's, and would either run
-     underneath the sidebar or collide with Leaflet's own zoom control
-     depending on window width. Checked against the real rendered page,
-     not assumed: a fixed right:62px looked fine at one width and visibly
-     drifted at another. Recomputed on resize, not just once at load. */
+     left is still set by positionTimebar() in the script below, not fixed
+     here -- #body-row spans BOTH the map and the sidebar, so centering
+     against it directly (left:50%) would center on the combined map+
+     sidebar width, visibly off-center from the map alone. Since
+     #body-row's own left edge coincides with #map-col's (map-col is
+     body-row's first child), positionTimebar() only needs the map's own
+     real width to compute a left offset + translateX(-50%) that centers
+     correctly within the map specifically. Width is also clamped there
+     against the real map width, not just this rule's CSS max-width
+     fallback (which resolves against #body-row's full width and would
+     under-constrain a narrow map) -- this rule's own width/max-width are
+     only the pre-JS first-paint default. */
   /* User-reported gap, not from the critique: #timebar and #legend-card
      already shared the same border-radius/box-shadow -- the mismatch was
      the translucent, blurred background here (vs. the legend's solid
@@ -266,6 +277,7 @@
     padding: 10px 14px; background: #fff;
     border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15);
     box-sizing: border-box;
+    width: 420px; max-width: calc(100% - 32px);
   }
   #timebar input[type="range"] { flex: 1; box-sizing: border-box; accent-color: #0b0b0b; min-width: 0; min-height: 24px; }
   #hour-label { font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; color: #0b0b0b; white-space: nowrap; flex-shrink: 0; min-width: 6.5ch; text-align: right; }
@@ -487,7 +499,8 @@
        becomes a normal block back in the historical-controls reading
        order, right after the card it used to live inside. */
     #timebar {
-      position: static; left: auto; right: auto; bottom: auto;
+      position: static; left: auto; right: auto; bottom: auto; transform: none;
+      width: auto; max-width: none;
       border-radius: 0; box-shadow: none; backdrop-filter: none;
       border-bottom: 1px solid #d8d7d3;
     }
@@ -1216,11 +1229,22 @@ function computeLiveClusterColor(childFillPcts) {
 // the visual/color logic is testable on its own. A null color (no valid
 // children for the current mode/period) renders the same hollow-gray
 // convention as an individual no-data marker: transparent fill, gray ring.
+//
+// User-reported gap, not from the critique: unlike individual markers,
+// clusters never used rampStroke() -- a "balanced" cluster (mean flow near
+// 0) rendered as a solid near-white (#f7f7f7) 40px disc with a WHITE
+// border, at full opacity (clusters don't fade the way rampOpacity makes
+// individual balanced markers do -- the count number needs to stay
+// legible regardless of class, so opacity isn't touched here, only the
+// border). A second issue found while fixing that one: the count text
+// itself was hardcoded white, which is just as invisible on a near-white
+// fill as the white border was -- same root cause, same fix.
 function clusterIconHTML(color, count) {
   const isNoData = color === null;
+  const isBalanced = color === RAMP[2];
   const background = isNoData ? 'transparent' : color;
-  const border = isNoData ? NO_DATA_STROKE : '#ffffff';
-  const textColor = isNoData ? '#898781' : '#ffffff';
+  const border = isNoData ? NO_DATA_STROKE : (isBalanced ? BALANCED_STROKE : '#ffffff');
+  const textColor = isNoData ? '#666057' : (isBalanced ? '#52514e' : '#ffffff');
   return `<div style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${background};border:2px solid ${border};color:${textColor};font-weight:600;font-size:13px;font-family:system-ui,-apple-system,sans-serif;">${count}</div>`;
 }
 
@@ -2149,6 +2173,20 @@ const DEFAULT_WEIGHT = 0.75;
 const SELECTED_WEIGHT = 2;
 const NO_DATA_WEIGHT = 1; // slightly heavier than default so a hollow ring reads clearly against the basemap
 
+// User-reported gap, not from the critique: at this map's small marker
+// radii (2.5-8px, see markerRadiusForZoom), SELECTED_WEIGHT's 2px dark
+// ring ate a large enough share of the marker's own small area that the
+// actual data-bearing fill color got visually swamped -- a selected
+// station just read as "a black dot," not "a colored dot with a
+// highlight ring." Growing the radius while selected (same +2px pattern
+// hover already uses, but persisting instead of reverting) keeps the fill
+// clearly visible relative to the ring, and makes the selected station
+// easier to spot on the map as a side effect.
+const SELECTED_RADIUS_DELTA_PX = 2;
+function radiusFor(id) {
+  return state.markerRadius + (id === state.selectedId ? SELECTED_RADIUS_DELTA_PX : 0);
+}
+
 function noDataStyle(selected) {
   return {
     fillColor: '#ffffff',
@@ -2319,7 +2357,9 @@ function markerStyleFor(id) {
 }
 
 function restyleMarker(id) {
-  state.markers[id].setStyle(markerStyleFor(id));
+  const marker = state.markers[id];
+  marker.setStyle(markerStyleFor(id));
+  marker.setRadius(radiusFor(id)); // selection changes the radius too now, not just color/weight -- see SELECTED_RADIUS_DELTA_PX
 }
 
 // Recolors/restyles every existing marker for the CURRENT state (mode,
@@ -2523,28 +2563,88 @@ function updateStatusMessage() {
 // sure the route layer itself leaves the map in live mode (regardless of
 // the user's last toggle preference) and reappears automatically on
 // returning to historical mode, without the user needing to re-toggle it.
-// #timebar's real left/width, not a fixed CSS right:Npx -- see its own
-// CSS comment for why: #body-row (the positioning ancestor) spans both
-// the map and the sidebar, so a plain right:Npx measures from the
-// SIDEBAR's edge, not the map's, and drifts (or collides with Leaflet's
-// own zoom control) at different window widths. Recomputed on resize,
-// not just once at load. Below the mobile breakpoint, the CSS media
-// query switches #timebar to a normal static block -- left/width are
-// cleared so they don't fight the stylesheet there.
+// #timebar's real center point + width, not a fixed CSS left:50% -- see
+// its own CSS comment for why: #body-row (the positioning ancestor) spans
+// both the map and the sidebar, so a plain left:50% would center on the
+// combined map+sidebar width, not the map alone. Since #body-row's own
+// left edge coincides with #map-col's, centering within the map only
+// needs the map's real width (half of it, as a left offset + a
+// translateX(-50%)) -- recomputed on resize, not just once at load, since
+// the map's width itself changes as the window resizes. Below the mobile
+// breakpoint, the CSS media query switches #timebar to a normal static
+// block -- left/width/transform are cleared so they don't fight the
+// stylesheet there.
 const TIMEBAR_MOBILE_BREAKPOINT_PX = 768; // matches the @media rule above
-const TIMEBAR_ZOOM_CONTROL_CLEARANCE_PX = 62; // 16px margin + ~46px for Leaflet's zoom control
+const TIMEBAR_MAX_WIDTH_PX = 420; // matches this file's other floating cards' scale (map-controls-bar/legend-card), not the old full-width dock
 function positionTimebar() {
   const timebar = document.getElementById('timebar');
   if (window.innerWidth <= TIMEBAR_MOBILE_BREAKPOINT_PX) {
     timebar.style.left = '';
     timebar.style.width = '';
+    timebar.style.transform = '';
     return;
   }
   const mapWidth = document.getElementById('map-col').getBoundingClientRect().width;
-  timebar.style.left = '16px';
-  timebar.style.width = `${mapWidth - 16 - TIMEBAR_ZOOM_CONTROL_CLEARANCE_PX}px`;
+  timebar.style.width = `${Math.min(TIMEBAR_MAX_WIDTH_PX, mapWidth - 32)}px`;
+  timebar.style.left = `${mapWidth / 2}px`;
+  timebar.style.transform = 'translateX(-50%)';
 }
-window.addEventListener('resize', positionTimebar);
+
+// User-reported gap, not from the critique: moving #map-corner-stack down
+// to bottom:16px (the same level as #timebar, per the request right above
+// this) put both on the same row for the first time -- and at plenty of
+// real window widths, the legend's normal 300px width reaches past
+// #timebar's own (centered, so its left edge moves with window width)
+// left edge, a real measured overlap (confirmed via getBoundingClientRect
+// before writing this fix, not assumed). Shrinks the legend's own zone to
+// whatever real horizontal room exists between it and the timebar, rather
+// than picking one fixed width that happens to work at today's window
+// size -- recomputed on resize for the same reason positionTimebar() is.
+// Never GROWS past the normal 300px even when there's extra room; only
+// shrinks when the timebar's real position actually encroaches.
+//
+// A first version of this floored the shrunk width at 140px -- checked
+// against a real narrower window (1000px) and that floor itself forced a
+// 96px overlap right back, because a 420px-wide timebar plus even a
+// 140px-wide legend genuinely doesn't fit in a map that's only ~540px
+// wide at that size. Below MAP_CORNER_STACK_MIN_WIDTH_PX of real
+// available room, the legend goes back to sitting ABOVE the timebar
+// (this file's original layout) instead of forcing either an overlap or
+// an unreadably thin card -- same-row when there's genuinely room for
+// both, stacked when there isn't.
+const MAP_CORNER_STACK_TIMEBAR_GAP_PX = 16;
+const MAP_CORNER_STACK_MIN_WIDTH_PX = 220;
+const MAP_CORNER_STACK_SAME_ROW_BOTTOM_PX = 16; // matches #timebar's own bottom offset
+function positionMapCornerStack() {
+  const stack = document.getElementById('map-corner-stack');
+  const timebar = document.getElementById('timebar');
+  if (window.innerWidth <= TIMEBAR_MOBILE_BREAKPOINT_PX) {
+    stack.style.maxWidth = '';
+    stack.style.bottom = '';
+    return;
+  }
+  const stackLeft = stack.getBoundingClientRect().left;
+  const timebarRect = timebar.getBoundingClientRect();
+  const available = timebarRect.left - stackLeft - MAP_CORNER_STACK_TIMEBAR_GAP_PX;
+
+  if (available >= MAP_CORNER_STACK_MIN_WIDTH_PX) {
+    stack.style.maxWidth = `${Math.min(300, available)}px`;
+    stack.style.bottom = `${MAP_CORNER_STACK_SAME_ROW_BOTTOM_PX}px`;
+  } else {
+    // Stacked bottom offset is measured from the timebar's own real
+    // rendered height, not a hardcoded guess -- can't go stale if the
+    // timebar's height ever changes (it did, in fact, change once already
+    // this session, from the old full-width dock's own padding).
+    stack.style.maxWidth = '';
+    stack.style.bottom = `${MAP_CORNER_STACK_SAME_ROW_BOTTOM_PX + timebarRect.height + MAP_CORNER_STACK_TIMEBAR_GAP_PX}px`;
+  }
+}
+
+function positionFloatingMapControls() {
+  positionTimebar(); // must run first -- positionMapCornerStack measures its real resulting position
+  positionMapCornerStack();
+}
+window.addEventListener('resize', positionFloatingMapControls);
 
 function setMode(mode) {
   // Live mode has no hour concept at all (#historical-controls, which
@@ -2862,7 +2962,7 @@ map.on('zoomend', () => {
   const zoom = map.getZoom();
   setViewMode(state.viewModeUserForced ?? autoViewModeForZoom(zoom));
   state.markerRadius = markerRadiusForZoom(zoom);
-  for (const id in state.markers) state.markers[id].setRadius(state.markerRadius);
+  for (const id in state.markers) state.markers[id].setRadius(radiusFor(id)); // radiusFor keeps the selected marker's own +2px bump across zoom changes
 });
 
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -3082,8 +3182,8 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
       ));
       marker.stationId = id; // lets clusterIconCreateFunction map a grouped child back to its station
       marker.on('click', () => selectStation(id));
-      marker.on('mouseover', () => marker.setRadius(state.markerRadius + MARKER_HOVER_RADIUS_DELTA_PX));
-      marker.on('mouseout', () => marker.setRadius(state.markerRadius));
+      marker.on('mouseover', () => marker.setRadius(radiusFor(id) + MARKER_HOVER_RADIUS_DELTA_PX));
+      marker.on('mouseout', () => marker.setRadius(radiusFor(id)));
       state.markers[id] = marker;
     }
 
@@ -3370,7 +3470,7 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
     // standing rule warns about).
     setMode('historical');
     wireRadiogroup(document.getElementById('mode-toggle'), ['mode-historical', 'mode-live']);
-    positionTimebar(); // real map width wasn't known until layout settled just above
+    positionFloatingMapControls(); // real map width wasn't known until layout settled just above
 
     // Design critique task 08: a manual click is a real override, not
     // just the current auto-computed state -- see viewModeUserForced's

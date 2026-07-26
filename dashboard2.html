@@ -250,10 +250,20 @@
      depending on window width. Checked against the real rendered page,
      not assumed: a fixed right:62px looked fine at one width and visibly
      drifted at another. Recomputed on resize, not just once at load. */
+  /* User-reported gap, not from the critique: #timebar and #legend-card
+     already shared the same border-radius/box-shadow -- the mismatch was
+     the translucent, blurred background here (vs. the legend's solid
+     #fff) reading as a different, lighter "layer" of UI, plus a 2px
+     padding difference (16px here vs. the legend's 14px) offsetting the
+     play button's left edge from the legend's own text left edge by a
+     couple of pixels. Solid background + matching 14px padding makes the
+     two read as the same kind of surface anchored to the same left edge,
+     not two unrelated floating panels that happen to share an
+     x-coordinate. */
   #timebar {
     position: absolute; bottom: 16px; z-index: 500;
     display: flex; align-items: center; gap: 14px;
-    padding: 10px 16px; background: rgba(255,255,255,0.94); backdrop-filter: blur(6px);
+    padding: 10px 14px; background: #fff;
     border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15);
     box-sizing: border-box;
   }
@@ -674,9 +684,20 @@
            real marker click already goes through -- not a second, parallel
            selection mechanism. Hidden entirely in live mode (no historical
            curve to rank by; see renderReadout()). -->
-      <div class="worst" id="worst-wrap">
-        <div class="worst__title">Worst now</div>
-        <ul id="worst-list"></ul>
+      <!-- User-reported gap, not from the critique: this used to be one
+           combined "Worst Now" list ranked by |value| across BOTH deficit
+           and surplus stations -- a full-dock station isn't "worst" in
+           the same sense as an empty one, so a shared ranking obscured
+           which problem a given station actually has. Split into two
+           independently-ranked top-8 lists instead; each is now
+           internally comparable (same sign, same real problem). -->
+      <div class="worst" id="worst-deficit-wrap">
+        <div class="worst__title">Most bikes needed</div>
+        <ul id="worst-deficit-list"></ul>
+      </div>
+      <div class="worst" id="worst-surplus-wrap">
+        <div class="worst__title">Most docks needed</div>
+        <ul id="worst-surplus-list"></ul>
       </div>
 
       <!-- Investigator is its own standalone collapsible now, not one
@@ -1026,6 +1047,20 @@ function rampColor(value, domainMax) {
 
 function rampOpacity(value, domainMax) {
   return classOf(value, domainMax) === 2 ? 0.22 : 0.9;
+}
+
+// User-reported gap, not from the critique: the balanced class's own fill
+// (near-white, #f7f7f7) already recedes via rampOpacity's 0.22 -- combined
+// with DEFAULT_STROKE's white ring, the whole marker nearly disappears
+// against the pale CARTO basemap. The white stroke is doing real work for
+// the other four classes (a clean ring around a saturated fill); it's only
+// the balanced class where white-on-near-white vanishes. A muted gray
+// stroke fixes that ONE class without touching DEFAULT_STROKE, RAMP, or
+// rampOpacity's already-tuned values for the rest.
+const BALANCED_STROKE = '#b0aea7';
+
+function rampStroke(value, domainMax) {
+  return classOf(value, domainMax) === 2 ? BALANCED_STROKE : DEFAULT_STROKE;
 }
 
 function percentile(sortedArr, p) {
@@ -1586,58 +1621,105 @@ function renderReadout() {
 
 const WORST_LIST_SIZE = 8;
 
+// User-reported gap, not from the critique: selectStation() (used by every
+// other selection path -- clicking a marker, a route stop, a search) never
+// pans the map, which is correct when you clicked something already on
+// screen. A Worst Now entry can be anywhere in the city, off-screen or
+// buried in a cluster, so that same no-op would leave you unable to find
+// what you just selected. Kept as its own function, called only from the
+// Worst Now click handler below, rather than added to selectStation()
+// itself -- clicking a marker you're already looking at should not also
+// yank the view.
+const WORST_LIST_FLY_ZOOM = 16; // z>=14 so it always lands in Individual view (task 08), not a cluster
+function flyToStation(id) {
+  const station = state.stations[id];
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reducedMotion) map.setView([station.lat, station.lng], WORST_LIST_FLY_ZOOM);
+  else map.flyTo([station.lat, station.lng], WORST_LIST_FLY_ZOOM, { duration: 0.75 });
+}
+
+// One <li> builder shared by both lists below -- deficit and surplus
+// entries render identically (name + signed value + click-to-select),
+// they just come from different filtered/sorted arrays.
+function buildWorstListItem(entry) {
+  const li = document.createElement('li');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('aria-label', `${entry.name}, ${entry.value > 0 ? 'surplus' : 'deficit'} ${Math.abs(entry.value).toFixed(1)} bikes/day -- select on map`);
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'worst-name';
+  nameSpan.textContent = entry.name;
+
+  const valueSpan = document.createElement('span');
+  valueSpan.className = 'worst-value';
+  valueSpan.style.color = entry.value < 0 ? rgba(DEFICIT_COLOR, 1) : rgba(SURPLUS_COLOR, 1);
+  valueSpan.textContent = (entry.value > 0 ? '+' : '') + entry.value.toFixed(1);
+
+  btn.appendChild(nameSpan);
+  btn.appendChild(valueSpan);
+  btn.addEventListener('click', () => {
+    flyToStation(entry.id);
+    selectStation(entry.id);
+  });
+  li.appendChild(btn);
+  return li;
+}
+
 // The keyboard/screen-reader-reachable equivalent of the map (task 11) --
 // there is otherwise no keyboard path to any of the 2,516 SVG circles.
 // Historical-only: net flow and live dock-fill % aren't the same kind of
 // quantity, and inventing a combined ranking across both would be exactly
-// the kind of made-up number CLAUDE.md rules out -- so in live mode this
-// list simply doesn't apply, same as any other historical-only control.
+// the kind of made-up number CLAUDE.md rules out -- so in live mode both
+// lists simply don't apply, same as any other historical-only control.
+//
+// Two independently-ranked top-8 lists, not one combined list split by
+// sign -- each of the two real "problems" a station can have (empty of
+// bikes vs. full of docks) gets its own ranking, rather than a shared
+// |value| ranking that buried which direction a station's imbalance runs
+// in behind a +/- sign a reader has to parse themselves. A station with
+// value === 0 (exactly balanced) belongs in neither list -- it isn't
+// "needed" in either direction -- so it's dropped from both rather than
+// arbitrarily assigned to one.
 function renderWorstNow() {
-  const wrap = document.getElementById('worst-wrap');
-  const list = document.getElementById('worst-list');
-  list.innerHTML = '';
+  const deficitWrap = document.getElementById('worst-deficit-wrap');
+  const surplusWrap = document.getElementById('worst-surplus-wrap');
+  const deficitList = document.getElementById('worst-deficit-list');
+  const surplusList = document.getElementById('worst-surplus-list');
+  deficitList.innerHTML = '';
+  surplusList.innerHTML = '';
 
   if (state.mode === 'live') {
-    wrap.classList.add('hidden');
+    deficitWrap.classList.add('hidden');
+    surplusWrap.classList.add('hidden');
     return;
   }
-  wrap.classList.remove('hidden');
+  deficitWrap.classList.remove('hidden');
+  surplusWrap.classList.remove('hidden');
 
-  const ranked = [];
+  const deficits = [];
+  const surpluses = [];
   for (const id in state.stations) {
     const station = state.stations[id];
     const curve = curveForPeriod(station, state.period, state.dayType);
     if (curve === null) continue;
     const value = curve[state.currentHour] * weatherMultiplierFor(id);
-    ranked.push({ id, name: station.name, value });
+    if (value < 0) deficits.push({ id, name: station.name, value });
+    else if (value > 0) surpluses.push({ id, name: station.name, value });
   }
 
-  if (ranked.length === 0) {
-    list.innerHTML = '<li class="worst-empty">No data for this filter.</li>';
-    return;
+  if (deficits.length === 0) {
+    deficitList.innerHTML = '<li class="worst-empty">No data for this filter.</li>';
+  } else {
+    deficits.sort((a, b) => a.value - b.value); // most negative (biggest deficit) first
+    for (const entry of deficits.slice(0, WORST_LIST_SIZE)) deficitList.appendChild(buildWorstListItem(entry));
   }
 
-  ranked.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-  for (const entry of ranked.slice(0, WORST_LIST_SIZE)) {
-    const li = document.createElement('li');
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('aria-label', `${entry.name}, ${entry.value > 0 ? 'surplus' : 'deficit'} ${Math.abs(entry.value).toFixed(1)} bikes/day -- select on map`);
-
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'worst-name';
-    nameSpan.textContent = entry.name;
-
-    const valueSpan = document.createElement('span');
-    valueSpan.className = 'worst-value';
-    valueSpan.style.color = entry.value < 0 ? rgba(DEFICIT_COLOR, 1) : rgba(SURPLUS_COLOR, 1);
-    valueSpan.textContent = (entry.value > 0 ? '+' : '') + entry.value.toFixed(1);
-
-    btn.appendChild(nameSpan);
-    btn.appendChild(valueSpan);
-    btn.addEventListener('click', () => selectStation(entry.id));
-    li.appendChild(btn);
-    list.appendChild(li);
+  if (surpluses.length === 0) {
+    surplusList.innerHTML = '<li class="worst-empty">No data for this filter.</li>';
+  } else {
+    surpluses.sort((a, b) => b.value - a.value); // most positive (biggest surplus) first
+    for (const entry of surpluses.slice(0, WORST_LIST_SIZE)) surplusList.appendChild(buildWorstListItem(entry));
   }
 }
 
@@ -2215,7 +2297,7 @@ function markerStyleFor(id) {
     return {
       fillColor: rampColor(centered, LIVE_FILL_DOMAIN),
       fillOpacity: rampOpacity(centered, LIVE_FILL_DOMAIN),
-      color: selected ? SELECTED_STROKE : DEFAULT_STROKE,
+      color: selected ? SELECTED_STROKE : rampStroke(centered, LIVE_FILL_DOMAIN),
       weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
     };
   }
@@ -2231,7 +2313,7 @@ function markerStyleFor(id) {
   return {
     fillColor: rampColor(adjustedValue, state.domainMax),
     fillOpacity: rampOpacity(adjustedValue, state.domainMax),
-    color: selected ? SELECTED_STROKE : DEFAULT_STROKE,
+    color: selected ? SELECTED_STROKE : rampStroke(adjustedValue, state.domainMax),
     weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
   };
 }
@@ -3405,7 +3487,7 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
 if (typeof globalThis !== 'undefined') {
   globalThis.__dashboard = {
     divergingColor, percentile, computeDomainMax, formatHourLabel, renderHour, setDayType,
-    selectStation, closeStation, previewStripHour, clearStripPreview, stripX, stripY,
+    selectStation, closeStation, previewStripHour, clearStripPreview, stripX, stripY, flyToStation,
     setPeriod, formatPeriodLabel, curveForPeriod, hasPeriodData, setHourPlaying,
     setMode, hasLiveData, formatAsOf,
     setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,

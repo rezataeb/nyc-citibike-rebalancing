@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard Review for the DOT Planner — Data Accuracy &amp; Design Options</title>
+<link rel="stylesheet" href="assets/report.css">
+<style>
+  /* Supplemental styling for the pandoc-converted body, so blockquotes read
+     as callouts and headings match the rest of the doc set. */
+  body { padding: 0 2mm; }
+  h1 {
+    font-size: 21pt; line-height: 1.15; letter-spacing: -0.01em;
+    margin: 0 0 3mm 0; padding-top: 8mm; border-top: 5px solid var(--accent);
+  }
+  h1 + p { color: var(--ink-faint); font-size: 10pt; margin-bottom: 7mm; }
+  blockquote {
+    margin: 3mm 0 4mm 0; padding: 3.5mm 5mm;
+    background: var(--accent-bg); border-left: 3px solid var(--accent);
+    border-radius: 2px; font-size: 10.2pt;
+  }
+  blockquote p { margin: 0; }
+  hr { margin: 7mm 0; }
+  h2 { margin-top: 10mm; }
+  table { font-size: 9pt; }
+  td:first-child, th:first-child { max-width: 44mm; }
+  /* right-align numeric-looking table cells is left to the reader's eye here;
+     pandoc alignment (--:) is preserved as inline styles by pandoc itself. */
+</style>
+</head>
+<body>
+<h1
+id="dashboard-review-for-the-dot-planner-data-accuracy-design-options">Dashboard
+Review for the DOT Planner — Data Accuracy &amp; Design Options</h1>
+<p><em>Working analysis and decision document. Citi Bike Rebalancing
+Explorer.</em> <em>Prepared July 2026. Nothing here is implemented yet —
+these are proposals to react to.</em></p>
+<hr />
+<h2 id="summary">Summary</h2>
+<p>This document answers four things asked of the dashboard, in the
+order they should be read:</p>
+<ol type="1">
+<li><strong>How accurate the data and predictions actually are</strong>,
+per Investigator feature — the grounded part, which should drive every
+design decision below.</li>
+<li><strong>What the right sidebar should show</strong> to be useful to
+a DOT planner.</li>
+<li><strong>What value Investigator Mode can bring</strong> to a planner
+checking scenarios.</li>
+<li><strong>How to redesign the top-left controls</strong>
+(Individual/Grouped + the time/period selector).</li>
+</ol>
+<p>The headline finding, because it shapes everything else:</p>
+<blockquote>
+<p><strong>The dashboard is a <em>climatology</em> tool — what a station
+<em>typically</em> does — not a next-day forecaster.</strong> Those are
+two different accuracy questions, and conflating them is the main way a
+planner could be misled by the numbers.</p>
+</blockquote>
+<hr />
+<h2 id="part-1-how-accurate-is-the-data-per-feature">Part 1 — How
+accurate is the data, per feature</h2>
+<h3
+id="single-day-flow-is-almost-pure-noise-the-averaged-curve-is-whats-reliable">1.1
+Single-day flow is almost pure noise; the <em>averaged</em> curve is
+what’s reliable</h3>
+<p>At the raw <code>(station, date, hour)</code> grain, the mean
+absolute net flow is <strong>2.23 bikes</strong>, and the best forecast
+(seasonal-naive) has <strong>MAE 1.95</strong> — the error is roughly
+<strong>88% of the signal</strong>. No model beats it out-of-sample
+(that is the honest headline shown in the model panel). <strong>You
+cannot tell a planner what a specific station will do next Tuesday at
+8am.</strong></p>
+<p>But the dashboard does not show single-day predictions — it shows the
+<strong>averaged curve</strong> (the trailing mean over many real days).
+How reliable that displayed number is depends entirely on the slice the
+planner has selected:</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>View (period selector)</th>
+<th style="text-align: right;">Days averaged (median)</th>
+<th style="text-align: right;">Std. error of the shown number</th>
+<th style="text-align: right;">Stations whose deficit/surplus
+<strong>sign is statistically confident</strong> (|mean| &gt; 2·SE)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>All-period average</strong> (default)</td>
+<td style="text-align: right;">~84</td>
+<td style="text-align: right;">0.19 bikes/hr</td>
+<td style="text-align: right;"><strong>93%</strong></td>
+</tr>
+<tr>
+<td><strong>Season</strong></td>
+<td style="text-align: right;">~22</td>
+<td style="text-align: right;">0.34 bikes/hr</td>
+<td style="text-align: right;"><strong>82%</strong></td>
+</tr>
+<tr>
+<td><strong>Single month</strong></td>
+<td style="text-align: right;">~8</td>
+<td style="text-align: right;">0.50 bikes/hr</td>
+<td style="text-align: right;"><strong>60%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Implication:</strong> the default view is trustworthy for
+prioritization, but drilling down to a single month means <strong>~40%
+of “signals” are no longer sign-confident.</strong> That is a concrete
+design cue (see Part 2C and Part 4).</p>
+<h3
+id="the-three-investigator-features-have-fundamentally-different-accuracy-characters">1.2
+The three Investigator features have fundamentally different accuracy
+<em>characters</em></h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Feature</th>
+<th>What it really is</th>
+<th>How much to trust it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Equity thresholds</strong></td>
+<td>Deterministic geometry (haversine distances)</td>
+<td><strong>Exact</strong> counts. The uncertainty is <em>data</em>, not
+statistics: schools are a <strong>2019–2020</strong> vintage layer; 216
+NYCHA developments / 1,899 schools / 2,120 subway entrances; and “within
+300 m” ≠ “actually served.” Trust the number; caveat the data
+currency.</td>
+</tr>
+<tr>
+<td><strong>Fleet simulator</strong></td>
+<td>Deterministic <em>capacity math</em> on a reliable flag</td>
+<td>The <strong>flag</strong> (which stations are AM-deficit) rests on
+the reliable all-period average, so <em>who needs a truck</em> is solid.
+But the <strong>serviced counts</strong> (14 → 145) come from a greedy
+heuristic with a placeholder depot and a 45-stop cap — read them as
+<em>“how many stations N trucks × 45 stops can physically touch,”</em>
+not an optimized operational plan. This is also why there are no
+diminishing returns.</td>
+</tr>
+<tr>
+<td><strong>Weather scenario</strong></td>
+<td>A genuine statistical model — <strong>precise but weak</strong></td>
+<td>The subtle one. Coefficients are <em>extremely</em> tight (temp
+<strong>+0.034/°C</strong>, CI ≈ ±0.0005) because n is huge — but the
+regression’s <strong>R² is only 0.04–0.07</strong>. Weather explains
+<strong>~5% of day-to-day variance.</strong> So the scenario is a good
+estimate of the <em>average direction and rough size</em> (ideal→hot ≈
+<strong>+11%</strong> magnitude; ideal→rain ≈ <strong>−15%</strong>),
+but a poor predictor of any single day. <strong>A tight confidence
+interval ≠ an accurate forecast</strong> — a planner will misread this
+unless it is shown as a directional band, not a precise number.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Trust summary for a planner:</strong> -
+<strong>Equity</strong> — trust the number (caveat the vintage). -
+<strong>Fleet</strong> — trust <em>who</em> needs service; treat <em>how
+many get serviced</em> as capacity illustration. -
+<strong>Weather</strong> — trust the <em>direction and rough size</em>,
+not the decimals.</p>
+<h3 id="weather-regression-in-numbers">1.3 Weather regression, in
+numbers</h3>
+<table>
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+</colgroup>
+<thead>
+<tr>
+<th>Typology group</th>
+<th style="text-align: right;">n (station-days)</th>
+<th style="text-align: right;">Temp coef (/°C)</th>
+<th style="text-align: right;">Precip coef (/mm)</th>
+<th style="text-align: right;"><strong>R²</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Commuter core</td>
+<td style="text-align: right;">230,915</td>
+<td style="text-align: right;">+0.034</td>
+<td style="text-align: right;">−0.017</td>
+<td style="text-align: right;"><strong>0.059</strong></td>
+</tr>
+<tr>
+<td>Residential feeder</td>
+<td style="text-align: right;">385,102</td>
+<td style="text-align: right;">+0.037</td>
+<td style="text-align: right;">−0.018</td>
+<td style="text-align: right;"><strong>0.073</strong></td>
+</tr>
+<tr>
+<td>Pooled</td>
+<td style="text-align: right;">616,017</td>
+<td style="text-align: right;">+0.028</td>
+<td style="text-align: right;">−0.014</td>
+<td style="text-align: right;"><strong>0.044</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Projected average magnitude for the presets (pooled fit):
+<strong>Ideal (22 °C) ≈ 2.21 · Hot (31 °C) ≈ 2.45 (+11%) · Steady rain
+(15.6 °C, 10.2 mm) ≈ 1.88 (−15%).</strong> Real, directionally sensible,
+modest — and dwarfed by the ~95% of variance the model does not
+explain.</p>
+<hr />
+<h2 id="part-2-right-sidebar-what-actually-helps-a-dot-planner">Part 2 —
+Right sidebar: what actually helps a DOT planner</h2>
+<p>Today the rail shows four readout tiles, two “worst now” lists,
+Investigator Mode, and the model panel. It is good, but it is missing
+the metrics a planner makes decisions on.</p>
+<h3 id="a.-upgrade-the-readout-tiles-to-be-decision-relevant">2A.
+Upgrade the readout tiles to be decision-relevant</h3>
+<p>The biggest gap: <strong>imbalance and equity never meet.</strong>
+The most valuable single number for this project’s own framing is the
+<strong>intersection</strong>:</p>
+<ul>
+<li><strong>Deficit stations that are <em>also</em>
+equity-priority</strong> — e.g. <em>“of 1,037 AM-deficit stations, N are
+within 300 m of NYCHA / a school.”</em> This is the barrier-to-access
+number. Right now equity and deficit sit in separate tiles and never
+cross.</li>
+<li><strong>Total system pressure</strong> — the sum of |deficit| bikes
+across flagged stations: one “how big is the problem” number that moves
+as the planner scrubs time.</li>
+<li><strong>Concentration</strong> — <em>“top 20 stations = X% of total
+deficit,”</em> which tells a planner whether targeting a handful of
+stations is worthwhile.</li>
+<li><strong>Confidence / coverage</strong> — <em>“this slice averages ~8
+days”</em> when they drill to a month, so they know the number just got
+noisier.</li>
+</ul>
+<h3 id="b.-make-the-worst-now-lists-planner-grade">2B. Make the “worst
+now” lists planner-grade</h3>
+<p>Add, per row: an <strong>equity flag icon</strong> (near NYCHA /
+school), and a <strong>reliability marker</strong> (is this a chronic
+imbalance or a noisy single-month reading?). Optionally a <strong>peak
+hour</strong> so they know <em>when</em> to send a truck.</p>
+<h3 id="c.-add-a-confidence-surface">2C. Add a confidence surface</h3>
+<p>When the sign is not statistically confident
+(<code>|mean| &lt; 2·SE</code>, common at the month grain), de-emphasize
+or mark those stations rather than showing them as equal-weight
+deficits.</p>
+<hr />
+<h2 id="part-3-investigator-mode-where-the-planning-value-is">Part 3 —
+Investigator Mode: where the planning value is</h2>
+<p>Reframe the three existing controls around planner decisions, and
+consider new modes.</p>
+<ul>
+<li><strong>Fleet → “Coverage &amp; gap” tool.</strong> The most useful
+reframing: <em>“N trucks reach X of 1,037 deficit stations — and Y of
+the equity-priority ones. Here are the stations left unserved.”</em> The
+<strong>residual gap</strong> and the <strong>equity reach</strong> are
+the real planning outputs, not the serviced count alone.</li>
+<li><strong>Weather → “Stress test.”</strong> Given the low R², do not
+sell precision. Sell <em>“on a hot day, how many more stations tip into
+deficit?”</em> as a <strong>range</strong>. Value = resilience planning,
+not point prediction.</li>
+<li><strong>Equity thresholds → “Policy sensitivity.”</strong> Value =
+<em>“if we define ‘near NYCHA’ as 500 m instead of 300 m, the flagged
+population changes by N”</em> — genuinely useful for setting the policy
+threshold itself.</li>
+<li><strong>New ideas worth considering:</strong> a <strong>borough /
+district filter</strong> (planners work by district); an
+<strong>“expansion targeting” mode</strong> (high transit-gap + equity +
+latent demand); a <strong>peak-hour finder</strong> (which hour has the
+worst system-wide imbalance).</li>
+</ul>
+<hr />
+<h2 id="part-4-top-left-controls-redesign-options">Part 4 — Top-left
+controls: redesign options</h2>
+<p><strong>Problems today:</strong> Individual/Grouped is now
+<em>auto-by-zoom</em>, so the manual toggle is largely redundant; the
+period dropdown crams three granularities (All / seasons / months) into
+one flat list; and the temporal controls are split between the top-left
+card and the bottom time slider.</p>
+<p><strong>How comparable tools handle this (reference):</strong>
+transportation-planning tools like <strong>Replica / StreetLight /
+Remix</strong> separate <em>“what am I looking at”</em> (layer/view)
+from <em>“what time context”</em> (a dedicated date/time panel); weather
+scrubbers like <strong>Windy</strong> use a single timeline filmstrip;
+<strong>MTA / Citi Bike</strong> data views lean on a granularity
+segmented control (Year → Month → Day). The common pattern is
+<strong>one coherent time-context panel, separate from view/layer
+controls.</strong></p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Option</th>
+<th>Idea</th>
+<th>Trade-off</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A — Unified time-context panel</strong></td>
+<td>Group <em>all</em> temporal controls together: granularity as a
+segmented control (<strong>All · Season · Month</strong>) + a secondary
+picker + day-type + the hour scrubber, in one panel. View/route controls
+move elsewhere.</td>
+<td>Cleanest mental model; biggest layout change.</td>
+</tr>
+<tr>
+<td><strong>B — Demote the view toggle</strong></td>
+<td>Since view is auto-by-zoom, replace the manual toggle with a small
+map chip (“Grouped — zoom in for detail”) that only reveals the override
+on click. Frees the card for temporal controls.</td>
+<td>Small change, quick win; keeps most of the current layout.</td>
+</tr>
+<tr>
+<td><strong>C — Month filmstrip</strong></td>
+<td>Replace the period dropdown with a horizontal <strong>season/month
+strip</strong> you click across (and can animate), instead of a hidden
+dropdown.</td>
+<td>Great for “watch the year change”; needs horizontal space.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation:</strong> <strong>B + a lighter version of
+A</strong> (demote the view toggle, and turn the period dropdown into a
+two-level segmented control) is the highest value-to-effort, paired with
+a <strong>confidence indicator</strong> driven by the reliability
+numbers in Part 1.</p>
+<hr />
+<h2 id="decisions-on-the-table">Decisions on the table</h2>
+<ol type="1">
+<li><strong>Sidebar</strong> — add the <strong>imbalance × equity
+intersection</strong> metric (top recommendation)? And reliability
+markers on the worst-now lists?</li>
+<li><strong>Investigator</strong> — reframe the existing three
+(coverage-gap / stress-test / policy-sensitivity), or also add a new
+mode (district filter / expansion targeting)?</li>
+<li><strong>Weather honesty</strong> — present it as a
+<strong>directional band</strong> rather than a precise % (given R² ≈
+0.05)?</li>
+<li><strong>Top-left</strong> — Option A, B, C, or the B+A blend?</li>
+</ol>
+<hr />
+<h2
+id="appendix-how-the-accuracy-numbers-were-computed-reproducible">Appendix
+— how the accuracy numbers were computed (reproducible)</h2>
+<p>All figures derive from committed data; nothing is estimated.</p>
+<ul>
+<li><strong>Signal magnitude &amp; MAE grain:</strong>
+<code>data/daily_net_flow.parquet</code> (11,777,290 rows). Mean |net|
+and quantiles computed directly on the <code>net</code> column. The
+model MAE (naive 1.95) is scored in
+<code>pipeline/demand_model.py</code> against the same single-day
+<code>net</code>, confirming the forecast-error-vs-signal ratio.</li>
+<li><strong>Displayed-curve reliability:</strong> grouped
+<code>net</code> by <code>(station, [period], day_type, hour)</code>;
+standard error = std / √n_days; “sign-confident” =
+<code>|mean| &gt; 2·SE</code>, restricted to actionable buckets
+(<code>|mean| ≥ 1</code>). Computed at three grains: all-period, season
+(quarter proxy), month.</li>
+<li><strong>Weather R²:</strong> OLS of
+<code>magnitude ~ 1 + temp_mean_c + precip_mm</code> on
+<code>pipeline.elasticities.load_daily_weather_panel(...)</code>
+(788,979 station-days across 18 weather zones), per typology group and
+pooled; R² = 1 − SS_res / SS_tot.</li>
+<li><strong>Equity / fleet counts:</strong> <code>data/flows.json</code>
+equity-join block, <code>data/route.json</code>,
+<code>data/fleet_scenarios.json</code>.</li>
+</ul>
+<p>Reproduce the whole pipeline with
+<code>python3 -m pipeline.reproduce_all --skip-download</code>.</p>
+<div class="footnote">
+  Citi Bike Rebalancing Explorer · Working analysis &amp; decision document ·
+  Companion to Documentation Set v2 · Public-data prototype, not an official NYC DOT product.
+</div>
+</body>
+</html>

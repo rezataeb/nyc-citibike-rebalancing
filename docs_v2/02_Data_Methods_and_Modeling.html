@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>02 — Data, Methods, Modeling, EDA, Findings &amp; Limitations</title>
+<link rel="stylesheet" href="assets/report.css">
+</head>
+<body>
+
+<section class="cover">
+  <div class="eyebrow">Citi Bike Rebalancing Explorer · Documentation Set v2</div>
+  <div class="docnum">Document 02 — Data, Methods, Modeling, EDA, Findings &amp; Limitations</div>
+  <h1>The engine room</h1>
+  <div class="subtitle">Datasets, data wrangling, feature engineering, the forecasting model and its
+    honest result, the supporting analyses, what was found, what the tool cannot do, and where it goes next.</div>
+  <div class="meta">
+    <div><b>Assumes:</b> Document 01 (the problem framing and the net-flow signal in one paragraph).</div>
+    <div><b>Baseline-first rule:</b> plain, auditable methods first; a complex model is adopted only where it wins out-of-sample.</div>
+    <div><b>Prepared:</b> July 2026 · every figure reproduced from committed data by code in <span class="mono">pipeline/</span>.</div>
+  </div>
+</section>
+
+<h2>1. The pipeline, end to end</h2>
+<p class="lead">The analysis is a chain of small, single-purpose modules run in dependency order.
+<span class="mono">pipeline/reproduce_all.py</span> runs them as a human would at the command line and
+stops on the first real failure — it does not re-import internals, so "it reproduces" means the actual
+steps ran, not that a wrapper claimed success.</p>
+
+<ol class="steps">
+  <li><strong>Download &amp; aggregate</strong> (<span class="mono">build_full_year.py</span>) — pull 12 months of real Citi Bike trip archives; run QC; aggregate to net flow and a per-date daily table.</li>
+  <li><strong>Station typology</strong> (<span class="mono">station_typology.py</span>) — k-means on flow <em>shape</em> to give each station a role label.</li>
+  <li><strong>Equity join</strong> (<span class="mono">equity_join.py</span>) — nearest-distance from each station to NYCHA, schools, subway entrances.</li>
+  <li><strong>Weather elasticities</strong> (<span class="mono">elasticities.py</span>) — how flow magnitude responds to temperature, precipitation, and capacity.</li>
+  <li><strong>Demand model</strong> (<span class="mono">demand_model.py</span>) — the 12-fold walk-forward comparison of three forecasting tiers.</li>
+  <li><strong>Route &amp; fleet</strong> (<span class="mono">plan_routes.py</span>, <span class="mono">fleet_simulator.py</span>) — greedy overnight truck tours and a 1–10-truck sweep.</li>
+  <li><strong>Weather presets</strong> (<span class="mono">scenario_presets.py</span>) — the named weather scenarios the dashboard offers.</li>
+  <li><strong>Ground-truth spot checks</strong> (<span class="mono">spot_check.py</span>) — assert the output against facts a reviewer can verify without this repo.</li>
+</ol>
+
+<h2>2. The datasets</h2>
+<table>
+  <thead><tr><th>Dataset</th><th>Source &amp; ID</th><th>Records</th><th>Used for</th></tr></thead>
+  <tbody>
+    <tr><td>Citi Bike trips</td><td>citibikenyc.com system-data (S3)</td><td class="num">12 months</td><td>Net flow, daily table, features</td></tr>
+    <tr><td>GBFS live status &amp; info</td><td>gbfs.citibikenyc.com</td><td class="num">live</td><td>Live dock layer; station capacity</td></tr>
+    <tr><td>NYCHA developments</td><td>data.cityofnewyork.us · <span class="mono">phvi-damg</span></td><td class="num">216</td><td>Equity proximity (≤ 300 m)</td></tr>
+    <tr><td>DOE school locations</td><td>data.cityofnewyork.us · <span class="mono">wg9x-4ke6</span></td><td class="num">1,899</td><td>Equity proximity (≤ 300 m)</td></tr>
+    <tr><td>MTA subway entrances</td><td>data.ny.gov · <span class="mono">i9wp-a4ja</span></td><td class="num">2,120</td><td>Transit gap (≥ 800 m)</td></tr>
+    <tr><td>Open-Meteo daily weather</td><td>archive-api.open-meteo.com</td><td class="num">18 zones</td><td>Model features; elasticities</td></tr>
+  </tbody>
+  <caption>Record counts are from the committed <span class="mono">flows.json</span> equity-join block and data manifest. All sources are public and key-free.</caption>
+</table>
+
+<div class="box fact">
+  <span class="box-label">Committed scale</span>
+  July 2025 – June 2026 (a full contiguous year) · <strong>2,516</strong> stations in the roster
+  (<strong>1,672</strong> with full-year coverage) · the daily table underlying the weather work holds
+  <strong>788,979</strong> real per-(station, date) rows.
+</div>
+
+<h2>3. Data wrangling &amp; quality control</h2>
+<p>QC rules are fixed and documented in code (<span class="mono">pipeline/qc.py</span>). They are
+deliberately conservative and few, so they are auditable:</p>
+<ul>
+  <li><strong>Duration bounds.</strong> Trips under 60 s are dropped (false starts — undock/redock with
+  no real ride); trips over 4 h are dropped (a bike never cleanly redocked). </li>
+  <li><strong>Missing station IDs are kept and flagged, not dropped.</strong> A trip missing only its end
+  station still counts as a valid departure, and vice-versa. Because e-bikes can start or end outside the
+  formal station network, this is common — so station-level departures and arrivals do <em>not</em>
+  balance by construction. That is expected, not a bug.</li>
+  <li><strong>Coordinates.</strong> Station location is the <em>median</em> of its observed coordinates,
+  to absorb GPS noise.</li>
+</ul>
+
+<div class="box caveat">
+  <span class="box-label">A real contamination find, not a hypothetical</span>
+  While designing the multi-point weather step, three stations turned up in Citi Bike's own published S3
+  archive that do not belong to NYC: two named <span class="mono">"LA Metro Demo 2/3"</span> at real Los
+  Angeles coordinates (34.03, −118.25), and one (<span class="mono">"Bronx WH station"</span>, SYS018) at
+  (0, 0) — off the coast of Africa. All three had near-zero ridership but still inflated the station roster
+  and the subway-gap flag count. A generous NYC bounding box (lat 39.5–41.5, lng −75 to −73) now drops
+  any trip whose start or end falls outside it. This looks like internal warehouse/demo records leaking into
+  the public export — real upstream contamination, caught by looking, not assumed away.
+</div>
+
+<h2>4. From trips to the net-flow signal</h2>
+<p>For each <em>(station, month, day-type, hour)</em> bucket:
+<span class="mono">net = arrivals − departures</span>, then divided by the number of distinct calendar dates
+observed in that bucket to give a <strong>per-day rate</strong> (a month has far more weekdays than
+weekend days, so raw counts are not comparable across day types). Month curves roll up into seasons —
+<strong>winter</strong> Dec–Feb, <strong>spring</strong> Mar–May, <strong>summer</strong> Jun–Aug,
+<strong>fall</strong> Sep–Nov — and an all-period average. The number the dashboard shows for a given hour
+is that period's value; it carries a per-day unit even though it describes a single hour (the "/day"
+normalizes across dates, not across hours).</p>
+
+<h2>5. Feature engineering</h2>
+<p>The daily table (<span class="mono">daily_net_flow.parquet</span>) carries one row per
+(station, date, hour) so that <em>every row has its own real day's weather</em>, not a monthly average —
+a fix that mattered (Section 8). Features added for the model:</p>
+<ul>
+  <li><strong>Calendar:</strong> hour, day-of-week, month, and U.S. federal holidays (via the
+  <span class="mono">holidays</span> package).</li>
+  <li><strong>Weather:</strong> real daily temperature and precipitation, joined per date from the
+  station's own weather zone (Section 7).</li>
+  <li><strong>Station baseline:</strong> the station's own trailing mean flow — a strong, cheap feature.</li>
+  <li><strong>Typology label:</strong> the station's cluster (Section 6), refit <em>inside each fold's
+  training data only</em> so a held-out month never influences the label used to predict it.</li>
+</ul>
+
+<h2>6. Station typology — clustering on rhythm, not volume</h2>
+<p>Each station's 24-hour weekday curve is <strong>L2-normalized to a unit vector before clustering</strong>,
+so k-means groups stations by the <em>shape</em> of their day (drains AM / fills PM vs. the reverse), not by
+how busy they are. Clustering raw curves would let Euclidean distance be dominated by volume, answering
+"how busy" instead of "when does this station drain vs. fill."</p>
+<p><strong>k is chosen by silhouette score, not the elbow method</strong> — inertia falls monotonically as
+k grows (trivially minimized at k = n), while silhouette rewards separation from the next-nearest cluster,
+giving a real interior maximum to search:</p>
+<table>
+  <thead><tr><th>k</th><th class="num">2</th><th class="num">3</th><th class="num">4</th><th class="num">5</th><th class="num">6</th><th class="num">7</th><th class="num">8</th></tr></thead>
+  <tbody><tr><td>silhouette</td><td class="num">0.385</td><td class="num">0.314</td><td class="num">0.187</td><td class="num">0.140</td><td class="num">0.160</td><td class="num">0.155</td><td class="num">0.141</td></tr></tbody>
+  <caption>k = 2 is the clear maximum. Values from <span class="mono">flows.json</span> → <span class="mono">typology.silhouette_by_k</span>.</caption>
+</table>
+<table>
+  <thead><tr><th>Cluster</th><th class="num">Stations</th><th>Signature</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Commuter core</strong></td><td class="num">684</td><td>Fills in the AM, drains in the PM (office / job-center stations)</td></tr>
+    <tr><td><strong>Residential feeder</strong></td><td class="num">1,146</td><td>Drains in the AM, fills in the PM (where the commute starts)</td></tr>
+    <tr><td>Low signal (excluded)</td><td class="num">686</td><td>Curve too flat/noisy to normalize into a real shape → cluster −1</td></tr>
+  </tbody>
+  <caption>1,830 stations clustered; 686 of 2,516 excluded as low-signal (raw weekday L2 norm &lt; 1.0 bikes/day). Cluster centers are themselves 24-hour curves, so the taxonomy is auditable by inspection.</caption>
+</table>
+
+<h2>7. Multi-point weather — and an equity lesson in the method itself</h2>
+<p>Weather is read from <strong>18 fixed geographic zones</strong> (a <strong>6 km grid</strong> over the
+real station footprint), each fetched independently from Open-Meteo, so a station uses its own zone's
+weather rather than one city-wide reading.</p>
+<div class="box caveat">
+  <span class="box-label">Why a grid, not k-means</span>
+  The zones were originally k-means on station coordinates. Checked against the four equity-priority areas
+  this project cares about most, it <strong>skewed</strong>: dense South Bronx and Upper Manhattan landed
+  ~2–3 km from their zone centroid, but sparser East Queens and Southern Brooklyn were swept into distant,
+  station-dense zones 6–8 km away. Raising k to 8 did not fix it (East Queens still ~5 km off). K-means
+  balances zone <em>population</em>, which pulls centroids toward dense clusters — exactly the wrong bias
+  for equity-priority areas. A fixed geographic grid has no notion of station density, so it cannot be
+  pulled off course by it. Same lesson, later reused when evaluating depot data (Document 04).
+</div>
+
+<h2>8. The forecasting model — and its honest result</h2>
+<p>The model exists to answer one question under the baseline-first rule: <em>can a real model beat a
+plain seasonal-naive forecast out-of-sample?</em> Three tiers are compared:</p>
+<ol>
+  <li><strong>Seasonal-naive</strong> — tomorrow's hour-h flow is the trailing average for that
+  (station, month, day-type, hour). Fully reproducible with pandas alone. This is the benchmark to beat.</li>
+  <li><strong>GAM</strong> — a spline generalized additive model.</li>
+  <li><strong>Guarded GBM</strong> — a tuned gradient-boosting model with an explicit
+  <em>extrapolation guard</em>: once a prediction's temperature leaves the range the model was trained on,
+  it stops trusting the GBM and falls back to the GAM, then (past a wider margin) to the naive baseline.</li>
+</ol>
+<p>Two techniques make the comparison fair. <strong>Validation is a 12-fold walk-forward</strong>
+(leave-one-month-out over the full year), not a single split — a single split cannot tell "extrapolation
+failure" apart from "the model is just worse." And the GAM/GBM predict <strong>arrivals and departures as
+two independent non-negative count regressions (Poisson loss)</strong>, recombined as
+<span class="mono">predicted_net = arrivals − departures</span>; the naive baseline is not duplicated per
+target because averaging the two and subtracting is mathematically identical to averaging net directly
+(verified by a dedicated test, not asserted).</p>
+
+<div class="box fact">
+  <span class="box-label">Result — 12-fold walk-forward, mean MAE (bikes/day), lower is better</span>
+  <table style="margin:2mm 0 0 0;">
+    <thead><tr><th>Tier</th><th class="num">Mean MAE</th><th>vs. naive</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Seasonal-naive</strong></td><td class="num">1.954</td><td>— (benchmark)</td></tr>
+      <tr><td>GAM (splines)</td><td class="num">2.180</td><td>worse · p = 0.0024</td></tr>
+      <tr><td>Guarded (GBM + GAM + naive)</td><td class="num">2.096</td><td>worse · p = 0.012</td></tr>
+    </tbody>
+  </table>
+</div>
+<p><strong>The simple baseline wins, significantly, and it is not overturned.</strong> This is the honest
+headline. Fixing the earlier extrapolation problem (real per-date weather instead of monthly averages)
+did not flip the result — it just made the comparison statistically rigorous instead of a single lucky or
+unlucky split. Under the project's own rule, the complex model is <em>not</em> adopted, because it did not
+earn its complexity. The walk-forward table is shown in the dashboard so a reviewer sees this directly.</p>
+
+<h2>9. Weather &amp; capacity elasticities (Investigator Mode Phase 1)</h2>
+<p>Separate from the forecast, the tool estimates how a station's <em>flow magnitude</em> responds to
+temperature, precipitation, and dock capacity — the numbers behind the weather-scenario projection.
+Temp/precip is a <strong>direct joint linear regression</strong> of real per-(station, date) daily flow
+magnitude on real daily temperature and precipitation; each coefficient carries a 95% confidence interval.</p>
+<table>
+  <thead><tr><th>Typology group</th><th class="num">Temp (per °C)</th><th class="num">Precip (per mm)</th><th class="num">Capacity</th><th class="num">Daily obs.</th></tr></thead>
+  <tbody>
+    <tr><td>Commuter core</td><td class="num surplus-txt">+0.034</td><td class="num deficit-txt">−0.017</td><td class="num">+0.019</td><td class="num">230,915</td></tr>
+    <tr><td>Residential feeder</td><td class="num surplus-txt">+0.037</td><td class="num deficit-txt">−0.018</td><td class="num">+0.014</td><td class="num">385,102</td></tr>
+  </tbody>
+  <caption>Unitless: fractional change in typical |net flow| per 1-unit change in the feature. Warmer ⇒ more flow; rain ⇒ less. All six point estimates have 95% CIs that exclude zero.</caption>
+</table>
+<div class="box caveat">
+  <span class="box-label">A confound found and controlled — but honestly not made causal</span>
+  A first capacity pass produced a <em>positive</em> elasticity in both groups — the opposite of the
+  expected direction. Rather than ship it, the cause was checked: capacity and flow magnitude correlate at
+  <strong>r ≈ 0.68–0.74</strong>, because DOT assigns busier stations more docks <em>and</em> busier stations
+  independently swing more. Adding real ridership throughput as a third regression term and evaluating the
+  capacity effect holding throughput fixed controls for that one confound. It does <strong>not</strong> make
+  the estimate causal — it is still a cross-sectional comparison across different stations, not a
+  "capacity changed at one station, here is what happened" measurement (which a public-data-only stack cannot
+  observe). The output's own notes say so.
+</div>
+
+<h2>10. Route planner &amp; fleet simulator</h2>
+<p>Overnight truck tours (<span class="mono">plan_routes.py</span>) are a greedy nearest-neighbor heuristic
+over stations flagged by their forecast AM net flow (hours 6–9). It is explicitly a prototype: the JSON
+contract is designed so an OR-Tools CVRP solver drops in without downstream changes. Two realism guards are
+written into the output so a reviewer sees them: a <strong>depot assumption</strong> (each truck starts at
+the largest remaining surplus station — a stopgap, since no public depot-location data exists) and a
+<strong>45-stop per-truck cap</strong> (a rough single-shift budget; without it, one truck once planned a
+2,142-stop city-spanning tour).</p>
+<div class="box fact">
+  <span class="box-label">Fleet finding — marginal benefit does <em>not</em> diminish here</span>
+  Of <strong>1,037</strong> AM-deficit and <strong>615</strong> AM-surplus flagged stations, 1 truck
+  services 14 deficit / 9 surplus; 10 trucks service 145 deficit / 111 surplus — very close to
+  <strong>10×</strong>, not a diminishing curve. Every truck hits its own 45-stop cap before running out of
+  flagged stations, so the binding constraint is per-truck stop budget, not overall demand. A result worth
+  stating precisely <em>because</em> it contradicts the intuitive "5th truck helps less than the 1st."
+</div>
+
+<h2>11. Equity join</h2>
+<p>Plain haversine nearest-neighbor from every station to each facility layer (brute force — the station ×
+facility product is a few million operations, no spatial index needed). Thresholds are fixed:
+<strong>≤ 300 m</strong> to a NYCHA development or school flags proximity; <strong>≥ 800 m</strong> to the
+nearest subway entrance flags a transit gap. The raw distances (not just the flags) are written per station,
+so Investigator Mode can recompute counts live at any threshold.</p>
+<div class="box caveat">
+  <span class="box-label">A vintage caveat that travels with the data</span>
+  The school layer is the <strong>2019–2020</strong> DOE school-locations dataset — confirmed (re-checked
+  2026-07-23, not assumed) to be the only row-queryable, coordinate-bearing school dataset still served by
+  NYC Open Data; the current layer is GIS-only and rejects row queries. Because this layer is the most likely
+  of the three to have drifted, its vintage label is attached to the data and surfaced anywhere school-proximity
+  numbers appear, not just noted here.
+</div>
+
+<h2>12. Verification &amp; reproducibility</h2>
+<p>Two independent safety nets back every number:</p>
+<ul>
+  <li><strong>Ground-truth spot checks</strong> (<span class="mono">spot_check.py</span>) assert the output
+  against facts a reviewer can verify without this repo — the Financial District behaves like an office
+  district, Stuyvesant Town like a purely residential complex, Thanksgiving like a holiday, winter ridership
+  below summer. None use the pipeline's own cluster labels (that would be circular). Failures are findings to
+  report, never thresholds to quietly loosen.</li>
+  <li><strong>One-command reproduction</strong> (<span class="mono">reproduce_all.py</span>) re-derives every
+  artifact from the committed data (<span class="mono">--skip-download</span>, the fast path) or from nothing
+  but public data (full path, several GB).</li>
+</ul>
+<div class="box note">
+  <span class="box-label">One reproducibility caveat, stated plainly</span>
+  The live GBFS feed is a <em>current</em> snapshot with no historical archive, so capacity-derived numbers in
+  <span class="mono">elasticities.json</span> drift slightly on every run by design. This was found and fixed
+  once when the committed file turned out to have been built against a snapshot 9 days stale. Everything else —
+  trip archives, Open-Meteo history, the fixed weather grid — reproduces identically. The automated test suite:
+  <strong>155 passed, 3 skipped.</strong>
+</div>
+
+<h2>13. What the EDA and analyses actually showed</h2>
+<ul>
+  <li><strong>Strong seasonal amplitude.</strong> January net-flow magnitude runs at roughly half of July's —
+  the reason the whole tool slices by season/month rather than showing a year-round average.</li>
+  <li><strong>Two dominant rhythms, cleanly separated.</strong> Silhouette peaks sharply at k = 2: the city's
+  stations divide into commuter-core (fills AM) and residential-feeder (drains AM), with a long tail of
+  low-signal stations that genuinely have no strong rhythm.</li>
+  <li><strong>Weather effects are real but modest and directionally sensible</strong> (warm ⇒ more, rain ⇒ less),
+  at a few percent per unit.</li>
+  <li><strong>The simple forecast is hard to beat</strong> (Section 8) — the single most important analytic
+  finding, and the one the tool is built to display rather than bury.</li>
+  <li><strong>An arrivals/departures split was tried and honestly lost.</strong> Predicting the two sides
+  separately and recombining did not beat predicting net directly for the naive baseline (it is an identity),
+  and did not rescue the model tiers either — reported as a negative result, not hidden.</li>
+</ul>
+
+<h2>14. Limitations — stated plainly</h2>
+<ul>
+  <li><strong>Invisible demand.</strong> Net flow cannot see the trips that did not happen because a station
+  was empty or full. It is a demand-pressure proxy; the live GBFS layer is the complement.</li>
+  <li><strong>No operator truck moves.</strong> Trip data omits rebalancing-truck moves, so net flow measures
+  demand pressure, not observed service failures. Joining the (non-public) truck logs is a day-one-on-the-job task.</li>
+  <li><strong>Route planner is a greedy heuristic.</strong> Realistic <em>within-budget</em> optimization is the
+  OR-Tools CVRP upgrade path, not yet built.</li>
+  <li><strong>Capacity elasticity is cross-sectional, not causal</strong> (Section 9).</li>
+  <li><strong>Weather scenarios are elasticity estimates, not a weather-specific model</strong> — and the panel says so.</li>
+  <li><strong>GBFS density.</strong> The live-failure log behind a deferred "dock capacity sandbox" (Phase 5)
+  has not yet accumulated enough real snapshots to be statistically useful.</li>
+  <li><strong>School layer vintage</strong> (Section 11).</li>
+</ul>
+
+<h2>15. Where it goes next</h2>
+<ul class="two-col">
+  <li><strong>OR-Tools CVRP</strong> router on the same JSON contract, replacing the greedy heuristic.</li>
+  <li><strong>Per-station SARIMA with confidence intervals</strong>, where interpretable intervals drive staffing.</li>
+  <li><strong>E-bike vs. classic split</strong> — a one-line groupby on the existing <span class="mono">rideable_type</span>.</li>
+  <li><strong>Dock-capacity sandbox (Phase 5)</strong> once the GBFS failure log reaches its density target.</li>
+  <li><strong>Power BI port</strong> — the flows table is deliberately tidy (station × day-type × hour) to drop into the DOT stack.</li>
+  <li><strong>Truck-log join</strong> to convert demand-pressure proxy into observed service performance.</li>
+</ul>
+
+<div class="footnote">
+  Citi Bike Rebalancing Explorer — Documentation Set v2 · Document 02 of 04 ·
+  Next: <strong>03 — Dashboard Design, Modes &amp; Metrics.</strong>
+</div>
+
+</body>
+</html>

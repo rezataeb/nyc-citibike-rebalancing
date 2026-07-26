@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Citi Bike Rebalancing Explorer — Documentation Set</title>
+<link rel="stylesheet" href="assets/report.css">
+</head>
+<body>
+
+<section class="cover">
+  <div class="eyebrow">Citi Bike Rebalancing Explorer · Documentation Set v2</div>
+  <div class="docnum">Document 00 — Index &amp; Reading Order</div>
+  <h1>Where and when does station imbalance become a barrier to riding — and what should NYC DOT do about it?</h1>
+  <div class="subtitle">A four-part written record of a self-directed, public-data-only prototype:
+    the problem it frames, the data and models behind it, the dashboard that presents it,
+    and the process that built it.</div>
+  <div class="meta">
+    <div><b>Audience:</b> NYC DOT Bike Share &amp; Shared Mobility reviewers, and anyone evaluating the project end-to-end.</div>
+    <div><b>Scope:</b> 100% public data (Citi Bike trip archives &amp; GBFS, NYC/NY Open Data, Open-Meteo). $0 hosting stack.</div>
+    <div><b>Status:</b> Working prototype. Every number in these documents is reproduced from committed data files by code in <span class="mono">pipeline/</span>.</div>
+    <div><b>Prepared:</b> July 2026. Independent portfolio project — not an official product of NYC DOT or Lyft / Citi Bike.</div>
+  </div>
+</section>
+
+<h2>How to read this set</h2>
+<p class="lead">The four documents are meant to be read in order. Each answers a different question and
+assumes you have read the ones before it — together they move from <em>why the project exists</em>
+to <em>how it works</em>, to <em>what a user sees</em>, and finally to <em>how it was built</em>.</p>
+
+<h3><span class="tocnum">Document 01</span> — Problem, Use Case &amp; Solution</h3>
+<p>The starting point. What imbalance is, why it is a mode-choice barrier rather than only an
+operations metric, who the intended user is, what data the project stands on, and the three concrete
+things the tool lets that user do. Read this first: it frames every decision the later documents explain.</p>
+
+<h3><span class="tocnum">Document 02</span> — Data, Methods, Modeling, EDA, Findings &amp; Limitations</h3>
+<p>The engine room. The datasets and how they are cleaned; how raw trips become a net-flow signal;
+the features and the three-tier forecasting model; the station typology, equity join, weather
+elasticities, and route planner; the honest findings (including where a simple baseline beats the
+fancy model); the limitations stated plainly; and the roadmap. Read this to trust the numbers.</p>
+
+<h3><span class="tocnum">Document 03</span> — Dashboard Design, Modes &amp; Metrics</h3>
+<p>The product. How the analysis is turned into something a reviewer can operate: the two data modes,
+the map and its color logic, the permanent readout and ranked lists, Investigator Mode's what-if
+sandbox, and exactly which metrics appear where and what each one means. Read this to understand
+the interface.</p>
+
+<h3><span class="tocnum">Document 04</span> — Lessons Learned: AI Collaboration &amp; System-Design Process</h3>
+<p>The retrospective. How the project was actually built — working with an AI assistant under a fixed
+set of standing rules, a verify-before-claiming discipline, and a one-module-per-session cadence.
+Reusable practices for AI-assisted development and for designing a small, honest data system.
+Read this last: it is the meta-layer over everything above.</p>
+
+<div class="box note">
+  <span class="box-label">One rule governs all four documents</span>
+  Never invent numbers. Every figure quoted here is derived from a committed data file
+  (<span class="mono">data/*.json</span>, <span class="mono">data/*.parquet</span>) by code in
+  <span class="mono">pipeline/</span>, and is reproducible with <span class="mono">python3 -m pipeline.reproduce_all</span>.
+  Where a number is a <em>proxy</em> or a <em>simplifying assumption</em> rather than a direct
+  measurement, it is labeled as such in the text, not smoothed over.
+</div>
+
+<div class="footnote">
+  Citi Bike Rebalancing Explorer — Documentation Set v2 · Document 00 of 04 ·
+  Public-data prototype, not an official NYC DOT product.
+</div>
+
+</body>
+</html>

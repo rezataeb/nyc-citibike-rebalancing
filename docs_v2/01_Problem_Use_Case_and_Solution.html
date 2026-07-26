@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>01 — Problem, Use Case &amp; Solution</title>
+<link rel="stylesheet" href="assets/report.css">
+</head>
+<body>
+
+<section class="cover">
+  <div class="eyebrow">Citi Bike Rebalancing Explorer · Documentation Set v2</div>
+  <div class="docnum">Document 01 — Problem, Use Case &amp; Solution</div>
+  <h1>Station imbalance as a barrier to mode choice</h1>
+  <div class="subtitle">What the problem is, who the tool is for, the data it stands on,
+    and the three concrete things it lets a reviewer do.</div>
+  <div class="meta">
+    <div><b>Read first.</b> This document frames the decisions that Documents 02–04 explain in depth.</div>
+    <div><b>Companion documents:</b> 02 (data &amp; methods), 03 (dashboard), 04 (process &amp; lessons).</div>
+    <div><b>Prepared:</b> July 2026 · Independent portfolio project · public data only.</div>
+  </div>
+</section>
+
+<h2>1. The one question</h2>
+<p class="lead">Every part of this project exists to answer a single question:</p>
+<div class="box note">
+  <span class="box-label">Framing question</span>
+  <strong>Where and when does station imbalance — no bikes to pick up, or no docks to return to —
+  create a physical barrier to choosing bike share, and how can NYC DOT prioritize rebalancing and
+  expansion investment using data it already collects?</strong>
+</div>
+<p>The emphasis on <em>barrier to choosing</em> is deliberate. An empty or full station is usually
+discussed as an operations nuisance — a metric for the rebalancing team to chase. This project
+reframes it as an <strong>access</strong> problem: a rider who reaches for a bike and finds none,
+or arrives and finds nowhere to dock, has just been told — physically — that bike share is not
+reliably available to them. If that happens often enough at the stations serving a given
+neighborhood, the mode stops being a real option for the people there. That is a transportation-equity
+question, not only a logistics one.</p>
+
+<h2>2. Why imbalance is hard to see, and why that matters</h2>
+<p>The central measurement difficulty shapes the entire design, so it is worth stating plainly and up front:</p>
+<div class="box caveat">
+  <span class="box-label">The invisible-demand problem</span>
+  Trip data cannot record the trips that <em>did not happen</em> because a station was empty when
+  someone wanted a bike, or full when they wanted to dock. Those are exactly the failures that matter
+  most for access — and they leave no row in the trip archive. Chronic imbalance therefore
+  <strong>understates</strong> the true access problem, rather than overstating it.
+</div>
+<p>Two consequences follow, and both are built into the tool rather than hidden:</p>
+<ul>
+  <li><strong>Net flow is a proxy, not a ground-truth failure count.</strong> The historical layer
+  measures <em>demand pressure</em> — the imbalance the demand pattern would create absent perfect
+  rebalancing — not observed empty-minutes. It is an honest, reproducible proxy, and it is labeled
+  as one wherever it appears.</li>
+  <li><strong>A live layer complements the historical one.</strong> The dashboard also reads the
+  public real-time feed (GBFS) so a reviewer can see the actual current fill state of every dock,
+  which is the closest thing to observing the failure directly.</li>
+</ul>
+
+<h2>3. Who this is for</h2>
+<p>The intended reader is the <strong>NYC DOT Bike Share &amp; Shared Mobility team</strong>, and more
+broadly anyone deciding where rebalancing effort and network-expansion dollars should go. The tool is
+built to support three real decisions that audience makes:</p>
+<dl>
+  <dt>Rebalancing prioritization</dt>
+  <dd>Which stations, in which hours, are chronically short of bikes or short of docks — so
+  overnight pre-positioning and daytime rebalancing can be aimed where the pressure actually is.</dd>
+  <dt>Expansion &amp; equity targeting</dt>
+  <dd>Whether the stations under the most pressure are the ones serving equity-priority populations
+  (near NYCHA developments and schools, or in transit-gap areas far from a subway entrance).</dd>
+  <dt>Intervention sizing</dt>
+  <dd>What a change would plausibly do before committing to it — more trucks, a weather scenario,
+  a different equity threshold — tested against the real data, in the browser.</dd>
+</dl>
+
+<h2>4. The data the project stands on</h2>
+<p>Everything is derived from <strong>public data, with no API keys and a $0 hosting stack</strong>.
+That constraint is a feature: it means the entire analysis is reproducible by anyone and cannot
+depend on data the DOT team does not already have or cannot obtain.</p>
+
+<table>
+  <thead>
+    <tr><th>Source</th><th>What it provides</th><th>Role in the tool</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Citi Bike trip archives</strong> (S3)</td><td>Every completed trip: start/end station, timestamps, rideable type</td><td>The historical net-flow signal — the map's core layer</td></tr>
+    <tr><td><strong>Citi Bike GBFS</strong> (real-time feed)</td><td>Live per-station bikes &amp; docks available; station roster &amp; capacity</td><td>The live dock-status layer, and station capacity for elasticities</td></tr>
+    <tr><td><strong>NYC Open Data</strong></td><td>NYCHA development footprints; DOE school locations</td><td>Per-station equity context (proximity to NYCHA / schools)</td></tr>
+    <tr><td><strong>NY State Open Data</strong></td><td>MTA subway entrances &amp; exits (2024)</td><td>Per-station transit-gap context (distance to nearest subway)</td></tr>
+    <tr><td><strong>Open-Meteo</strong> (historical archive)</td><td>Real daily temperature &amp; precipitation, by location</td><td>Weather features for the model and the weather-scenario elasticities</td></tr>
+  </tbody>
+  <caption>All sources are public and key-free. Dataset IDs and endpoints are documented in <span class="mono">pipeline/</span>.</caption>
+</table>
+
+<div class="box fact">
+  <span class="box-label">Scale of the committed dataset</span>
+  <strong>12 months</strong> of real trips — July 2025 through June 2026, a full contiguous year —
+  aggregated across <strong>2,516 stations</strong> in the station roster. The weather regression alone
+  is fit on <strong>788,979</strong> real per-(station, date) observations spanning
+  <strong>435 distinct daily temperatures</strong> from −14.3 °C to 32.3 °C. These are counts from the
+  committed data files, not estimates.
+</div>
+
+<h2>5. The core signal, in one paragraph</h2>
+<p>For every station, hour of day, day type (weekday / weekend), and calendar month, the pipeline
+computes <strong>net flow = arrivals − departures</strong>, normalized to a per-day rate (so a month's
+many weekdays and few weekend days are comparable). A persistently <span class="deficit-txt">negative</span>
+morning value means the station <em>drains</em> — riders arrive to find no bikes (a deficit / supply
+failure). A persistently <span class="surplus-txt">positive</span> value means it <em>fills</em> — riders
+arrive to find no open docks (a surplus / dock-scarcity failure). That single signed number, sliced by
+time and season, is what the map colors. Document 02 explains exactly how it is built and validated.</p>
+
+<h2>6. The solution — three things the tool lets you do</h2>
+<p class="lead">The prototype is not a report; it is an interactive instrument. It supports the three
+decisions from Section 3 through three capabilities.</p>
+
+<h3>6.1 See where and when imbalance concentrates</h3>
+<p>A map of every station, colored by net flow, with a 24-hour time slider, a weekday/weekend toggle,
+and a season/month selector. Slicing by time is not decoration: NYC bike-share demand in January runs
+at roughly half of July's amplitude, and warm-month evening peaks run later — so a year-round average
+would forecast both months wrong. The same map switches to a <strong>live dock-status</strong> layer
+that reads the real-time GBFS feed at view time.</p>
+
+<h3>6.2 Rank and prioritize — with equity context attached</h3>
+<p>The dashboard surfaces the stations under the most pressure right now as two ranked lists
+(<em>most bikes needed</em>, <em>most docks needed</em>), and attaches per-station equity context to
+every station: its nearest NYCHA development, school, and subway entrance, with real distances. A
+permanent readout keeps the population-level counts in view — for example, at the default thresholds,
+how many stations sit within 300 m of a NYCHA development or school, and how many are more than 800 m
+from any subway entrance.</p>
+
+<div class="box note">
+  <span class="box-label">A deliberate scope boundary</span>
+  Equity context is shown <strong>per station</strong> — in the detail panel, in tooltips, in the
+  ranked lists — but the tool intentionally has <strong>no map-level "equity filter"</strong> that
+  recolors or hides the whole map by equity status. This is a standing design decision (recorded in the
+  project's working rules), not an omission. The goal is to let imbalance be <em>read against</em> the
+  access agenda, not to reduce the map to a single equity toggle.
+</div>
+
+<h3>6.3 Simulate an intervention before committing to it — "Investigator Mode"</h3>
+<p>A what-if sandbox lets a reviewer test three kinds of change against the real data, entirely in the
+browser (every control reads a precomputed file — nothing re-runs a model live):</p>
+<ul>
+  <li><strong>Fleet size</strong> (1–10 rebalancing trucks) → how many deficit/surplus stations get serviced.</li>
+  <li><strong>Weather scenario</strong> (temperature &amp; precipitation, or a preset) → how each station's flow is projected to shift.</li>
+  <li><strong>Equity thresholds</strong> (NYCHA/school proximity, subway gap) → how the flagged population changes, recomputed live.</li>
+</ul>
+<p>A running diff bar summarizes baseline-vs-scenario for all three at once, and any scenario can be
+saved to a shareable URL. Document 03 walks through the interface; Document 02 explains what each
+control is actually computing.</p>
+
+<h2>7. A preview of the honest findings</h2>
+<p>Document 02 reports the results in full, but three of them define the project's character and are
+worth stating here, because the tool was built to surface them rather than hide them:</p>
+<table>
+  <thead><tr><th>Finding</th><th>What it means</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>The simple baseline <strong>wins</strong></td>
+      <td>A season-aware seasonal-naive forecast beats both a spline GAM and a tuned gradient-boosting
+      model out-of-sample (mean MAE <span class="mono">1.95</span> vs <span class="mono">2.18</span> and
+      <span class="mono">2.10</span> bikes/day, statistically significant). The complex model is not
+      adopted, because it did not earn its complexity.</td>
+    </tr>
+    <tr>
+      <td>More trucks help <strong>linearly, not with diminishing returns</strong></td>
+      <td>At this network's scale, every truck hits its own single-shift stop cap long before running
+      out of flagged stations — so the binding constraint is per-truck stop budget, not overall demand.
+      A counter-intuitive result, checked against the data rather than assumed.</td>
+    </tr>
+    <tr>
+      <td>Weather effects are real but modest</td>
+      <td>Warmer days lift flow magnitude and rain suppresses it, at plausible sizes — but the projection
+      is an elasticity estimate from history, explicitly <em>not</em> a weather-specific model, and says so.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>8. What this deliberately is <em>not</em></h2>
+<ul>
+  <li><strong>Not an official product.</strong> It is an independent, self-directed prototype, not
+  affiliated with or endorsed by NYC DOT or Lyft / Citi Bike.</li>
+  <li><strong>Not a real-time operations console.</strong> The historical analysis is a planning and
+  prioritization instrument; the live layer is a current-state view, not a dispatch system.</li>
+  <li><strong>Not a ground-truth failure meter.</strong> Net flow is a demand-pressure proxy; the tool
+  says so wherever the number appears, and pairs it with the live layer for the real current state.</li>
+  <li><strong>Not a black box.</strong> Every derived number is reproducible from public data by code in
+  <span class="mono">pipeline/</span>; the models are deliberately auditable (see Document 02).</li>
+</ul>
+
+<div class="footnote">
+  Citi Bike Rebalancing Explorer — Documentation Set v2 · Document 01 of 04 ·
+  Next: <strong>02 — Data, Methods, Modeling, EDA, Findings &amp; Limitations.</strong>
+</div>
+
+</body>
+</html>

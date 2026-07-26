@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>03 — Dashboard Design, Modes &amp; Metrics</title>
+<link rel="stylesheet" href="assets/report.css">
+</head>
+<body>
+
+<section class="cover">
+  <div class="eyebrow">Citi Bike Rebalancing Explorer · Documentation Set v2</div>
+  <div class="docnum">Document 03 — Dashboard Design, Modes &amp; Metrics</div>
+  <h1>The product</h1>
+  <div class="subtitle">How the analysis becomes something a reviewer can operate: the layout, the two
+    data modes, the map's color logic, the ranked readouts, Investigator Mode, and exactly which metric
+    appears where and what each one means.</div>
+  <div class="meta">
+    <div><b>Assumes:</b> Documents 01 (the problem) and 02 (what the numbers are and how they are built).</div>
+    <div><b>Subject:</b> the evolved v2 dashboard — a single self-contained HTML page, no build step, no server-side code.</div>
+    <div><b>Prepared:</b> July 2026 · public-data prototype.</div>
+  </div>
+</section>
+
+<h2>1. Design principles</h2>
+<p class="lead">The interface follows a small set of rules that keep it honest and legible under the same
+constraints as the analysis.</p>
+<dl>
+  <dt>Map-left, rail-right</dt>
+  <dd>The map stays visible at all times (no bottom-sheet covering it); the right rail is a real fixed
+  column of readouts and controls, not a hidden drawer.</dd>
+  <dt>One visual system</dt>
+  <dd>A single diverging color scale means the same thing everywhere — <span class="deficit-txt">red</span>
+  is "runs empty" (deficit), <span class="surplus-txt">blue</span> is "runs full" (surplus), in both data modes.</dd>
+  <dt>Precomputed, never live-computed</dt>
+  <dd>Every control reads a precomputed JSON file. Nothing re-runs a model in the browser — the page is a
+  viewer over reproducible outputs, which is what lets it run on a $0 static host.</dd>
+  <dt>Graceful degradation</dt>
+  <dd>Any optional layer whose data file fails to load simply does not appear, rather than breaking the page.
+  If the historical data is missing entirely, a clearly-labeled illustrative demo layer stands in, with an
+  on-screen banner saying so.</dd>
+</dl>
+
+<h2>2. The two data modes</h2>
+<p>A single top-bar toggle switches the entire map between two sources. They answer different questions and
+use different underlying quantities, so the legend re-labels itself when you switch:</p>
+<table>
+  <thead><tr><th>Mode</th><th>Underlying metric</th><th>Answers</th><th>Legend reads</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Historical flow</strong> (default)</td><td>Net daily flow (bikes/day) for the selected hour</td><td>Where does imbalance <em>chronically</em> concentrate?</td><td>Net daily flow · −2.7 … 0 … +2.7</td></tr>
+    <tr><td><strong>Live docks</strong></td><td>Dock fill % (bikes ÷ capacity) from GBFS</td><td>What is the <em>actual current</em> fill state?</td><td>Dock fill · 0% … 100%</td></tr>
+  </tbody>
+  <caption>The two are genuinely different quantities (a modeled per-day rate vs. a real-time percentage), so the tool never blends them into one number — it re-labels the scale instead.</caption>
+</table>
+
+<h2>3. The map and its color logic</h2>
+<p>Stations are drawn as markers colored by a <strong>5-class diverging ramp</strong> (ColorBrewer RdBu-5):
+deep red → light red → near-neutral → light blue → deep blue. Discrete classes, not a continuous gradient,
+so the legend can match the map exactly and small markers stay readable.</p>
+<div class="box note">
+  <span class="box-label">The scale is a real computed statistic, not a round number</span>
+  The endpoints are ± the 95th percentile of |net flow| across every station, hour, and period —
+  currently <strong>≈ 2.74 bikes/day</strong> (shown as ±2.7). Anchoring on the p95 (with a small floor)
+  means the deepest colors mark genuinely unusual imbalance, without a handful of extreme outliers washing
+  everything else pale.
+</div>
+<p>Two refinements make the map readable at NYC's station density:</p>
+<ul>
+  <li><strong>The "balanced" class recedes.</strong> Near-zero stations are drawn faint, with a soft gray
+  stroke rather than white, so they fade into the background instead of competing with the stations that
+  actually need attention — and, critically, so they do not vanish white-on-white against the pale basemap.</li>
+  <li><strong>View follows zoom.</strong> At a city-wide zoom the ~2,500 markers would over-plot into a solid
+  mass, so the map starts in <strong>Grouped</strong> view (clustered counts) and auto-switches to
+  <strong>Individual</strong> markers at street zoom (z ≥ 14). A manual Individual/Grouped toggle overrides
+  the auto-switch when the user wants control. Selecting a station grows its marker and darkens its ring so
+  the colored fill stays visible rather than being swamped by the highlight.</li>
+</ul>
+
+<h2>4. Time and slice controls</h2>
+<ul>
+  <li><strong>24-hour time slider</strong> with a play button that animates through the day (paused by
+  default, and it respects reduced-motion preferences).</li>
+  <li><strong>Weekday / Weekend</strong> toggle.</li>
+  <li><strong>Period selector</strong> — all-period average, each season, or each individual analysis month —
+  built directly from the data's own coverage, so it never offers a slice the data cannot support.</li>
+</ul>
+<p>The slider sits in a compact bar centered along the bottom of the map, on the same row as the legend, so
+the bottom edge reads as one control strip.</p>
+
+<h2>5. The permanent readout — headline numbers always in view</h2>
+<p>Above the interactive controls, four tiles keep the population-level picture visible without any
+interaction. At the default settings they read (all reproduced from the committed data):</p>
+<table>
+  <thead><tr><th>Tile</th><th class="num">Value</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td>AM deficit stations</td><td class="num">1,037</td><td>Stations flagged short of bikes across the 6–9 AM commute window</td></tr>
+    <tr><td>Near NYCHA / school</td><td class="num">1,585 / 2,516</td><td>Within 300 m of a NYCHA development or school (default threshold)</td></tr>
+    <tr><td>Beyond subway gap</td><td class="num">357</td><td>More than 800 m from the nearest subway entrance (default threshold)</td></tr>
+    <tr><td>Current map filter</td><td class="num">—</td><td>Echoes the active hour / day-type / period so a screenshot is self-describing</td></tr>
+  </tbody>
+  <caption>Equity tiles recompute live as the Investigator Mode thresholds move — they are not baked-in constants.</caption>
+</table>
+
+<h2>6. "Worst now" — two ranked, clickable lists</h2>
+<p>The stations under the most pressure right now, surfaced as the keyboard- and screen-reader-accessible
+equivalent of the map (there is otherwise no keyboard path to 2,516 SVG circles). Split into two lists so
+each is internally comparable:</p>
+<ul>
+  <li><strong>Most bikes needed</strong> — the 8 largest <span class="deficit-txt">deficits</span> (drawn red).</li>
+  <li><strong>Most docks needed</strong> — the 8 largest <span class="surplus-txt">surpluses</span> (drawn blue).</li>
+</ul>
+<p>They were deliberately split from a single magnitude-ranked list: a full-dock station is not "worst" in
+the same sense as an empty one, and mixing them hid which problem a station actually had. Clicking an entry
+flies the map to that station and opens its detail panel.</p>
+
+<h2>7. Investigator Mode — the what-if sandbox</h2>
+<p>The tool's differentiator, open by default so a first-time viewer sees it. A running
+<strong>diff bar</strong> summarizes baseline-vs-scenario for all three controls at once — zero-centered
+bars encoding the <em>change</em>, not the absolute level — and stays visible even when the panel is
+collapsed, so an active non-default scenario is never lost. Below it, four collapsible sections:</p>
+<table>
+  <thead><tr><th>Control</th><th>What it does</th><th>Reads</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Equity thresholds</strong></td><td>Two sliders (NYCHA/school proximity, subway gap) recompute the flagged counts live from each station's real distances</td><td><span class="mono">flows.json</span> context</td></tr>
+    <tr><td><strong>Fleet simulator</strong></td><td>A 1–10-truck slider swaps in a precomputed scenario and redraws the real route on the map</td><td><span class="mono">fleet_scenarios.json</span></td></tr>
+    <tr><td><strong>Weather scenario</strong></td><td>Temperature/precipitation sliders (or a preset) project each station's flow through its own elasticity; the map recolors live</td><td><span class="mono">elasticities.json</span></td></tr>
+    <tr><td><strong>Load a shared scenario</strong></td><td>Paste a shared link to re-apply a saved scenario</td><td>URL state</td></tr>
+  </tbody>
+  <caption>Weather presets: Ideal (22.2 °C), Steady rain (15.6 °C / 10.2 mm), Snow event (−2.2 °C / 7.6 mm), Hot day (31.0 °C). Every value is inside the real observed range.</caption>
+</table>
+<div class="box caveat">
+  <span class="box-label">Honesty built into the control itself</span>
+  The weather panel states in place that its projection is <em>estimated from historical elasticity, not a
+  weather-specific model</em>, and names the 18-zone 6 km grid it reads from. The fleet panel states that
+  added trucks do not show diminishing returns at this scale because each truck hits its 45-stop shift cap.
+  These are not footnotes — they sit next to the sliders.
+</div>
+
+<h2>8. Station detail</h2>
+<p>Selecting any station (on the map or from a ranked list) opens a detail card: its name and typology role,
+a 24-hour <strong>flow-rhythm strip</strong> (the same signed curve the map colors, drawn small), and its
+<strong>per-station equity context</strong> — nearest NYCHA development, school, and subway entrance, each
+with a real distance. This is where per-station equity lives, by design (Document 01, §6.2). A "More info"
+disclosure holds the cluster typology and the school-layer vintage note.</p>
+
+<h2>9. Model performance panel</h2>
+<p>A small, quiet disclosure near the footer holds the real walk-forward result from Document 02 — the
+three-tier MAE table showing the seasonal-naive baseline winning. It is intentionally low-emphasis (a static
+reference, read once) but it is <em>present</em>: the tool shows the reviewer the evidence that its own
+forecast is the simple one, rather than asserting sophistication it did not earn.</p>
+
+<h2>10. Metric reference — what appears where</h2>
+<table>
+  <thead><tr><th>Metric</th><th>Where</th><th>Unit / scale</th><th>Source</th></tr></thead>
+  <tbody>
+    <tr><td>Net daily flow</td><td>Map markers (historical), detail strip, legend</td><td>bikes/day, ±2.7 (p95)</td><td><span class="mono">flows.json</span></td></tr>
+    <tr><td>Dock fill %</td><td>Map markers (live)</td><td>0–100%</td><td>GBFS live</td></tr>
+    <tr><td>AM-deficit count</td><td>Readout tile</td><td>count (1,037)</td><td><span class="mono">route.json</span></td></tr>
+    <tr><td>Equity proximity counts</td><td>Readout tiles; equity sliders</td><td>counts (live)</td><td><span class="mono">flows.json</span> context</td></tr>
+    <tr><td>Worst-now rankings</td><td>Two ranked lists</td><td>top 8 each, bikes/day</td><td><span class="mono">flows.json</span></td></tr>
+    <tr><td>Fleet serviced</td><td>Fleet panel; diff bar</td><td>stations serviced</td><td><span class="mono">fleet_scenarios.json</span></td></tr>
+    <tr><td>Weather projection</td><td>Weather panel; map recolor</td><td>% shift in magnitude</td><td><span class="mono">elasticities.json</span></td></tr>
+    <tr><td>Forecast MAE (3 tiers)</td><td>Model performance panel</td><td>bikes/day (1.95 / 2.18 / 2.10)</td><td><span class="mono">model_performance.json</span></td></tr>
+  </tbody>
+</table>
+
+<h2>11. Accessibility &amp; responsiveness</h2>
+<ul>
+  <li><strong>WCAG AA color contrast</strong> — muted text colors were audited against their real
+  backgrounds and darkened until every one clears 4.5:1.</li>
+  <li><strong>Real keyboard operation</strong> — the segmented mode/view/day toggles are true ARIA
+  radiogroups with arrow-key navigation (not just roles), and the ranked lists give a keyboard path to any
+  station. The hour slider exposes a formatted <span class="mono">aria-valuetext</span> ("8:00 AM", not "8").</li>
+  <li><strong>Touch targets &amp; motion</strong> — controls grow to 44 px on touch pointers; animation is
+  disabled under <span class="mono">prefers-reduced-motion</span>.</li>
+  <li><strong>Mobile layout</strong> — the map becomes sticky so it stays visible while the controls scroll,
+  the masthead compacts, and Investigator Mode is promoted to the top of the mobile rail so the differentiator
+  is not buried.</li>
+</ul>
+
+<div class="box note">
+  <span class="box-label">Note on design iteration</span>
+  The v2 design described here is being refined in a parallel dashboard file so the original stays intact
+  while changes are validated (headless-browser behavior checks and screenshots per change). Which file
+  becomes the single shipped dashboard is a decision reserved for the end of the project — the design
+  principles and metric contract in this document apply to whichever one ships.
+</div>
+
+<div class="footnote">
+  Citi Bike Rebalancing Explorer — Documentation Set v2 · Document 03 of 04 ·
+  Next: <strong>04 — Lessons Learned: AI Collaboration &amp; System-Design Process.</strong>
+</div>
+
+</body>
+</html>

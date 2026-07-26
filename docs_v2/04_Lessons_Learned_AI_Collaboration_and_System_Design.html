@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>04 — Lessons Learned: AI Collaboration &amp; System-Design Process</title>
+<link rel="stylesheet" href="assets/report.css">
+</head>
+<body>
+
+<section class="cover">
+  <div class="eyebrow">Citi Bike Rebalancing Explorer · Documentation Set v2</div>
+  <div class="docnum">Document 04 — Lessons Learned: AI Collaboration &amp; System-Design Process</div>
+  <h1>How it was actually built</h1>
+  <div class="subtitle">Reusable practices for AI-assisted development, for designing a small and honest
+    data system, and for the product decisions that kept it credible — each drawn from something that
+    actually happened while building this project.</div>
+  <div class="meta">
+    <div><b>Read last.</b> This is the meta-layer over Documents 01–03 — the process, not the product.</div>
+    <div><b>Nature:</b> concrete, transferable lessons with real examples, not generic best-practice boilerplate.</div>
+    <div><b>Prepared:</b> July 2026 · independent portfolio project.</div>
+  </div>
+</section>
+
+<h2>Part A — Working with an AI assistant</h2>
+
+<h3>A1. Write standing rules the assistant cannot silently override</h3>
+<p>The single highest-leverage practice was a short, fixed set of project rules that override the model's
+defaults on every turn. They are not suggestions in a first prompt that decay over a long session — they are
+persistent, and the assistant is expected to stop and flag rather than pattern-match past them.</p>
+<div class="box note">
+  <span class="box-label">Rules that earned their place</span>
+  <strong>Never invent numbers</strong> (label anything illustrative). · <strong>Baseline-first</strong>
+  (a complex model is adopted only where it beats a plain one out-of-sample). · <strong>No map-level equity
+  filter</strong> (a deliberate scope boundary, even though the reference implementation has one). ·
+  <strong>UI default state must be set in JS, not implied by markup</strong> (a bug class that recurred
+  three times before it became a rule).
+</div>
+<p><strong>Why it works:</strong> a standing rule turns a judgment the human would otherwise re-make every
+session into a constraint the assistant enforces for itself — including catching itself pattern-matching a
+reference implementation toward the very thing the rule forbids.</p>
+
+<h3>A2. Explain the approach before writing the code</h3>
+<p>For any non-trivial change, the assistant explains the intended approach in a few sentences and waits for
+a go-ahead before implementing. This "learning-mode" gate caught mismatched assumptions cheaply — in
+conversation, before they became code that had to be reviewed and unwound — and kept the human in control of
+direction rather than reviewing finished work after the fact.</p>
+
+<h3>A3. One session = one unit of work, ending in tests and a written log</h3>
+<p>Each working session took on one module or one coherent change, ran the test suite at the end, and wrote
+what was built and what was learned into a durable log (<span class="mono">PROGRESS.md</span>). That log —
+not the chat history — is the real memory across sessions: it is where "we tried the arrivals/departures
+split and it lost" or "the depot data was researched and rejected" lives, so a later session does not
+re-litigate a settled question or silently re-introduce a rejected idea.</p>
+
+<h3>A4. Verify before claiming — at every layer, including your own comments</h3>
+<p>The most important discipline: nothing is reported as done or true until it is checked against reality.
+This showed up concretely again and again.</p>
+<ul>
+  <li><strong>Behavioral tests, not code-reading.</strong> UI changes were verified by driving a real headless
+  browser and asserting the actual resulting DOM state, then confirming with screenshots — not by re-reading
+  the diff and declaring it correct.</li>
+  <li><strong>Screenshots catch what computed styles miss.</strong> One chevron had a perfectly correct
+  computed <span class="mono">content</span>/<span class="mono">color</span>/<span class="mono">width</span> —
+  and was invisible, clipped by a parent's overflow from a missing <span class="mono">box-sizing</span>. Only
+  a rendered screenshot showed it.</li>
+  <li><strong>Check specific numbers, not "looks fine."</strong> Two individually-reasonable layout changes
+  (center the time bar; move the legend to its row) combined into a real 56–96 px overlap — found by measuring
+  element rectangles at several window widths, which "it looked fine in one screenshot" would have missed.</li>
+  <li><strong>Even self-authored claims get verified.</strong> A code comment that asserted a crash was
+  "confirmed by testing" was corrected before the test had actually run — the claim was walked back to honest
+  wording, then the test was really run.</li>
+</ul>
+
+<h3>A5. Re-check inherited reasoning; do not treat an old caveat as permanent</h3>
+<p>Reasons rot. Several times, a documented exclusion turned out to rest on a mechanism that no longer existed:</p>
+<ul>
+  <li>A weather preset (<span class="mono">hot_day</span>) had been excluded for years because of a specific
+  artifact in a gradient-boosting partial-dependence curve — but that model had since been replaced by a direct
+  regression and then deleted entirely. The stated reason could no longer occur; the preset was unblocked after
+  confirming that against the current code and the real 435-value temperature range, not assumed still valid.</li>
+  <li>A "no newer school dataset exists" caveat was re-verified against the live data portal (not re-read from an
+  old note) and found still true — for five specific, checkable reasons.</li>
+</ul>
+<p><strong>Lesson:</strong> a years-old caveat deserves the same "check against current reality" treatment as
+any other claim. The alternative is a codebase that accumulates frozen justifications no one revalidates.</p>
+
+<h3>A6. Use a reference implementation as a diff target, never a copy source</h3>
+<p>A finished prior version existed, but the rule was to build independently and consult the reference only to
+produce a diff — "here is what mine does differently and which is better." That preserved the learning value of
+the rebuild and, more than once, surfaced that the reference's choice (e.g. its map-level equity filter, its
+module structure) was <em>not</em> the one to reproduce.</p>
+
+<h3>A7. Let the human's current intent override past rationale — including the assistant's own</h3>
+<p>When the human asked to narrow and center a control that an earlier session had deliberately made
+full-width, the right move was to make the change and note the tension — not to defend the earlier decision.
+A written rationale explains why a past choice was made; it is not a constraint on the person who owns the
+project changing their mind. The assistant's job is to flag consequences, then follow direction.</p>
+
+<h2>Part B — Designing the system for honesty and reproducibility</h2>
+
+<h3>B1. Baseline-first, enforced rather than asserted</h3>
+<p>The forecasting work exists to answer "can a real model beat a plain one?" — and the answer was <em>no</em>,
+out-of-sample (Document 02). Because the rule was enforced with a real 12-fold walk-forward, the honest result
+survived: the simple seasonal-naive baseline is the shipped forecast, and the dashboard shows the evidence.
+A project that only <em>asserts</em> baseline-first would have quietly adopted the fancier model.</p>
+
+<h3>B2. Write assumptions into the output, not just the docs</h3>
+<p>Every simplifying assumption travels <em>with the data</em>. The route file carries its own
+<span class="mono">depot_assumption</span> and <span class="mono">max_stops_note</span>; the typology block
+carries its low-volume threshold and how many stations it excluded; the school layer carries its vintage label.
+A reviewer reading the JSON sees the caveat without reading this document — which is exactly where a caveat
+needs to be to survive.</p>
+
+<h3>B3. Verify against facts from outside the system</h3>
+<p>Ground-truth spot checks assert the pipeline's output against things a reviewer already knows —
+the Financial District is an office district, Stuyvesant Town is residential, Thanksgiving is a holiday, NYC
+winters have less ridership than summers — and deliberately never use the pipeline's own derived labels (that
+would be circular). Every real bug the project found (contaminated station coordinates, a skewed weather-zone
+scheme, a stale caveat) was caught by checking a claim against reality, so that habit was made a standing,
+repeatable check instead of an accident of investigation.</p>
+
+<h3>B4. Small, pure, auditable functions beat clever ones</h3>
+<p>The color logic, the cluster coloring, the elasticity math — each is a small pure function that takes plain
+numbers in and returns a value, testable without stubbing a map library or a browser. The clustering is k-means
+on interpretable unit vectors whose centers are themselves inspectable 24-hour curves. "No black boxes" was a
+rule, and it is what let the whole analysis be reproduced and spot-checked.</p>
+
+<h3>B5. Make reproduction a single real command</h3>
+<p>One entry point re-derives every artifact by running the actual pipeline steps in order and stopping on the
+first real failure — it does not re-import internals or wrap them in something that could claim success without
+running them. And the one genuine non-reproducibility (the live GBFS feed has no historical archive) is stated
+plainly in the reproduction script itself, not implied away.</p>
+
+<h2>Part C — Product decisions that kept it credible</h2>
+
+<h3>C1. Frame the metric honestly, then complement its blind spot</h3>
+<p>Net flow is a <em>demand-pressure proxy</em>, not an observed-failure count — it cannot see the trips that
+did not happen. Rather than overclaim, the tool labels it as a proxy wherever it appears and pairs it with a
+live GBFS layer that shows the real current state. Naming a metric's limitation and then covering the gap is
+more credible than a single number that pretends to be complete.</p>
+
+<h3>C2. Report negative results as first-class findings</h3>
+<p>The model losing to the baseline, and the arrivals/departures split failing to help, are both surfaced —
+in the dashboard and in the docs — not buried. For a portfolio aimed at analysts, a visible negative result
+is stronger evidence of rigor than an unbroken string of wins.</p>
+
+<h3>C3. Draw the scope boundary and hold it</h3>
+<p>Per-station equity context is everywhere it is useful (detail panel, tooltips, ranked lists), but there is
+deliberately no map-level equity filter that recolors the whole map by equity status — a standing decision held
+even though the reference implementation and a later spec both assumed one. The right response to a spec that
+conflicts with a standing boundary is to stop and ask how to adapt it, not to silently build the thing the
+boundary forbids or silently skip the feature.</p>
+
+<h3>C4. Design the interface to be honest in place</h3>
+<p>The weather panel states next to its own sliders that it is an elasticity estimate, not a weather model; the
+fleet panel explains the no-diminishing-returns result where the slider is; the model-performance table shows
+the baseline winning. Honesty embedded at the point of interaction is harder to miss than an honesty section
+in a report no one opens.</p>
+
+<h2>The short version</h2>
+<div class="box fact">
+  <span class="box-label">If you take four things from this document</span>
+  <strong>1.</strong> Give the assistant standing rules it enforces for you, and a durable written log so
+  settled questions stay settled. &nbsp;
+  <strong>2.</strong> Verify everything against reality — a real browser, a rendered screenshot, a specific
+  measured number, a fact from outside the system — before calling it done. &nbsp;
+  <strong>3.</strong> Build for honesty: enforce baseline-first, write assumptions into the output, report
+  negative results, and reproduce from one real command. &nbsp;
+  <strong>4.</strong> Re-check inherited reasoning, and let the human's current intent override past rationale —
+  including the assistant's own.
+</div>
+
+<div class="footnote">
+  Citi Bike Rebalancing Explorer — Documentation Set v2 · Document 04 of 04 ·
+  End of set. Return to <strong>00 — Index &amp; Reading Order</strong> for the full map.
+</div>
+
+</body>
+</html>

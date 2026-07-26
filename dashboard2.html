@@ -1,0 +1,3426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Citi Bike Rebalancing Explorer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow-x: clip; }
+  body { display: flex; flex-direction: column; }
+  .hidden { display: none; }
+
+  /* Version-2-laptop layout: a full-width top bar (title + historical/live
+     mode toggle), then a map-left/controls-right split -- the map stays
+     visible at all times (no bottom-sheet-over-the-map problem), and the
+     right column is a real fixed-width panel, not a drawer. */
+  /* 3-column grid (title / toggle / empty spacer), not flex space-between --
+     the toggle is the single most consequential control on the page (it
+     recolors the map, swaps the whole right panel, and changes the
+     legend), so it gets true dead-center placement, independent of how
+     long the title+station-count text on the left happens to be. The
+     third column has no content -- an unoccupied 1fr grid track still
+     reserves its own share of the row's width, which is what balances
+     the middle column without needing a real spacer element. */
+  /* Design critique task 07: was a 3-column 1fr/auto/1fr grid with the
+     mode toggle centered in the middle column (an empty, unused third
+     column just to balance it) -- genuinely centering a two-state,
+     once-per-session switch as if it were the masthead's subject. Two
+     columns now: title left (its own natural width), mode toggle right
+     (justify-self:end below), no dead space left over. */
+  #topbar {
+    display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 20px;
+    padding: 14px 20px; border-bottom: 1px solid #d8d7d3; background: #fcfcfb; flex-shrink: 0;
+  }
+  #title { min-width: 0; }
+  #title-heading { display: flex; align-items: center; gap: 10px; }
+  #title-logo { flex-shrink: 0; color: #2a78d6; }
+  /* Two lines with a real size hierarchy -- "NYC Citi Bike" is context
+     (which city, which system); "Rebalancing Explorer" is the actual
+     distinctive name of this specific tool, so it carries the primary
+     bold size. Not a tiny muted kicker line either -- both are still
+     clearly part of one heading, just weighted differently. */
+  /* Design critique task 11: the old muted-text grays (#898781, 3.59:1;
+     #84817a, 3.21-3.89:1 depending on background) failed WCAG AA's 4.5:1
+     text-contrast minimum everywhere they were used as real copy, not
+     just the specific "legend labels ~2.8:1" example the critique named.
+     #666057 clears 4.5:1 against every real background in this file
+     (checked against white, the off-white card bg, and the tan/beige pill
+     backgrounds -- the worst case, not just white) while staying visually
+     distinct from #52514e/#0b0b0b, so the secondary/de-emphasized text
+     hierarchy this file already uses still reads correctly. Applied as
+     one blanket token swap (including the disclosure chevrons -- their
+     open/closed state is redundant with rotation + the native [open]
+     attribute anyway, so darkening them cost nothing and kept this a
+     single find-and-replace instead of a partial one). */
+  #title-text { display: flex; flex-direction: column; }
+  #title-line1 { font-size: 15px; font-weight: 600; color: #52514e; letter-spacing: -0.005em; }
+  #title-line2 { font-size: 22px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; color: #0b0b0b; }
+  #title .subtitle { color: #52514e; font-size: 12px; margin-top: 4px; }
+  #title-meta { color: #666057; } /* real station count + coverage/weather-scenario caveats -- the only subtitle content now; the old "Net flow at HH:MM, weekday (period)" phrase was dropped as pure duplication of the Map controls panel's own hour/day/period controls */
+  #mode-toggle { width: 280px; justify-self: end; }
+
+  /* position:relative -- this, not #map-col, is the positioning ancestor
+     for #map-controls-bar/#map-corner-stack now (see the HTML comment
+     where they're declared for why they live here instead of inside
+     #map-col). #map-col is always body-row's first, full-height, flex:1
+     child, so top-left/bottom-left offsets against body-row land in
+     exactly the same visual spot as they would against map-col. */
+  #body-row { flex: 1; display: flex; min-height: 0; position: relative; }
+  #map-col { flex: 1; min-width: 0; position: relative; background: #f9f9f7; }
+  #map { position: absolute; inset: 0; }
+
+  /* Map controls, floating top-left on the map itself -- reuses the same
+     compact classes (.segmented.compact, .hour-control.compact,
+     .pill-btn.compact) built for the sidebar toolbar version, so this is
+     the slim variant, not the old spacious stacked card, specifically to
+     minimize how much of the map it covers. Leaflet's zoom control moves
+     to bottom-right (see the map init in the script below) to make room
+     here instead of the two competing for the same corner. Internal
+     scroll is a safety net (max-height), not the expected case. Mobile
+     override (bottom of this stylesheet) switches this to a normal
+     static block instead of a float. */
+  #map-controls-bar { position: absolute; top: 16px; left: 16px; z-index: 500; width: 280px; max-width: calc(100% - 32px); max-height: calc(100% - 32px); overflow-y: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15); padding: 12px 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }
+
+  /* Legend and Station detail are now two INDEPENDENT floating cards, not
+     a tab pair sharing one container -- Legend is permanent (always on
+     the map, no click needed to see it); Detail only exists while a
+     station is selected. Stacked in one corner via column-reverse: Legend
+     is the FIRST DOM child, so it's pinned to the bottom of the stack and
+     never moves; Detail is the LAST DOM child, so it appears ABOVE Legend
+     (and only takes stack space) whenever it's not .hidden. Mobile
+     override switches this to column (not reversed) static flow --
+     Legend first, Detail below it, top-to-bottom reading order. */
+  /* bottom offset cleared to sit above #timebar (task 07) instead of
+     overlapping it -- both are absolute against the same #body-row
+     ancestor. Verified visually, not just computed on paper: #timebar's
+     own real height (padding + a 26px play button) plus a real gap. */
+  #map-corner-stack { position: absolute; left: 16px; bottom: 78px; z-index: 500; display: flex; flex-direction: column-reverse; gap: 12px; width: 300px; max-width: calc(100% - 32px); }
+  #legend-card, #detail-card { background: #fff; border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15); padding: 14px; box-sizing: border-box; font-size: 12px; }
+  /* Design critique task 10: numeric anchors so the legend states real
+     units instead of leaving "how big is a deficit" to guesswork -- the
+     three ticks are real computed values (state.domainMax / the live
+     mode's fill-percent bounds), never the critique's own placeholder
+     -12/+12, set by renderLegendScale() below (called from renderHour(),
+     the same hook that already keeps every other mode-dependent legend
+     string in sync). */
+  #legend-title { font-weight: 700; font-size: 12px; color: #0b0b0b; letter-spacing: 0.01em; margin-bottom: 6px; }
+  #legend-ticks { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 11px; color: #52514e; font-variant-numeric: tabular-nums; margin: 4px 0 6px; }
+  #legend-ticks span:nth-child(2) { text-align: center; }
+  #legend-ticks span:nth-child(3) { text-align: right; }
+  #legend-route-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #d8d7d3; font-size: 11.5px; color: #52514e; }
+  #legend-route-row.hidden { display: none; }
+  #legend-route-swatch { width: 20px; height: 3px; border-radius: 2px; background: #7c4dbd; flex-shrink: 0; }
+
+  #legend-card .bar { width: 100%; height: 12px; border-radius: 6px; margin: 0 0 6px; box-sizing: border-box; }
+  #legend-card .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; flex-wrap: wrap; gap: 4px 12px; }
+  #legend-caption { margin-top: 8px; font-size: 11px; color: #666057; }
+
+  #detail-card { position: relative; max-height: 320px; overflow-y: auto; }
+  #detail-close { position: absolute; top: 10px; right: 10px; border: none; background: none; font-size: 16px; line-height: 1; cursor: pointer; color: #666057; padding: 2px 4px; }
+  #detail-close:hover { color: #0b0b0b; }
+  #detail-card h2 { margin: 0 24px 4px 0; font-size: 15px; }
+  #detail-card .striptitle { font-size: 11px; color: #52514e; margin: 10px 0 4px; }
+  #detail-card .strip { width: 100%; height: 70px; overflow: visible; }
+
+  /* "More info" (cluster typology + equity context) is collapsed by
+     default -- CLAUDE.md requires this per-station equity context stay
+     accessible SOMEWHERE, but the graph is the thing worth surfacing by
+     default; this is that "somewhere," one click away rather than deleted. */
+  .detail-more-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; font: inherit; font-size: 11px; font-weight: 600; color: #52514e; background: none; border: none; border-top: 1px solid #f3f2f0; margin-top: 10px; padding: 8px 0 0; cursor: pointer; }
+  .detail-more-toggle:hover { color: #0b0b0b; }
+  #detail-more-content { margin-top: 6px; }
+  #detail-card .meta { color: #52514e; margin-bottom: 3px; line-height: 1.4; }
+
+  /* Right-hand panel: fixed width, its own internal scroll -- the map
+     column never scrolls, so a tall Investigator accordion stack can't
+     push the map out of frame. */
+  #side-col { width: 460px; min-width: 380px; height: 100%; box-sizing: border-box; background: #fff; border-left: 1px solid #d8d7d3; display: flex; flex-direction: column; overflow: hidden; overflow-wrap: anywhere; }
+  /* Task 06 (design critique): flex/grid children default to min-width:auto,
+     which refuses to shrink below their own content's intrinsic width even
+     with flex:1 -- the actual cause of text truncating/clipping instead of
+     wrapping or shrinking gracefully at narrower widths. This blanket rule
+     for the rail is the general fix; the map-controls-bar/hour-control/
+     legend rules above are the same fix applied to those specific flex rows. */
+  #side-col * { min-width: 0; }
+
+  #status { margin: 14px 16px 0; padding: 8px 12px; font-size: 12px; color: #52514e; background: #f3f2f0; border: 1px solid #d8d7d3; border-radius: 8px; }
+  #status.error { color: #8a2a29; background: #fdecec; border-color: #e34948; }
+  #status-detail-toggle { display: block; margin-top: 4px; font: inherit; font-weight: 600; font-size: 11px; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
+  #status-detail-toggle:hover { text-decoration: underline; }
+  #status-detail { margin-top: 6px; font-size: 11px; line-height: 1.4; }
+
+  #historical-controls { display: flex; flex-direction: column; gap: 10px; }
+  #controls-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #controls-row #period-select { flex: 1 1 170px; max-width: 100%; min-width: 0; }
+
+  #side-content { flex: 1; overflow-y: auto; padding: 16px; box-sizing: border-box; }
+
+  /* Investigator mode and Model performance are each a simple, plain-text
+     collapsed-by-default disclosure -- not tabs, not bordered cards --
+     same "zero extra height budget in the common case" rule the inner
+     equity/fleet/weather/presets accordions follow one level deeper.
+     Investigator gets top billing (first in the DOM, no visual
+     de-emphasis); Model performance is intentionally smaller/quieter,
+     sitting right before the footer, since it's a static reference table
+     rather than something you work within. */
+  #investigator-panel, #model-eval { margin-bottom: 16px; }
+  /* Design critique task 09: these are native <summary> elements now, not
+     buttons -- list-style/marker rules strip the native disclosure
+     triangle (Chrome/Safari need the ::-webkit-details-marker rule too,
+     display:none on ::marker alone isn't enough in WebKit) so the custom
+     ::after chevron below is the only arrow shown, same look as before. */
+  #investigator-toggle, #model-eval-toggle { width: 100%; display: flex; flex-wrap: wrap; align-items: center; font: inherit; font-weight: 600; font-size: 13px; color: #52514e; cursor: pointer; list-style: none; }
+  #investigator-toggle::-webkit-details-marker, #model-eval-toggle::-webkit-details-marker { display: none; }
+  #investigator-toggle::after, #model-eval-toggle::after { order: 2; content: '\25B8'; color: #666057; font-size: 11px; transition: transform 0.15s ease; flex-shrink: 0; margin-left: auto; }
+  #investigator-panel[open] > #investigator-toggle::after, #model-eval[open] > #model-eval-toggle::after { transform: rotate(90deg); }
+  #investigator-toggle:hover, #model-eval-toggle:hover { color: #0b0b0b; }
+  #model-eval-toggle { font-size: 11px; color: #666057; }
+  #model-eval-toggle:hover { color: #52514e; }
+  .accordion-head-row { order: 1; display: flex; align-items: center; min-width: 0; }
+  .investigator-badge { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #c9832b; margin-left: 4px; vertical-align: top; }
+  #investigator-teaser { order: 3; margin-top: 4px; font-size: 11px; color: #666057; line-height: 1.4; flex-basis: 100%; }
+  #tab-panel-investigator, #tab-panel-model { margin-top: 12px; }
+
+  /* Design critique task 03 -- permanent readout + "worst now" list.
+     Colors/radii/borders reuse this file's own existing tokens
+     (#0b0b0b/#52514e/#666057/#d8d7d3, 10px radius) rather than the
+     critique's own separate palette, which was written without ever
+     seeing this file -- matching what's already here, not introducing a
+     second visual language. */
+  .readout { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #d8d7d3; border: 1px solid #d8d7d3; border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+  .readout > div { background: #fff; padding: 12px 14px; }
+  .readout b { display: block; font-size: 22px; font-weight: 800; color: #0b0b0b; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.1; }
+  .readout span { display: block; margin-top: 4px; font-size: 11px; color: #52514e; line-height: 1.35; }
+
+  .worst { border: 1px solid #d8d7d3; border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
+  .worst__title { padding: 10px 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #666057; border-bottom: 1px solid #d8d7d3; }
+  .worst ul { list-style: none; margin: 0; padding: 0; }
+  .worst li { border-bottom: 1px solid #f0ede7; }
+  .worst li:last-child { border-bottom: none; }
+  .worst button { all: unset; display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px; width: 100%; box-sizing: border-box; padding: 9px 14px; cursor: pointer; font: inherit; }
+  .worst button:hover, .worst button:focus-visible { background: #faf9f7; }
+  .worst button:focus-visible { outline: 2px solid #2a78d6; outline-offset: -2px; }
+  .worst .worst-name { font-size: 12.5px; color: #0b0b0b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .worst .worst-value { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .worst .worst-empty { padding: 12px 14px; font-size: 12px; color: #666057; }
+
+  .control-label { font-size: 11px; color: #666057; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+
+  /* Segmented (pill-track) control -- two visual variants matching the
+     two treatments in the mockup: the base variant is a light track with
+     a solid-black active segment (used for the historical/live mode
+     toggle, the single most consequential control); .light is a beige
+     track with a white active segment (used for View and the day-type
+     toggle, secondary controls). .compact trims the padding/font-size
+     for the condensed sidebar toolbar specifically -- the mockup-derived
+     sizing above is still what full-size segmented controls use
+     elsewhere (e.g. the top-bar mode toggle). */
+  .segmented { display: flex; background: #f3f2ee; border-radius: 10px; padding: 3px; gap: 3px; }
+  .segmented-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 700; padding: 9px 10px; border: none; border-radius: 8px; background: transparent; color: #52514e; cursor: pointer; white-space: nowrap; }
+  .btn-icon { flex-shrink: 0; }
+  .segmented-btn.active { background: #0b0b0b; color: #fff; }
+  .segmented-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .segmented.light { background: #efe9de; }
+  .segmented.light .segmented-btn.active { background: #fff; color: #0b0b0b; box-shadow: 0 1px 3px rgba(11,11,11,0.15); }
+  .segmented.light .segmented-btn:not(.active) { color: #666057; }
+  .segmented.compact { padding: 2px; }
+  .segmented.compact .segmented-btn { font-size: 12px; padding: 6px 8px; }
+
+  .card { background: #f9f9f7; border: 1px solid #d8d7d3; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+
+  #period-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; }
+  #controls-row #period-select { font-size: 12px; padding: 7px 8px; }
+
+  /* Design critique task 07: the hour scrubber's own real estate. Full-
+     width dock along the bottom of the map (not the cramped ~160px range
+     that used to sit inside the 280px floating card) -- same absolute-
+     positioning ancestor (#body-row) as #map-controls-bar/#map-corner-
+     stack, so it lines up with them the same way. #map-corner-stack
+     (legend/detail) shifts up to sit above it instead of overlapping --
+     see its own bottom offset below.
+
+     left/width (not right) are set by positionTimebar() in the script
+     below, not fixed here -- #body-row (the positioning ancestor) spans
+     BOTH the map and the sidebar, so a plain CSS right:Npx measures from
+     the sidebar's right edge, not the map's, and would either run
+     underneath the sidebar or collide with Leaflet's own zoom control
+     depending on window width. Checked against the real rendered page,
+     not assumed: a fixed right:62px looked fine at one width and visibly
+     drifted at another. Recomputed on resize, not just once at load. */
+  #timebar {
+    position: absolute; bottom: 16px; z-index: 500;
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 16px; background: rgba(255,255,255,0.94); backdrop-filter: blur(6px);
+    border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15);
+    box-sizing: border-box;
+  }
+  #timebar input[type="range"] { flex: 1; box-sizing: border-box; accent-color: #0b0b0b; min-width: 0; min-height: 24px; }
+  #hour-label { font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; color: #0b0b0b; white-space: nowrap; flex-shrink: 0; min-width: 6.5ch; text-align: right; }
+  .hour-play-btn { flex-shrink: 0; width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
+  .hour-play-btn:hover { border-color: #0b0b0b; color: #0b0b0b; }
+  .hour-play-btn.active { background: #0b0b0b; border-color: #0b0b0b; color: #fff; }
+
+  /* Full-width rounded pill button -- the mockup's own dedicated look for
+     the one "do something on the map" primary action in this tab.
+     .compact drops it back to content width for the condensed toolbar,
+     where a full-width button would look oversized next to the slim
+     rows around it. */
+  .pill-btn { width: 100%; font: inherit; font-size: 14px; font-weight: 700; padding: 12px; border-radius: 24px; border: 1.5px solid #0b0b0b; background: #fff; color: #0b0b0b; cursor: pointer; }
+  .pill-btn.active { background: #0b0b0b; color: #fff; } /* route's own dedicated color story: black/white, not the flow-scale red/blue -- see JS comment on ROUTE_COLOR for the map layer itself */
+  .pill-btn.compact { width: auto; font-size: 12px; padding: 7px 16px; }
+
+  #live-as-of { color: #52514e; font-size: 12px; }
+  /* Coverage gap lives here now, not in the hero -- it's specific to Live
+     mode, so it belongs next to the other live-only fact (the as-of
+     timestamp), not competing for space in the title on every load.
+     Hidden by default, same "only show it when there's something to
+     flag" rule the hero subtitle line itself already follows. */
+  #live-coverage-note { margin-top: 4px; color: #666057; }
+
+  #tab-panel-model table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 10px; }
+  #tab-panel-model th, #tab-panel-model td { text-align: right; padding: 6px 4px; font-size: 12px; }
+  #tab-panel-model th:first-child, #tab-panel-model td:first-child { text-align: left; }
+  #tab-panel-model thead th { color: #52514e; font-weight: 600; border-bottom: 1px solid #d8d7d3; text-transform: uppercase; font-size: 10px; letter-spacing: 0.03em; }
+  #tab-panel-model tbody td { border-bottom: 1px solid #f3f2f0; }
+  /* Design critique task 05: was #b5482f (a real red) -- the same color
+     the map uses for "deficit," so a reviewer's eye reads this column as
+     an alarm/failure. It's the opposite: naive beating the richer tiers
+     here is the project's own honest headline finding, not a problem.
+     Still visually distinct (bold + a neutral dark ink), just no longer
+     borrowing a color that means something else entirely two inches to
+     the left of it. */
+  #tab-panel-model tbody td:last-child { color: #191817; font-weight: 700; }
+  #model-eval-caption { margin-bottom: 4px; color: #4a4744; line-height: 1.5; font-size: 12.5px; font-style: normal; }
+
+  .investigator-slider { margin-bottom: 12px; }
+  .investigator-slider label { display: block; font-size: 12px; color: #52514e; margin-bottom: 6px; }
+  .investigator-slider input[type="range"] { width: 100%; box-sizing: border-box; accent-color: #c9832b; }
+  #investigator-counts { margin-top: 6px; color: #52514e; line-height: 1.7; font-size: 12px; }
+  .equity-count-primary { font-weight: 700; color: #0b0b0b; font-size: 13px; margin-bottom: 4px; }
+  .equity-count-breakdown { padding-left: 12px; color: #666057; font-size: 11px; line-height: 1.6; }
+  .equity-count-separate { margin-top: 8px; padding-top: 8px; border-top: 1px solid #f3f2f0; }
+  #fleet-stats { margin-top: 6px; color: #52514e; line-height: 1.6; font-size: 12px; }
+  /* #detail-context-note is a genuine short caption (one real sentence) --
+     italic still reads fine there. #fleet-sim-note/#weather-scenario-note
+     are real multi-sentence paragraphs (design critique task 05: "italic
+     is for a phrase, not a paragraph"), so they get their own roman-text
+     treatment below instead. */
+  #detail-context-note { margin-top: 8px; color: #666057; line-height: 1.4; font-style: italic; font-size: 11px; }
+  #fleet-sim-note, #weather-scenario-note {
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0ede7;
+    color: #4a4744; line-height: 1.55; font-style: normal; font-size: 12px;
+  }
+  #fleet-sim-note::before, #weather-scenario-note::before {
+    content: 'Method'; display: block; margin-bottom: 5px;
+    font: 600 10px/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.08em; text-transform: uppercase; color: #666057;
+  }
+
+  /* Real map wiring already existed here (fleet size drives the actual
+     route, weather already recolors real markers) but nothing told the
+     user that -- this cue makes an invisible connection felt, the
+     cheapest of the Investigator Mode improvements suggested alongside
+     the design critique. Accent color reuses the existing
+     .investigator-badge orange, tying it visually to "Investigator mode"
+     itself rather than reading as another muted caption. */
+  .map-tie-in-cue { margin: 8px 0; padding: 6px 10px; border-left: 2px solid #c9832b; background: #fdf6e8; color: #7a5b1e; font-size: 11px; line-height: 1.4; border-radius: 0 4px 4px 0; }
+  #weather-preset-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 12px; }
+  #weather-scenario-status { margin-top: 6px; color: #52514e; line-height: 1.6; font-size: 12px; }
+
+  /* Equity thresholds / Fleet simulator / Weather scenario / Save-load-reset
+     are now four independently collapsible accordions (matching the
+     mockup) instead of one always-shown block -- each tracked in
+     state.investigatorAccordions and toggled by setAccordionExpanded().
+     Fleet's and Weather's OUTER accordion (not its inner content) is what
+     graceful degradation hides when fleet_scenarios.json/elasticities.json
+     never loaded -- the same two-level "container visibility vs. content
+     expand-state" split #investigator-diff-bar and #model-eval used to
+     keep separate concerns separate. */
+  .accordion { border: 1px solid #d8d7d3; border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .accordion-toggle { width: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; font: inherit; font-size: 13px; font-weight: 700; padding: 13px 14px; background: #fff; color: #0b0b0b; cursor: pointer; text-align: left; list-style: none; }
+  .accordion-toggle::-webkit-details-marker { display: none; }
+  .accordion-toggle::after { content: '\25B8'; color: #666057; font-size: 11px; transition: transform 0.15s ease; flex-shrink: 0; margin-left: 8px; }
+  details[open] > .accordion-toggle::after { transform: rotate(90deg); }
+  .accordion-toggle:hover { background: #f9f9f7; }
+  .accordion-chevron { color: #666057; font-size: 11px; }
+  .accordion-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; background: #f0dfc0; color: #8a5a1f; margin-left: 8px; }
+  .accordion-content { padding: 0 14px 14px; }
+
+  /* Scenario-vs-baseline card: replaces the old plain-text diff bar with
+     a real bar-chart-style visualization per metric, computed from real,
+     already-displayed numbers (never a mockup-decorative formula -- see
+     renderScenarioRow()'s own comment for the exact per-metric domain
+     each bar/tick is drawn against). Visibility rule carries over 1:1
+     from the old design: shown whenever the Investigator tab is active,
+     or whenever the scenario is non-default even on another tab, so
+     navigating away never loses the cue that a scenario is still applied. */
+  #investigator-diff-bar { border: 1.5px solid #0b0b0b; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .scenario-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .scenario-card-head-actions { display: flex; gap: 6px; }
+  .scenario-card-title { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #52514e; }
+  .share-btn { font: inherit; font-size: 12px; font-weight: 700; padding: 7px 14px; border-radius: 16px; border: 1px solid #d8d7d3; background: #f3f2ee; color: #0b0b0b; cursor: pointer; }
+  #preset-url-output { width: 100%; box-sizing: border-box; font: inherit; font-size: 11px; padding: 6px 8px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 12px; }
+
+  .scenario-row { margin-bottom: 16px; }
+  .scenario-row:last-child { margin-bottom: 0; }
+  .scenario-row-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .scenario-row-label { font-size: 14px; font-weight: 700; }
+  .scenario-pill { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 10px; }
+  .scenario-pill.neutral { background: #ece9e4; color: #666057; }
+  .scenario-pill.warn { background: #f0dfc0; color: #8a5a1f; }
+  /* Design critique task 04: the track's zero line is the baseline
+     reference now (a static ::before at center, not a JS-positioned tick
+     tracking an absolute level) -- delta=0 always sits exactly here by
+     construction, so it can't drift out of sync with the pill the way an
+     independently-computed tick position could. .scenario-bar-fill no
+     longer hardcodes left:0 -- renderScenarioRow() sets both left and
+     width now, since a zero-centered fill can grow either direction. */
+  .scenario-bar-track { position: relative; height: 6px; border-radius: 3px; background: #ece9e4; margin-bottom: 8px; }
+  .scenario-bar-track::before { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: #b8b4ab; }
+  .scenario-bar-fill { position: absolute; top: 0; height: 100%; border-radius: 3px; background: #c9a876; }
+  /* The equity/fleet bars both plot "change in station count, as a share
+     of a real total" -- genuinely the same kind of quantity, so they're
+     directly comparable to each other now (unlike before, when all three
+     rows including a raw °F range looked identical but weren't). Weather
+     no longer has a bar at all (see the markup), so there's no third,
+     incomparable domain left to caption around. */
+  .scenario-bar-domain { font-size: 10px; color: #666057; margin: -4px 0 6px; }
+  .scenario-row-foot { display: flex; justify-content: space-between; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .scenario-row-foot .baseline { color: #666057; }
+  .scenario-row-foot .scenario { color: #0b0b0b; font-weight: 700; }
+  .scenario-weather-value { font-size: 12px; color: #0b0b0b; font-variant-numeric: tabular-nums; }
+  #scenario-summary { margin-top: 14px; padding-top: 12px; border-top: 1px solid #f3f2f0; font-size: 12px; line-height: 1.5; color: #52514e; }
+
+  .day-btn { font: inherit; font-size: 12px; padding: 7px 12px; border-radius: 16px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
+  #preset-controls input[type="text"] { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin: 8px 0; }
+  #preset-controls .day-btn { margin-right: 6px; margin-bottom: 6px; }
+
+  #footer { margin-top: 16px; padding-top: 14px; border-top: 1px solid #f3f2f0; font-size: 10px; color: #666057; line-height: 1.4; }
+
+  /* ---- Mobile breakpoint ----
+     Single threshold (not a multi-tier responsive system, matching this
+     project's plain-methods style), meant to make the dashboard usable
+     on a phone, not to optimize for every possible screen size.
+
+     #side-col's own min-width (380px) is wider than most phone screens
+     on its own, which is what actually broke mobile before this existed
+     -- flexbox refused to shrink it, so it claimed nearly the whole
+     viewport and crushed #map-col to a sliver, which in turn broke every
+     floating overlay sized/positioned against it.
+
+     Fix: map and sidebar stack vertically instead of sitting side by
+     side, and #map-controls-bar/#map-corner-stack switch from floating
+     absolute overlays to normal static blocks between the map and the
+     sidebar -- panels sized for a wide desktop map would dominate a much
+     shorter mobile map strip otherwise. The zoom control stays floating
+     on the map (small, standard placement, low visual cost either way). */
+  @media (max-width: 768px) {
+    /* Design critique "Mobile shell restructure" (applies alongside task
+       06 above -- that fix was the flex-overflow bug at ~1200px; this is
+       the separate, deeper problem the critique found at ~430px: on the
+       original stacked layout, the masthead ran ~112px tall, then a
+       fixed-height map, then ~560px more of controls before you reached
+       anything interactive, and Investigator Mode -- this dashboard's own
+       differentiator -- landed ~830px down, still collapsed. Real width
+       here is capped at what headless Chrome can reliably measure in this
+       environment (~500px+, see this file's own testing notes elsewhere)
+       -- verified at 500/600/768px; below that is reasoned from the CSS
+       itself (flex-wrap/min-width:0 safety nets already in place from
+       task 06), not screenshot-confirmed. */
+    #topbar { padding: 10px 14px; gap: 10px; }
+    #title-subtitle-line { display: none; } /* the eyebrow line's own JS toggle logic is untouched -- this just costs it its vertical space specifically on narrow screens, regardless of whether it has real content to show */
+    /* Reuses the exact padding/font values .segmented.compact already
+       defines elsewhere in this file (Individual/Grouped, Weekday/
+       Weekend) -- same compact look, without adding "compact" to
+       #mode-toggle's own class list (which would also shrink it on
+       desktop). */
+    #mode-toggle { width: auto; align-self: flex-end; padding: 2px; }
+    #mode-toggle .segmented-btn { font-size: 12px; padding: 6px 8px; }
+
+    #body-row { flex-direction: column; overflow-y: auto; }
+    /* Sticky, not fixed-in-flow: the map keeps its own document-flow
+       height (so #map-controls-bar/#timebar/#map-corner-stack below it
+       are never overlapped), but stays pinned to the top of #body-row's
+       own scroll viewport (the nearest scrolling ancestor, per its
+       overflow-y:auto above) while the controls and sidebar scroll
+       underneath it -- exactly the "map stays put while you scrub"
+       problem this section exists to fix. svh (not vh) so iOS Safari's
+       address-bar show/hide doesn't resize the map out from under you;
+       written as a second height: declaration so browsers that don't
+       recognize svh silently keep the vh fallback above it instead of
+       discarding the whole rule. */
+    #map-col { flex: none; position: sticky; top: 0; z-index: 1; height: 40vh; height: 40svh; min-height: 200px; }
+    #side-col { width: 100%; min-width: 0; height: auto; border-left: none; border-top: 1px solid #d8d7d3; overflow: visible; }
+    #side-content {
+      overflow-y: visible; /* the whole page scrolls together now -- no separate nested scroll region needed */
+      display: flex; flex-direction: column; /* only so the order: below can promote Investigator -- no other layout change intended here */
+    }
+    /* "Don't bury the differentiator" -- Investigator Mode moves ahead of
+       the readout/worst-now list specifically on mobile, where vertical
+       space is scarce enough that reaching it used to mean scrolling past
+       everything else first. Desktop's reading order (readout, then
+       worst-now, then Investigator) is untouched -- order only applies
+       inside this media query. */
+    #investigator-panel { order: -1; }
+
+    #map-controls-bar {
+      position: static; width: auto; max-width: none; max-height: none; overflow-y: visible;
+      border-radius: 0; box-shadow: none; border-bottom: 1px solid #d8d7d3;
+    }
+    /* Same floating-to-static fix as map-controls-bar/map-corner-stack
+       above, applied to #timebar (task 07) -- it moved out of
+       map-controls-bar on desktop specifically to get real width, but a
+       stacked mobile layout has no "width" problem to solve, so it just
+       becomes a normal block back in the historical-controls reading
+       order, right after the card it used to live inside. */
+    #timebar {
+      position: static; left: auto; right: auto; bottom: auto;
+      border-radius: 0; box-shadow: none; backdrop-filter: none;
+      border-bottom: 1px solid #d8d7d3;
+    }
+    #map-corner-stack {
+      position: static; width: auto; max-width: none; flex-direction: column;
+      padding: 14px 16px; border-bottom: 1px solid #d8d7d3;
+    }
+    #legend-card, #detail-card { box-shadow: none; border: 1px solid #d8d7d3; }
+  }
+
+  /* Design critique task 11: accessibility quick wins. */
+  :focus-visible { outline: 2px solid #2166ac; outline-offset: 2px; }
+  @media (pointer: coarse) {
+    /* Real touch hit targets -- the play button (26px) and Leaflet's zoom
+       buttons (Leaflet's own default ~26px) are well under the 44px WCAG
+       2.5.5 target size; segmented buttons are close (9px/6px padding on
+       13/12px text) but grow explicitly here too rather than left
+       borderline. */
+    .hour-play-btn { width: 44px; height: 44px; }
+    .segmented-btn { min-height: 44px; }
+    .leaflet-control-zoom a { width: 44px !important; height: 44px !important; line-height: 44px !important; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  }
+  #skip-link { position: absolute; left: 8px; top: -60px; z-index: 2000; background: #0b0b0b; color: #fff; padding: 10px 16px; border-radius: 0 0 8px 8px; font: inherit; font-weight: 700; font-size: 13px; text-decoration: none; transition: top 0.15s ease; }
+  #skip-link:focus { top: 0; }
+</style>
+</head>
+<body>
+<a href="#historical-controls" id="skip-link">Skip to controls</a>
+<header id="topbar">
+  <div id="title">
+    <div id="title-heading">
+      <!-- An original generic bike glyph -- deliberately not Citi Bike's
+           own logo/brand mark. This is an independent portfolio project,
+           not an official product (see the footer disclosure); using
+           their real branding here would misleadingly suggest otherwise. -->
+      <svg id="title-logo" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="6" cy="17" r="3.5"/>
+        <circle cx="18" cy="17" r="3.5"/>
+        <path d="M6 17l4-8 6 8h2M10 9h3l3 8"/>
+      </svg>
+      <div id="title-text">
+        <div id="title-line1">NYC Citi Bike</div>
+        <div id="title-line2">Rebalancing Explorer</div>
+      </div>
+    </div>
+    <div class="subtitle hidden" id="title-subtitle-line"><span id="title-meta"></span></div>
+  </div>
+  <!-- Design critique task 07: was plain .segmented (solid black active
+       state) -- the loudest object in the masthead for a two-state,
+       once-per-session switch. Now .light, the same subtle track/white-
+       pill treatment already used for Individual/Grouped and Weekday/
+       Weekend (see .segmented.light below) -- reusing an existing,
+       already-correct pattern rather than inventing a new one. -->
+  <div id="mode-toggle" class="segmented light">
+    <button id="mode-historical" class="segmented-btn active"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Historical flow</button>
+    <button id="mode-live" class="segmented-btn" title="Live dock status via GBFS (General Bikeshare Feed Specification)"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.5 5.5a9 9 0 0 0 0 13"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>Live docks</button>
+  </div>
+</header>
+
+<main id="body-row">
+
+  <div id="map-col">
+    <div id="map"></div>
+  </div>
+
+  <!-- Map controls, Legend, and Station detail are now direct children of
+       #body-row (not #map-col) -- they still float absolutely positioned
+       over the map on desktop (#body-row is their positioning ancestor,
+       and #map-col is always body-row's first, full-height, flex:1 child,
+       so anchoring to body-row's top-left/bottom-left corners lands in
+       exactly the same place as anchoring to map-col's would). The reason
+       for the extra indirection: at the mobile breakpoint below, these
+       switch to position:static and need to render as normal stacked
+       blocks BETWEEN the map and the sidebar -- they can't do that as
+       descendants of #map-col, since #map itself is position:absolute
+       and would just paint on top of them (absolutely-positioned siblings
+       paint above static in-flow content regardless of DOM order), never
+       actually revealing them. Living outside #map-col sidesteps that
+       entirely. -->
+
+  <!-- Map controls -- reuses the exact same compact markup/classes built
+       for the sidebar toolbar (Option 2), not a bulkier version,
+       specifically so the floating desktop panel covers as little of the
+       map as possible. Leaflet's zoom control moves to bottom-right (see
+       the map init below) to make room, rather than the other way around
+       -- zoom buttons carry much less positional expectation than the
+       controls a reviewer actually reads. -->
+  <div id="map-controls-bar">
+    <div id="view-toggle" class="segmented light compact">
+      <button id="view-individual" class="segmented-btn active">Individual</button>
+      <button id="view-grouped" class="segmented-btn">Grouped</button>
+    </div>
+
+    <div id="historical-controls" tabindex="-1">
+      <div id="controls-row">
+        <div id="day-toggle" class="segmented light compact">
+          <button id="day-weekday" class="segmented-btn active">Weekday</button>
+          <button id="day-weekend" class="segmented-btn">Weekend</button>
+        </div>
+        <select id="period-select"></select>
+      </div>
+      <div id="route-toggle-wrap" class="hidden">
+        <button id="route-toggle-btn" class="pill-btn compact">Show route</button>
+      </div>
+    </div>
+
+    <div id="live-as-of" class="hidden">
+      <div id="live-as-of-timestamp"></div>
+      <div id="live-coverage-note" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- Design critique task 07: the hour scrubber gets real pixels now --
+       a full-width dock along the bottom of the map instead of a cramped
+       range input inside the 280px floating card above. Same #hour-play-
+       btn/#hour-slider/#hour-label ids as before (just moved), so every
+       existing JS listener/render path keeps working completely
+       unchanged -- this is a pure relocate, not a rewrite. Hidden/shown
+       by setMode() exactly like #historical-controls above, since the
+       hour concept doesn't apply in Live mode. -->
+  <div id="timebar">
+    <button id="hour-play-btn" class="hour-play-btn" type="button" aria-label="Play through the day" title="Play through the day">
+      <svg id="hour-play-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4l14 8-14 8z"/></svg>
+    </button>
+    <input type="range" id="hour-slider" min="0" max="23" step="1" value="8" aria-label="Hour of day" aria-valuetext="8:00 AM">
+    <output id="hour-label" for="hour-slider">8:00 AM</output>
+  </div>
+
+  <!-- Legend is the FIRST child (bottom, in flex column-reverse below) --
+       it never moves. Detail is the LAST child (stacks above it), shown
+       only while a station is selected -- see setDetailVisible(). -->
+  <div id="map-corner-stack">
+    <div id="legend-card">
+      <div id="legend-title">Net daily flow</div>
+      <div class="bar" id="legend-bar"></div>
+      <div id="legend-ticks"><span id="legend-tick-low"></span><span id="legend-tick-mid">0</span><span id="legend-tick-high"></span></div>
+      <div class="labels"><span id="legend-label-low">Deficit (no bikes)</span><span id="legend-label-high">Surplus (no docks)</span></div>
+      <div id="legend-caption">Click a station for its daily flow</div>
+      <div id="legend-route-row" class="hidden"><span id="legend-route-swatch"></span><span id="legend-route-text"></span></div>
+    </div>
+
+    <div id="detail-card" class="hidden">
+      <button id="detail-close" aria-label="Close station detail">&times;</button>
+      <h2 id="detail-name"></h2>
+      <div class="striptitle">24-hour flow rhythm (<span id="detail-daylabel"></span>)</div>
+      <svg class="strip" id="detail-strip" viewBox="0 0 240 70" preserveAspectRatio="none"></svg>
+      <button id="detail-more-toggle" class="detail-more-toggle">
+        <span>More info</span>
+        <span class="accordion-chevron" id="detail-more-chevron">&#9656;</span>
+      </button>
+      <div id="detail-more-content" class="hidden">
+        <div class="meta" id="detail-cluster"></div>
+        <div class="meta" id="detail-context"></div>
+        <div id="detail-context-note" class="hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside id="side-col">
+    <div id="status">
+      <span id="status-text">Loading stations&hellip;</span>
+      <button id="status-detail-toggle" class="hidden">Details &#9656;</button>
+      <div id="status-detail" class="hidden"></div>
+    </div>
+
+    <div id="side-content">
+
+      <!-- Design critique task 03: the rail used to open with everything
+           valuable (equity counts, the fleet baseline) present but at zero
+           visible pixels -- two collapsed accordions and a disclaimer. This
+           permanent readout states real numbers immediately, no click
+           required. Three of the four tiles are genuinely live (recomputed
+           on every relevant change, see renderReadout() below); the fleet
+           baseline is real but intentionally NOT relabeled as live -- it's
+           fleet_scenarios.json's own fixed AM-window (6-9am) precomputation,
+           independent of the map's own hour/period selector, and claiming
+           otherwise would be exactly the kind of invented-precision this
+           project's CLAUDE.md rules out. -->
+      <div class="readout" id="readout">
+        <div><b id="readout-deficit"></b><span>stations, AM (6-9am) deficit baseline</span></div>
+        <div><b id="readout-equity"></b><span>of <span id="readout-equity-total"></span> within NYCHA/school threshold</span></div>
+        <div><b id="readout-subway-gap"></b><span>beyond the subway-gap threshold</span></div>
+        <div><b id="readout-filter"></b><span>current map filter</span></div>
+      </div>
+
+      <!-- "Worst now" -- real per-station ranking under whatever filter is
+           currently active, doubling as the keyboard/screen-reader-
+           reachable equivalent of the map's 2,516 SVG circles (task 11):
+           there is otherwise no keyboard path to any single station. Click
+           behavior reuses selectStation() unchanged, the exact same path a
+           real marker click already goes through -- not a second, parallel
+           selection mechanism. Hidden entirely in live mode (no historical
+           curve to rank by; see renderReadout()). -->
+      <div class="worst" id="worst-wrap">
+        <div class="worst__title">Worst now</div>
+        <ul id="worst-list"></ul>
+      </div>
+
+      <!-- Investigator is its own standalone collapsible now, not one
+           half of a tab pair -- Model (below) is a static reference
+           table, not an interactive "mode" alongside it, so pairing them
+           as equal-weight tabs overstated Model's actual role.
+
+           Design critique task 09: native <details> here too. The teaser
+           (always visible even collapsed -- a first-time visitor has no
+           reason to click a plain "Investigator mode" row otherwise) has
+           to live INSIDE <summary> now, not as a sibling after it --
+           native <details> hides everything except <summary> when
+           closed, so a sibling div would have disappeared along with the
+           real collapsible content. <summary> can contain block-level
+           content like this without issue. Real behavior (expanding
+           reveals the scenario card even at baseline) preserved via a
+           'toggle' event listener in the script below, not lost in the
+           conversion. -->
+      <details id="investigator-panel">
+        <summary id="investigator-toggle">
+          <span class="accordion-head-row"><span>Investigator mode</span><span id="investigator-badge" class="investigator-badge hidden"></span></span>
+          <span id="investigator-teaser">Simulate fleet size, weather, and equity thresholds against real data.</span>
+        </summary>
+        <div id="tab-panel-investigator">
+        <div id="investigator-diff-bar" class="hidden">
+          <div class="scenario-card-head">
+            <span class="scenario-card-title">Scenario vs. baseline</span>
+            <div class="scenario-card-head-actions">
+              <!-- Moved here from the "Save / load / reset" accordion --
+                   Reset belongs right next to the summary it undoes, not
+                   buried behind an unrelated section someone has to know
+                   to look in. -->
+              <button id="reset-baseline-btn" class="share-btn">Reset</button>
+              <button id="save-preset-btn" class="share-btn">&#10554; Share</button>
+            </div>
+          </div>
+          <input type="text" id="preset-url-output" readonly placeholder="Shareable link appears here after Share">
+
+          <!-- Design critique task 04: bars now encode the DELTA from
+               baseline, zero-centered on a real per-row domain -- not an
+               absolute level with a separately-drawn baseline tick, which
+               is how a bar reading ~60% full could sit right next to a
+               "No change" pill and visually contradict it. The zero line
+               itself (see .scenario-bar-track::before) IS the baseline
+               reference now; there's no separate movable tick left to
+               draw, so scenario-bar-tick is gone from both rows. -->
+          <div class="scenario-row" id="scenario-row-equity">
+            <div class="scenario-row-head">
+              <span class="scenario-row-label">Equity</span>
+              <span class="scenario-pill neutral" id="scenario-pill-equity"></span>
+            </div>
+            <div class="scenario-bar-track">
+              <div class="scenario-bar-fill" id="scenario-fill-equity"></div>
+            </div>
+            <div class="scenario-bar-domain">change in stations flagged, share of 2,516 total</div>
+            <div class="scenario-row-foot">
+              <span class="baseline" id="scenario-baseline-equity"></span>
+              <span class="scenario" id="scenario-scenario-equity"></span>
+            </div>
+          </div>
+
+          <div class="scenario-row" id="scenario-row-fleet">
+            <div class="scenario-row-head">
+              <span class="scenario-row-label">Fleet</span>
+              <span class="scenario-pill neutral" id="scenario-pill-fleet"></span>
+            </div>
+            <div class="scenario-bar-track">
+              <div class="scenario-bar-fill" id="scenario-fill-fleet"></div>
+            </div>
+            <div class="scenario-bar-domain">change in unserved deficit stations, share of the flagged total</div>
+            <div class="scenario-row-foot">
+              <span class="baseline" id="scenario-baseline-fleet"></span>
+              <span class="scenario" id="scenario-scenario-fleet"></span>
+            </div>
+          </div>
+
+          <!-- Weather is a projection INPUT, not an outcome measured in the
+               same "stations affected" unit as the two rows above -- it
+               gets no bar at all now, rather than a bar on an incomparable
+               0-90degF scale that used to need its own disclaimer caption
+               to explain why it couldn't be compared to the others. -->
+          <div class="scenario-row" id="scenario-row-weather">
+            <div class="scenario-row-head">
+              <span class="scenario-row-label">Weather</span>
+              <span class="scenario-pill neutral" id="scenario-pill-weather"></span>
+            </div>
+            <div class="scenario-weather-value" id="scenario-weather-value"></div>
+          </div>
+
+          <!-- Plain-English synthesis, template-built from the exact
+               numbers already computed above -- never an LLM call, this
+               project's $0/never-invent-numbers rule applies here just
+               like everywhere else. Only states what actually changed;
+               nothing is asserted about categories still at baseline. -->
+          <div id="scenario-summary"></div>
+        </div>
+
+        <!-- Design critique task 09: native <details>/<summary>, not
+             hand-rolled JS toggles -- free keyboard (Enter/Space) and
+             screen-reader semantics, and a shared `name` gives free
+             mutual exclusion (only one of these four open at a time)
+             with no JS at all, a real browser feature (Baseline 2023+),
+             not a polyfill. -->
+        <details class="accordion" id="equity-accordion" name="investigator-subpanel">
+          <summary class="accordion-toggle" id="equity-accordion-toggle">
+            <span>Equity thresholds</span>
+          </summary>
+          <div class="accordion-content" id="equity-accordion-content">
+            <div class="investigator-slider">
+              <label for="nycha-school-slider">NYCHA / school proximity: <span id="nycha-school-value">300</span> m</label>
+              <input type="range" id="nycha-school-slider" min="0" max="3000" step="50" value="300">
+            </div>
+            <div class="investigator-slider">
+              <label for="subway-gap-slider">Subway gap: <span id="subway-gap-value">800</span> m</label>
+              <input type="range" id="subway-gap-slider" min="0" max="3000" step="50" value="800">
+            </div>
+            <div id="investigator-counts">
+              <!-- Combined (union) is the primary, most-asked number --
+                   promoted to its own bold line. NYCHA/school/overlap are
+                   the derived breakdown underneath it, indented and
+                   de-emphasized so the relationship reads visually, not
+                   just five same-weight lines in a row. Subway gap is a
+                   genuinely separate criterion (its own threshold, no
+                   relation to NYCHA/school), so it's set apart below a
+                   divider rather than folded into the same group. -->
+              <div id="count-nycha-or-school" class="equity-count-primary"></div>
+              <div class="equity-count-breakdown">
+                <div id="count-nycha"></div>
+                <div id="count-school"></div>
+                <div id="count-nycha-and-school"></div>
+              </div>
+              <div id="count-subway-gap" class="equity-count-separate"></div>
+            </div>
+          </div>
+        </details>
+
+        <details class="accordion hidden" id="fleet-accordion" name="investigator-subpanel">
+          <summary class="accordion-toggle" id="fleet-accordion-toggle">
+            <span>Fleet simulator<span class="accordion-badge" id="fleet-badge"></span></span>
+          </summary>
+          <div class="accordion-content" id="fleet-sim-wrap">
+            <div class="investigator-slider">
+              <label for="fleet-size-slider">Fleet size: <span id="fleet-size-value">1</span> truck(s)</label>
+              <input type="range" id="fleet-size-slider" min="1" max="10" step="1" value="1">
+            </div>
+            <div class="map-tie-in-cue">Click "Show route" on the map, then drag this slider &mdash; the real route redraws live.</div>
+            <div id="fleet-stats"></div>
+            <div id="fleet-sim-note">Checked against real data, not assumed: added trucks do not show smoothly diminishing returns at this scale. Every truck hits its own 45-stop shift cap before ever running out of flagged stations, so the binding constraint here is each truck's per-shift stop budget, not overall demand.</div>
+          </div>
+        </details>
+
+        <details class="accordion hidden" id="weather-accordion" name="investigator-subpanel">
+          <summary class="accordion-toggle" id="weather-accordion-toggle">
+            <span>Weather scenario</span>
+          </summary>
+          <div class="accordion-content" id="weather-scenario-wrap">
+            <select id="weather-preset-select"></select>
+            <div class="map-tie-in-cue">Watch the map recolor live as you adjust these &mdash; no separate toggle needed.</div>
+            <div class="investigator-slider">
+              <label for="weather-temp-slider">Temperature: <span id="weather-temp-value">72</span>&deg;F</label>
+              <input type="range" id="weather-temp-slider" min="0" max="90" step="1" value="72">
+            </div>
+            <div class="investigator-slider">
+              <label for="weather-precip-slider">Precipitation: <span id="weather-precip-value">0.0</span> in</label>
+              <input type="range" id="weather-precip-slider" min="0" max="1" step="0.05" value="0">
+            </div>
+            <div id="weather-scenario-status"></div>
+            <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model. A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Jul 2025-Jun 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading -- each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
+          </div>
+        </details>
+
+        <details class="accordion" id="presets-accordion" name="investigator-subpanel">
+          <summary class="accordion-toggle" id="presets-accordion-toggle">
+            <span>Load a shared scenario</span>
+          </summary>
+          <div class="accordion-content" id="preset-controls">
+            <input type="text" id="preset-load-input" placeholder="Paste a shared link here">
+            <button id="load-preset-btn" class="day-btn">Load preset</button>
+          </div>
+        </details>
+        </div>
+      </details>
+
+      <!-- Model performance: a small, low-emphasis reference disclosure
+           near the footer -- real numbers, but static and read-once, so
+           it doesn't need Investigator's level of prominence. Fetched from
+           data/model_performance.json (Session 30's walk-forward run)
+           rather than hardcoded here -- hardcoded numbers are exactly what
+           went stale after Session 5/7.5, still showing a single Feb+April
+           -> June split long after Session 30's real 12-fold walk-forward
+           superseded it. Hidden entirely if that file is missing, same
+           graceful-degradation rule as route.json/fleet_scenarios.json. -->
+      <!-- Design critique task 09: native <details> -- the outer
+           class="hidden" (graceful degradation if model_performance.json
+           failed to load, toggled by renderModelPerformance()) is
+           independent of and stacks fine with the element's own native
+           open/closed state; a <details> can be display:none via a class
+           regardless of its open attribute. No JS at all needed for
+           open/close here (unlike Investigator's), since nothing
+           re-renders on toggle -- the table is populated once at load
+           regardless of visibility. -->
+      <details id="model-eval" class="hidden">
+        <summary id="model-eval-toggle">Model performance</summary>
+        <div id="tab-panel-model">
+          <!-- Design critique task 05: the plain-language explanation
+               moved ABOVE the table it explains, not below -- a reader
+               should know what they're looking at before the numbers, not
+               after. This text already existed and was already real
+               (Session 30's actual walk-forward result, not invented for
+               this move); only its position changed. -->
+          <div id="model-eval-caption"></div>
+          <table>
+            <thead>
+              <tr><th>Tier</th><th>Mean MAE (bikes/day)</th><th>vs. naive</th></tr>
+            </thead>
+            <tbody id="model-eval-tbody"></tbody>
+          </table>
+        </div>
+      </details>
+
+      <div id="footer">Public data: Citi Bike GBFS &amp; trip data, NYC Open Data, Open-Meteo. Independent portfolio project, not an official NYC DOT product.</div>
+
+    </div>
+  </aside>
+
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+// Session 10 built the map skeleton (fixed 8am, no interactivity). Session 11
+// added the 24h time slider. Session 12 added the weekday/weekend toggle.
+// Session 13 added the station click -> detail panel. Session 14 added the
+// season/month period selector. Session 15 added the live GBFS docks mode
+// (marker clustering was scoped out of Session 15 pending clarification --
+// no computeClusterColor or similar existed anywhere at that point, verified
+// by grep across this file, reference/dashboard.html, and PROGRESS.md).
+// Session 16 added marker clustering (view-mode toggle, Leaflet.markercluster,
+// mode-aware cluster coloring). Session 17 fixed a refreshClusters() crash
+// on every page load plus the file:// error message. Session 18 replaced
+// the floating top-bar layout with a left sidebar + map-fill split. Session
+// 19 fixed sidebar height: the station count moved into the title subtitle
+// (no separate boxed row), the Legend/Station-detail pair share one
+// fixed-height tabbed container instead of two independently-growing
+// blocks, and a condensed footer was added (none existed before). Session
+// 20 adds the rebalancing-route layer (route.json, historical-mode-only,
+// graceful degradation if the file is missing) and a collapsed-by-default
+// model-eval footer (real Session 7.5 MAE-by-volume-tercile numbers, not
+// fetched -- see PROGRESS.md for where they came from) -- each
+// interaction lands as its own commit. Equity filter is a standing scope
+// exclusion, see
+// CLAUDE.md -- per-station equity context in the detail panel is in scope
+// and unaffected. No mobile
+// breakpoint exists yet (flagged as a separate decision, not silently
+// left broken -- see PROGRESS.md).
+
+const DEFAULT_HOUR = 8; // initial slider position; no longer a fixed constant once wired up
+
+// Radius scales with ZOOM (design critique task 08), not with flow
+// MAGNITUDE -- these are different axes and don't conflict with each
+// other. Magnitude-encoded size was deliberately rejected earlier: with
+// ~2,300 stations packed tightly in Manhattan, a size-encodes-magnitude
+// scheme would make the densest, most decision-relevant area the most
+// visually cluttered and hardest to click precisely, and the diverging
+// color scale already carries magnitude on its own. Zoom-based size is a
+// different, standard cartographic convention (things look bigger as you
+// zoom in, regardless of their data value) and doesn't reopen that
+// decision. Calibrated so the existing fixed radius (5px) sits near the
+// middle of the real zoom range this map actually uses (minZoom ~8-9 from
+// setMinZoom, maxZoom 19), not an arbitrary formula.
+const MARKER_MIN_RADIUS_PX = 2.5;
+const MARKER_MAX_RADIUS_PX = 8;
+function markerRadiusForZoom(zoom) {
+  const r = 2.5 + (zoom - 12) * 0.7;
+  return Math.max(MARKER_MIN_RADIUS_PX, Math.min(MARKER_MAX_RADIUS_PX, r));
+}
+
+// Hover-only "grow" affordance, deliberately independent of the selection
+// styling (SELECTED_STROKE/SELECTED_WEIGHT below): selection is a thicker,
+// darker ring that persists; hover is a temporary size change that reverts
+// on mouseout. Distinct enough that a reviewer can't mistake "I'm hovering
+// this" for "this is the selected station." Leaflet's own .leaflet-interactive
+// CSS class already sets cursor:pointer on every clickable vector layer, so
+// that part of the affordance needs no extra code here. Relative to the
+// CURRENT zoom-based radius now (+2px), not a fixed absolute value --
+// otherwise hover would feel inconsistent at the zoom extremes (barely
+// noticeable at max zoom, oversized at min zoom).
+const MARKER_HOVER_RADIUS_DELTA_PX = 2;
+
+// Diverging red<->gray<->blue, matching the palette already used in the
+// Session 7.5 EDA report: red = draining (deficit, no bikes to pick up),
+// blue = filling (surplus, no docks to return to), gray = near zero.
+const DEFICIT_COLOR = [227, 73, 72];   // #e34948
+const SURPLUS_COLOR = [42, 120, 214];  // #2a78d6
+const NEUTRAL_COLOR = [137, 135, 129]; // #898781
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function lerpColor(c1, c2, t) {
+  return `rgb(${Math.round(lerp(c1[0], c2[0], t))}, ${Math.round(lerp(c1[1], c2[1], t))}, ${Math.round(lerp(c1[2], c2[2], t))})`;
+}
+
+// 10% opacity wash, per the dataviz area-fill spec -- a wash, never a
+// saturated block. Used only by the station detail strip's area fills;
+// the map markers use lerpColor/divergingColor directly, unchanged.
+function rgba(c, alpha) {
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`;
+}
+
+function divergingColor(value, domainMax) {
+  const t = Math.max(-1, Math.min(1, value / domainMax));
+  return t < 0 ? lerpColor(DEFICIT_COLOR, NEUTRAL_COLOR, t + 1) : lerpColor(NEUTRAL_COLOR, SURPLUS_COLOR, t);
+}
+
+// Design critique (Session 43-ish, dashboard2.html only), task 02: red-to-
+// blue interpolated in sRGB (divergingColor above) passes through a dark,
+// ~45%-lightness warm gray at the midpoint -- on the pale CARTO Positron
+// basemap this makes BALANCED stations the heaviest marks on the map,
+// inverting the visual weight a map like this needs (deficit/surplus
+// concentrations should read first, not "nothing's wrong here" gray).
+// Fixed with 5 explicit classes (ColorBrewer RdBu-5) instead of a
+// continuous interpolation -- readable at small marker sizes, and it lets
+// the legend match the map exactly (a discrete legend can't misrepresent a
+// continuous scale the way a 3-stop gradient often does).
+const RAMP = ['#b2182b', '#ef8a62', '#f7f7f7', '#67a9cf', '#2166ac'];
+
+function classOf(value, domainMax) {
+  const t = domainMax ? value / domainMax : 0;
+  if (t <= -0.55) return 0;
+  if (t < -0.14) return 1;
+  if (t <= 0.14) return 2; // balanced
+  if (t < 0.55) return 3;
+  return 4;
+}
+
+// fillOpacity recedes specifically for the balanced class (0.22 vs 0.9) --
+// this, not marker radius, is how this map encodes "nothing much going on
+// here" fading into the background. Radius stays fixed (see
+// MARKER_RADIUS_PX above): with ~2,500 stations packed tightly in
+// Manhattan, magnitude-scaled radius would make the densest,
+// most decision-relevant area the most visually cluttered and hardest to
+// click precisely -- a real, deliberate tradeoff already made in this
+// codebase, not reopened here just because the critique suggested it.
+function rampColor(value, domainMax) {
+  return RAMP[classOf(value, domainMax)];
+}
+
+function rampOpacity(value, domainMax) {
+  return classOf(value, domainMax) === 2 ? 0.22 : 0.9;
+}
+
+function percentile(sortedArr, p) {
+  const idx = (sortedArr.length - 1) * p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sortedArr[lo];
+  return lerp(sortedArr[lo], sortedArr[hi], idx - lo);
+}
+
+// Every weekday/weekend curve a station has, across every granularity: the
+// all-period average plus every season plus every month it's present in
+// (coverage varies per station -- e.g. only 365 of 2,347 stations have
+// 2026-05 -- so this only collects what actually exists for that station,
+// never fabricating a missing bucket).
+function allPeriodCurves(station) {
+  const curves = [station.weekday, station.weekend];
+  for (const key in station.seasons) curves.push(station.seasons[key].weekday, station.seasons[key].weekend);
+  for (const key in station.months) curves.push(station.months[key].weekday, station.months[key].weekend);
+  return curves;
+}
+
+// Domain computed once across ALL 24 hours x BOTH day types x EVERY PERIOD
+// (all-period average, every season, every month) x all stations -- not
+// per-hour, per-day-type, or per-period. Recomputing it per hour would make
+// color intensity meaningless across the slider (Session 11); recomputing
+// it per day type has the same problem one level up (Session 12); a period
+// selector is the same invariant a third time -- switching from "all-period
+// average" to "May 2026" must not rescale color intensity, or a modest May
+// swing could render as saturated as a genuine all-period extreme. Same
+// 95th-percentile-of-|value| logic as before, just over a bigger pool;
+// floored at 0.5 to avoid a degenerate 0-width domain.
+function computeDomainMax(stations) {
+  const allAbs = [];
+  for (const id in stations) {
+    for (const curve of allPeriodCurves(stations[id])) {
+      for (let h = 0; h < 24; h++) allAbs.push(Math.abs(curve[h]));
+    }
+  }
+  allAbs.sort((a, b) => a - b);
+  return Math.max(percentile(allAbs, 0.95), 0.5);
+}
+
+function formatHourLabel(hour) {
+  const period = hour < 12 ? 'AM' : 'PM';
+  let displayHour = hour % 12;
+  if (displayHour === 0) displayHour = 12;
+  return `${displayHour}:00 ${period}`;
+}
+
+// Period values are 'all', `season:${name}`, or `month:${YYYY-MM}` --
+// dynamically built from flows.json's own `granularity` block (never a
+// hardcoded season/month list), so this parses that same shape back apart.
+function parsePeriod(period) {
+  if (period === 'all') return { kind: 'all', key: null };
+  const sep = period.indexOf(':');
+  return { kind: period.slice(0, sep), key: period.slice(sep + 1) };
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function formatPeriodLabel(period) {
+  if (period === 'all') return 'all-period average';
+  const { kind, key } = parsePeriod(period);
+  if (kind === 'season') return key;
+  const [year, month] = key.split('-').map(Number);
+  return `${MONTH_NAMES[month - 1]} ${year}`;
+}
+
+function periodOptionLabel(period) {
+  if (period === 'all') return 'All-period average';
+  const label = formatPeriodLabel(period);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+// Whether `station` actually has a bucket for `period` -- NOT whether that
+// bucket has a nonzero value. Coverage varies per station (see
+// allPeriodCurves above); this is the single source of truth both the
+// marker "no data" styling and the detail panel's "no data" state read from,
+// so they can never disagree about which stations are missing a period.
+function hasPeriodData(station, period) {
+  if (period === 'all') return true;
+  const { kind, key } = parsePeriod(period);
+  return Boolean(kind === 'season' ? station.seasons[key] : station.months[key]);
+}
+
+// Returns the 24h curve for `period`/`dayType`, or null if `station` has no
+// data for that period. Never fabricates a curve for a missing period.
+function curveForPeriod(station, period, dayType) {
+  if (period === 'all') return station[dayType];
+  const { kind, key } = parsePeriod(period);
+  const bucket = kind === 'season' ? station.seasons[key] : station.months[key];
+  return bucket ? bucket[dayType] : null;
+}
+
+// Fixed deviation-from-50% domain for live fill level, NOT state.domainMax
+// and NOT pooled -- percent-full is naturally bounded to [0, 100] already,
+// unlike historical flow magnitude, which has no natural ceiling and needs
+// a percentile-based domain. Fed straight into the same divergingColor()
+// the historical view uses: 0% full -> t=-1 (red, same "can't get a bike"
+// meaning as a flow deficit), 100% full -> t=+1 (blue, same "can't return a
+// bike" meaning as a flow surplus), 50% -> t=0 (gray). One consistent
+// visual language across historical and live, not a second color scale.
+const LIVE_FILL_DOMAIN = 50;
+
+// A station has a usable live reading only if it has a crosswalk match,
+// AND a real capacity to divide by (52 real-world stations report
+// capacity: 0), AND is fully operational (is_renting/is_returning both
+// true -- ~96 real-world stations are mid-maintenance or otherwise
+// offline). All three collapse into one no-data bucket, same hollow-marker
+// convention as a missing historical period -- not a second visual
+// language for "why there's no data."
+function hasLiveData(id) {
+  const live = state.liveStations[id];
+  return Boolean(live && live.capacity > 0 && live.is_renting && live.is_returning);
+}
+
+// Deterministic, timezone-free formatting for the feed's own UTC
+// last_updated timestamp (an ISO string like "2026-07-14T04:30:08+00:00")
+// -- deliberately not `new Date(...).toLocaleString()`, which would make
+// the displayed "as of" time depend on the viewer's local timezone/locale
+// and be non-deterministic to test.
+function formatAsOf(isoString) {
+  if (!isoString) return 'unknown';
+  return `${isoString.replace('T', ' ').replace(/[+-]\d{2}:\d{2}$/, '').replace(/Z$/, '')} UTC`;
+}
+
+// Mean net flow of children that HAVE data for the current hour/dayType/
+// period, colored via the same divergingColor()/domainMax every individual
+// historical marker uses -- a cluster's color is directly comparable to an
+// individual marker's, not a separately-scaled summary. Pure and Leaflet-
+// free: takes plain numbers in, a color (or null) out, so it's testable
+// without stubbing markercluster's clustering geometry at all. Returns null
+// -- never averages in a missing child as zero -- when childFlows is empty,
+// so the caller can render the same hollow-gray no-data convention as an
+// individual no-data marker.
+function computeClusterColor(childFlows, domainMax) {
+  if (childFlows.length === 0) return null;
+  const mean = childFlows.reduce((sum, value) => sum + value, 0) / childFlows.length;
+  return rampColor(mean, domainMax);
+}
+
+// Same shape and same "empty -> null, never zero-filled" rule as
+// computeClusterColor, but for live fill percentages: mean deviation-from-50
+// of children with a valid live reading, against the FIXED LIVE_FILL_DOMAIN
+// (never state.domainMax) -- same reasoning as individual live markers.
+function computeLiveClusterColor(childFillPcts) {
+  if (childFillPcts.length === 0) return null;
+  const mean = childFillPcts.reduce((sum, value) => sum + value, 0) / childFillPcts.length;
+  return rampColor(mean - 50, LIVE_FILL_DOMAIN);
+}
+
+// Pure HTML-string builder for one cluster icon -- no Leaflet involved, so
+// the visual/color logic is testable on its own. A null color (no valid
+// children for the current mode/period) renders the same hollow-gray
+// convention as an individual no-data marker: transparent fill, gray ring.
+function clusterIconHTML(color, count) {
+  const isNoData = color === null;
+  const background = isNoData ? 'transparent' : color;
+  const border = isNoData ? NO_DATA_STROKE : '#ffffff';
+  const textColor = isNoData ? '#898781' : '#ffffff';
+  return `<div style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${background};border:2px solid ${border};color:${textColor};font-weight:600;font-size:13px;font-family:system-ui,-apple-system,sans-serif;">${count}</div>`;
+}
+
+// Leaflet.markercluster's iconCreateFunction hook -- called whenever a
+// cluster needs (re)drawing. Resolves each child marker back to its station
+// id via marker.stationId (tagged at creation time), looks up exactly the
+// same underlying value an individual marker would use for the CURRENT
+// state.mode, and delegates the aggregation/coloring to the pure functions
+// above. `cluster` only needs .getAllChildMarkers()/.getChildCount() here --
+// no spatial clustering geometry -- so a plain fake object with those two
+// methods is enough to test this directly.
+function clusterIconCreateFunction(cluster) {
+  const children = cluster.getAllChildMarkers();
+  let color;
+  if (state.mode === 'live') {
+    const fillPcts = [];
+    for (const marker of children) {
+      if (hasLiveData(marker.stationId)) {
+        const live = state.liveStations[marker.stationId];
+        fillPcts.push((live.bikes_available / live.capacity) * 100);
+      }
+    }
+    color = computeLiveClusterColor(fillPcts);
+  } else {
+    const flows = [];
+    for (const marker of children) {
+      const curve = curveForPeriod(state.stations[marker.stationId], state.period, state.dayType);
+      if (curve !== null) flows.push(curve[state.currentHour]);
+    }
+    color = computeClusterColor(flows, state.domainMax);
+  }
+  return L.divIcon({
+    html: clusterIconHTML(color, cluster.getChildCount()),
+    className: 'cluster-icon',
+    iconSize: L.point(40, 40),
+  });
+}
+
+// Forces every currently-visible cluster icon to re-run
+// clusterIconCreateFunction against the latest state -- Leaflet.markercluster
+// caches icons otherwise, so without this, grouped view would show stale
+// colors after the hour/dayType/period/mode changes. Called from exactly one
+// place (renderHour, below) rather than separately from setDayType/setPeriod/
+// setMode, because all three already funnel through renderHour -- same "one
+// hook point" reasoning already used for updateStationDetail().
+//
+// Guarded behind map.hasLayer(state.clusterLayer): markercluster's
+// refreshClusters() reads internal state (_topClusterLevel) that's only set
+// up once the group has actually been added to the map via its own onAdd
+// lifecycle. renderHour() runs once at initial load -- before the user has
+// ever switched to grouped view -- so calling refreshClusters() unconditionally
+// throws on every single page load, not just when toggling views (confirmed
+// bug, not a hypothetical: this uncaught exception aborted the load .then()
+// callback before it reached ANY of the addEventListener calls below it,
+// which is why controls appeared completely unresponsive).
+function refreshClusters() {
+  if (state.clusterLayer && map.hasLayer(state.clusterLayer)) state.clusterLayer.refreshClusters();
+}
+
+// route.json's own dedicated color -- deliberately NOT reused from
+// DEFICIT_COLOR/SURPLUS_COLOR/NEUTRAL_COLOR. Those three already carry a
+// specific meaning (net-flow magnitude/sign) on this same map; a route
+// stop is a truck-visit-sequence marker, not a flow value, so painting it
+// red or blue would misleadingly suggest a deficit/surplus reading that
+// isn't what the marker means.
+const ROUTE_COLOR = '#7c4dbd';
+
+// Golden-angle spiral offset for the Nth visit to the same station within
+// one truck's tour (route.json's stops can and do revisit a station --
+// confirmed against the real data before building this, not assumed).
+// sqrt(visitIndex) growth keeps consecutive repeats close together at
+// first and only fans out further for a station visited many times,
+// rather than every repeat jumping the same fixed distance. Pure and
+// Leaflet-free: testable with plain integers.
+const STOP_OFFSET_STEP = 0.00004; // ~4-5m in latitude degrees at NYC's latitude
+const GOLDEN_ANGLE_DEG = 137.5;
+function computeStopOffset(visitIndex) {
+  if (visitIndex === 0) return { dLat: 0, dLng: 0 };
+  const angleRad = visitIndex * GOLDEN_ANGLE_DEG * (Math.PI / 180);
+  const radius = STOP_OFFSET_STEP * Math.sqrt(visitIndex);
+  return { dLat: radius * Math.cos(angleRad), dLng: radius * Math.sin(angleRad) };
+}
+
+// For each stop in one truck's tour (in visit order), how many times its
+// station has already appeared earlier in the SAME tour -- 0 for a
+// station's first visit, 1 for its second, etc. Pure: takes route.json's
+// own stop objects, returns a parallel array of integers, no Leaflet.
+function assignVisitIndices(stops) {
+  const seenCounts = {};
+  return stops.map(stop => {
+    const visitIndex = seenCounts[stop.station_id] || 0;
+    seenCounts[stop.station_id] = visitIndex + 1;
+    return visitIndex;
+  });
+}
+
+// Pure HTML-string builder for one route stop marker -- pickup is a
+// circle, dropoff is a diamond (a rotated square), so the two are
+// distinguishable by SHAPE, not color (color is one dedicated route hue
+// for both, per ROUTE_COLOR's own comment -- shape carries the
+// pickup/dropoff distinction, same "don't spend the same channel twice"
+// reasoning as the rest of this dashboard's color usage). The visit-order
+// number sits inside either shape; the diamond's number is counter-
+// rotated so it reads upright.
+function buildStopIconHTML(action, stopNumber, color) {
+  if (action === 'pickup') {
+    return `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #ffffff;color:#ffffff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(11,11,11,0.35);">${stopNumber}</div>`;
+  }
+  return `<div style="width:20px;height:20px;background:${color};border:2px solid #ffffff;transform:rotate(45deg);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(11,11,11,0.35);"><span style="display:inline-block;transform:rotate(-45deg);color:#ffffff;font-size:10px;font-weight:700;">${stopNumber}</span></div>`;
+}
+
+// Builds the route layer from route.json's real shape: one polyline plus
+// one numbered stop marker per truck's stops, in visit order. Independent
+// of individualLayer/clusterLayer entirely -- this is its own layer group,
+// drawn on top of whichever of those is currently on the map, never part
+// of the Individual/Grouped swap. Each stop marker's click opens that
+// station's detail panel via the same selectStation() every other marker
+// uses, regardless of how many times that station appears in the tour.
+function buildRouteLayer(routeData) {
+  const layers = [];
+  for (const truck of routeData.trucks) {
+    const visitIndices = assignVisitIndices(truck.stops);
+    const latlngs = [];
+    truck.stops.forEach((stop, i) => {
+      const offset = computeStopOffset(visitIndices[i]);
+      const lat = stop.lat + offset.dLat;
+      const lng = stop.lng + offset.dLng;
+      latlngs.push([lat, lng]);
+
+      const marker = L.marker([lat, lng], {
+        icon: L.divIcon({
+          html: buildStopIconHTML(stop.action, i + 1, ROUTE_COLOR),
+          className: 'route-stop-icon',
+          iconSize: [24, 24],
+        }),
+      });
+      marker.on('click', () => selectStation(stop.station_id));
+      layers.push(marker);
+    });
+    // Design critique task 10: a white casing under the colored line so
+    // the route survives visually over ~2,500 packed station dots -- two
+    // overlapping polylines (casing pushed first, so it renders below),
+    // not one thicker colored line, which would just be a wider smear of
+    // the same low-contrast-over-dots problem.
+    layers.push(L.polyline(latlngs, { color: '#ffffff', weight: 5, opacity: 0.9 }));
+    layers.push(L.polyline(latlngs, { color: ROUTE_COLOR, weight: 3, opacity: 0.9 }));
+  }
+  return L.layerGroup(layers);
+}
+
+// Route visibility is the AND of two independent things: the user's own
+// toggle preference (state.routeVisible, which persists across mode
+// switches so the route reappears automatically on returning to
+// historical mode rather than needing to be re-toggled) and whether
+// historical mode is even active (route planning is based on historical
+// deficit/surplus data, never live GBFS, so it's never shown in live mode
+// regardless of the toggle's last state). Both setRouteVisible() and
+// setMode() recompute from this one rule, rather than each independently
+// deciding when to add/remove the layer.
+function applyRouteVisibility() {
+  const shouldShow = !!state.routeLayer && state.routeVisible && state.mode === 'historical';
+  if (state.routeLayer) {
+    if (shouldShow) map.addLayer(state.routeLayer);
+    else map.removeLayer(state.routeLayer);
+  }
+  renderLegendRoute(shouldShow);
+}
+
+// Design critique task 10: the legend's route row, real stop count from
+// state.route's own trucks/stops (never a hardcoded placeholder like the
+// critique's own mockup "42"). Explicit hide-path runs even when
+// state.routeLayer is null (route.json never loaded, or hasn't yet) --
+// same standing rule as every other control in this file: default
+// visible/hidden state is set in JS, never left to the static markup's
+// class="hidden" to already be correct (Sessions 19/20A/20B/21).
+function renderLegendRoute(shouldShow) {
+  const row = document.getElementById('legend-route-row');
+  row.classList.toggle('hidden', !shouldShow);
+  if (!shouldShow || !state.route) return;
+  const stopCount = state.route.trucks.reduce((sum, truck) => sum + truck.stops.length, 0);
+  document.getElementById('legend-route-text').textContent = `Simulated route · ${stopCount} stop${stopCount === 1 ? '' : 's'}`;
+}
+
+function setRouteVisible(visible) {
+  state.routeVisible = visible;
+  const btn = document.getElementById('route-toggle-btn');
+  btn.textContent = visible ? 'Hide route' : 'Show route';
+  btn.classList.toggle('active', visible);
+  applyRouteVisibility();
+}
+
+// Factored out (not just inlined into state's own initializer below) so
+// Phase 6's "Reset to baseline" control can produce the exact same
+// defaults without retyping the magic numbers a second place they could
+// drift out of sync -- returns a fresh object each call, never a shared
+// reference, so resetting can't accidentally alias into whatever the
+// live state object currently is.
+function defaultInvestigatorState() {
+  return {
+    equityThresholds: { nycha_school_m: 300, subway_gap_m: 800 }, // CLAUDE.md's fixed defaults
+    fleetSize: 1, // Phase 3 -- 1..10 trucks, matches fleet_scenarios.json's own fleet_sizes range
+    // Phase 4 -- defaults to the 'ideal' preset's own values, which is
+    // also the fixed reference point the projection subtracts against,
+    // so the default state produces exactly zero adjustment (not just
+    // approximately) until the user actually picks something else.
+    weatherScenario: { temp_c: 22.2, precip_mm: 0.0, presetId: 'ideal' },
+  };
+}
+
+// Dashboard state, kept in one place (rather than scattered closure
+// variables) so the Node smoke test can inspect it via the test hook below.
+const state = {
+  stations: null,   // raw stations object from flows.json, once loaded
+  markers: {},      // station_id -> Leaflet circleMarker, kept for in-place updates
+  domainMax: null,
+  currentHour: DEFAULT_HOUR,
+  dayType: 'weekday',
+  period: 'all', // 'all' | `season:${name}` | `month:${YYYY-MM}`
+  selectedId: null, // station id with an open detail panel, or null
+  mode: 'historical', // 'historical' | 'live'
+  liveStations: null, // station_id -> {capacity, bikes_available, docks_available, is_renting, is_returning}, from live_status.json
+  liveAsOf: null, // live_status.json's own last_updated (ISO string), never the viewer's local load time
+  viewMode: 'individual', // 'individual' | 'grouped'
+  // Design critique task 08: null until the user explicitly picks a view
+  // via the toggle -- auto-switch-by-zoom (see the zoomend handler below)
+  // only applies while this is null. Once set, it's a real override, not
+  // just a snapshot of the current auto-computed mode -- zooming further
+  // never clears it back to null; only clicking the OTHER toggle button
+  // changes it.
+  viewModeUserForced: null, // 'individual' | 'grouped' | null
+  markerRadius: null, // set for real once the map's actual starting zoom is known, see markerRadiusForZoom()
+  individualLayer: null, // L.layerGroup holding the same marker objects as state.markers
+  clusterLayer: null, // L.markerClusterGroup holding the same marker objects as state.markers
+  detailMoreInfoExpanded: false, // collapsed by default -- see setDetailMoreInfoExpanded()
+  route: null, // route.json's raw payload, or null if it failed to load (graceful degradation, not fatal)
+  routeLayer: null, // L.layerGroup of polylines + numbered stop markers, built once if route.json loads
+  routeVisible: false, // the user's own toggle preference, independent of state.mode -- see applyRouteVisibility()
+  hourPlaying: false, // whether the hour slider is currently auto-advancing -- see setHourPlaying()
+  demoMode: false, // true when flows.json failed and state.stations is DEMO_FLOWS_PAYLOAD instead of real data
+  liveAvailable: true, // false when live_status.json failed independently -- gates the Live mode tab, not tied to demoMode
+  // Investigator Mode's own state namespace, matching the Investigator_Mode_Guideline.md
+  // contract's investigatorState shape -- equityThresholds is Phase 1 (well,
+  // Phase 2)'s only field; fleetSize/weatherScenario/dockOverrides join it
+  // in later phases rather than each getting a separate ad hoc variable.
+  investigatorState: defaultInvestigatorState(),
+  fleetScenarios: null, // raw fleet_scenarios.json payload, or null if it failed/wasn't generated -- graceful degradation, same rule as route.json
+  elasticities: null, // raw elasticities.json payload, or null if missing -- Phase 4's weather-scenario projection needs this
+  scenarioPresets: null, // raw scenario_presets.json payload, or null if missing
+  modelPerformance: null, // raw model_performance.json payload, or null if missing -- Session 30's walk-forward result
+  equityJoinMeta: null, // flows.json's own equity_join{} metadata block (layer vintage labels etc.), or null if flows.json failed to load
+};
+
+// Renders the real pipeline/demand_model.py walk-forward result (Session
+// 30) into the Model performance table -- fetched from
+// data/model_performance.json rather than hardcoded, specifically so this
+// can't go stale the way the old Session 7.5 numbers did (still showing a
+// single Feb+April -> June split long after the 12-fold walk-forward
+// superseded it). #model-eval hides entirely if the file is missing, same
+// graceful-degradation rule as route.json/fleet_scenarios.json.
+function renderModelPerformance(payload) {
+  const wrap = document.getElementById('model-eval');
+  if (!payload) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+
+  const tiers = [
+    { key: 'naive_mean_mae', label: 'Seasonal-naive' },
+    { key: 'gam_mean_mae', label: 'GAM (splines)' },
+    { key: 'guarded_mean_mae', label: 'Guarded (GBM+GAM+naive)' },
+  ];
+  const tbody = document.getElementById('model-eval-tbody');
+  tbody.innerHTML = '';
+  const naiveMae = payload.aggregate.naive_mean_mae;
+  for (const tier of tiers) {
+    const mae = payload.aggregate[tier.key];
+    const row = document.createElement('tr');
+    const vsNaive = tier.key === 'naive_mean_mae' ? '—' : formatSignificance(
+      tier.key === 'gam_mean_mae' ? payload.significance.gam_vs_naive : payload.significance.guarded_vs_naive,
+      mae, naiveMae
+    );
+    row.innerHTML = `<td>${tier.label}</td><td>${mae.toFixed(3)}</td><td>${vsNaive}</td>`;
+    tbody.appendChild(row);
+  }
+
+  const nFolds = payload.folds.length;
+  const firstMonth = payload.months[0];
+  const lastMonth = payload.months[payload.months.length - 1];
+  document.getElementById('model-eval-caption').textContent =
+    `MAE in bikes/day, ${nFolds}-fold leave-one-month-out walk-forward across ${formatPeriodLabel('month:' + firstMonth)} – ${formatPeriodLabel('month:' + lastMonth)}. ` +
+    `Seasonal-naive still wins overall (p<0.05 both comparisons) -- fixing the earlier extrapolation problem (real per-date weather instead of monthly averages) ` +
+    `didn't flip the result, it just made it statistically rigorous instead of a single train/test split.`;
+}
+
+// A paired Wilcoxon result -> "p=0.0024 (naive better)" / "not significant"
+// -- p_value can be null (identical fold-level MAEs, nothing to test).
+// Direction is computed by comparing this tier's own mean MAE against
+// naive's, not assumed -- naive happens to win in every real result this
+// project has produced so far, but the formatter itself makes no such
+// assumption, so a future run where a richer tier actually wins would
+// still be labeled correctly.
+function formatSignificance(result, tierMae, naiveMae) {
+  if (result.p_value === null) return 'n/a';
+  if (result.p_value >= 0.05) return `p=${result.p_value.toFixed(4)} (not significant)`;
+  const winner = tierMae < naiveMae ? 'this tier' : 'naive';
+  return `p=${result.p_value.toFixed(4)} (${winner} better)`;
+}
+
+// Pure function, no DOM/Leaflet -- recomputes equity flags CLIENT-SIDE from
+// each station's raw context distances (nycha_dist_m/school_dist_m/
+// subway_dist_m), never the near_nycha/near_school/transit_gap booleans
+// flows.json also carries (those were baked in by equity_join.py at the
+// FIXED 300m/800m defaults and can't reflect a slider's chosen threshold --
+// this is exactly why Session 6 exported raw distances instead of only
+// flags, per CLAUDE.md). NYCHA and school proximity share one threshold
+// (nycha_school_m) per the Investigator_Mode_Guideline.md contract's
+// equityThresholds shape, but are reported as two separate counts --
+// they're different real-world facilities, and collapsing them into one
+// blended count would hide which one is actually driving a given result.
+// Deliberately returns COUNTS, never a per-station pass/fail list or
+// anything that could feed a map recolor -- CLAUDE.md's standing scope
+// exclusion rules out a map-level equity filter/recolor control in this
+// dashboard, in any session; per-station equity context stays in scope
+// (already in the detail panel), but a whole-map filter does not.
+function computeEquityCounts(stations, thresholds) {
+  const ids = Object.keys(stations);
+  let nychaCount = 0;
+  let schoolCount = 0;
+  let subwayGapCount = 0;
+  // Union/overlap between NYCHA and school specifically -- they share one
+  // slider (nycha_school_m), so "how many stations does this threshold
+  // flag at all" (union) and "how many are flagged by both facility types,
+  // not just one" (overlap/intersection) are what actually answer "which
+  // population is this flagging" for a reviewer, not just two independent
+  // counts that could double-count or hide overlap either way. Subway gap
+  // is a genuinely separate axis (its own threshold, its own kind of
+  // criterion), so it's not folded into this union/overlap.
+  let nychaOrSchoolCount = 0;
+  let nychaAndSchoolCount = 0;
+  for (const id of ids) {
+    const context = stations[id].context;
+    const nearNycha = context.nycha_dist_m <= thresholds.nycha_school_m;
+    const nearSchool = context.school_dist_m <= thresholds.nycha_school_m;
+    if (nearNycha) nychaCount += 1;
+    if (nearSchool) schoolCount += 1;
+    if (nearNycha || nearSchool) nychaOrSchoolCount += 1;
+    if (nearNycha && nearSchool) nychaAndSchoolCount += 1;
+    if (context.subway_dist_m > thresholds.subway_gap_m) subwayGapCount += 1;
+  }
+  return { total: ids.length, nychaCount, schoolCount, subwayGapCount, nychaOrSchoolCount, nychaAndSchoolCount };
+}
+
+// Renders computeEquityCounts()'s result into the three count lines. Called
+// once at load (alongside every other initial render) and again on every
+// slider move -- never a full station-count computation on every 'input'
+// event without throttling, same rAF-coalescing rule the hour slider uses,
+// see the slider wiring below.
+function renderEquityCounts() {
+  const counts = computeEquityCounts(state.stations, state.investigatorState.equityThresholds);
+  const total = counts.total.toLocaleString();
+  document.getElementById('count-nycha').textContent =
+    `Within NYCHA threshold: ${counts.nychaCount.toLocaleString()} of ${total} stations`;
+  document.getElementById('count-school').textContent =
+    `Within school threshold: ${counts.schoolCount.toLocaleString()} of ${total} stations`;
+  document.getElementById('count-nycha-or-school').textContent =
+    `NYCHA or school (combined): ${counts.nychaOrSchoolCount.toLocaleString()} of ${total} stations`;
+  document.getElementById('count-nycha-and-school').textContent =
+    `NYCHA and school (overlap): ${counts.nychaAndSchoolCount.toLocaleString()} of ${total} stations`;
+  document.getElementById('count-subway-gap').textContent =
+    `Beyond subway-gap threshold: ${counts.subwayGapCount.toLocaleString()} of ${total} stations`;
+}
+
+// Design critique task 03: a permanent readout at the top of the rail,
+// recomputed on every filter/hour/threshold change -- not a static
+// snapshot. Three of the four tiles are genuinely live; the fleet
+// baseline is real but intentionally not claimed as live (see the
+// markup's own comment on #readout for why).
+function renderReadout() {
+  if (state.fleetScenarios) {
+    const baseline = state.fleetScenarios.scenarios['1'];
+    document.getElementById('readout-deficit').textContent = baseline.n_deficit_flagged.toLocaleString();
+  }
+
+  if (state.stations) {
+    const counts = computeEquityCounts(state.stations, state.investigatorState.equityThresholds);
+    document.getElementById('readout-equity').textContent = counts.nychaOrSchoolCount.toLocaleString();
+    document.getElementById('readout-equity-total').textContent = counts.total.toLocaleString();
+    document.getElementById('readout-subway-gap').textContent = counts.subwayGapCount.toLocaleString();
+  }
+
+  document.getElementById('readout-filter').textContent = state.mode === 'live'
+    ? 'Live docks'
+    : `${formatHourLabel(state.currentHour)}, ${state.dayType}, ${periodOptionLabel(state.period)}`;
+
+  renderWorstNow();
+}
+
+const WORST_LIST_SIZE = 8;
+
+// The keyboard/screen-reader-reachable equivalent of the map (task 11) --
+// there is otherwise no keyboard path to any of the 2,516 SVG circles.
+// Historical-only: net flow and live dock-fill % aren't the same kind of
+// quantity, and inventing a combined ranking across both would be exactly
+// the kind of made-up number CLAUDE.md rules out -- so in live mode this
+// list simply doesn't apply, same as any other historical-only control.
+function renderWorstNow() {
+  const wrap = document.getElementById('worst-wrap');
+  const list = document.getElementById('worst-list');
+  list.innerHTML = '';
+
+  if (state.mode === 'live') {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+
+  const ranked = [];
+  for (const id in state.stations) {
+    const station = state.stations[id];
+    const curve = curveForPeriod(station, state.period, state.dayType);
+    if (curve === null) continue;
+    const value = curve[state.currentHour] * weatherMultiplierFor(id);
+    ranked.push({ id, name: station.name, value });
+  }
+
+  if (ranked.length === 0) {
+    list.innerHTML = '<li class="worst-empty">No data for this filter.</li>';
+    return;
+  }
+
+  ranked.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  for (const entry of ranked.slice(0, WORST_LIST_SIZE)) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute('aria-label', `${entry.name}, ${entry.value > 0 ? 'surplus' : 'deficit'} ${Math.abs(entry.value).toFixed(1)} bikes/day -- select on map`);
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'worst-name';
+    nameSpan.textContent = entry.name;
+
+    const valueSpan = document.createElement('span');
+    valueSpan.className = 'worst-value';
+    valueSpan.style.color = entry.value < 0 ? rgba(DEFICIT_COLOR, 1) : rgba(SURPLUS_COLOR, 1);
+    valueSpan.textContent = (entry.value > 0 ? '+' : '') + entry.value.toFixed(1);
+
+    btn.appendChild(nameSpan);
+    btn.appendChild(valueSpan);
+    btn.addEventListener('click', () => selectStation(entry.id));
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+}
+
+function setEquityThreshold(key, value) {
+  state.investigatorState.equityThresholds[key] = value;
+  renderEquityCounts();
+  // Fleet stats' equity-overlap line depends on the current thresholds
+  // too, so it has to refresh here, not just from setFleetSize() --
+  // guarded, since the fleet simulator may not have loaded at all.
+  if (state.fleetScenarios) renderFleetStats(state.investigatorState.fleetSize);
+  renderDiffBar();
+  renderReadout(); // the readout's equity tile depends on these same thresholds
+}
+
+// Real intersection between what the fleet simulator actually routes and
+// the current equity thresholds -- not two independently-displayed
+// numbers a reviewer has to mentally combine themselves. "Serviced" means
+// a real stop (pickup OR dropoff) somewhere in the scenario's own real
+// truck data -- station ids straight from fleet_scenarios.json, not a
+// separately-tracked "flagged" list (no such list exists in that file;
+// only counts are precomputed, so this is the one honest thing that IS
+// reconstructable client-side: which stations a truck actually visits).
+// A station id present in the scenario but missing from state.stations
+// (shouldn't happen -- the two files are generated from the same
+// pipeline run -- but they are two separate files) is silently skipped
+// rather than crashing or guessing at its equity status.
+function computeServicedEquityOverlap(scenario, thresholds) {
+  const servicedIds = new Set();
+  for (const truck of scenario.trucks) {
+    for (const stop of truck.stops) servicedIds.add(stop.station_id);
+  }
+  let equityServiced = 0;
+  for (const id of servicedIds) {
+    const station = state.stations[id];
+    if (!station) continue;
+    const context = station.context;
+    const nearNycha = context.nycha_dist_m <= thresholds.nycha_school_m;
+    const nearSchool = context.school_dist_m <= thresholds.nycha_school_m;
+    if (nearNycha || nearSchool) equityServiced += 1;
+  }
+  return { totalServiced: servicedIds.size, equityServiced };
+}
+
+// Fleet simulator (Phase 3): reads a precomputed scenario for the selected
+// fleet size from state.fleetScenarios -- never runs plan_routes.py's
+// greedy algorithm in-browser, per Investigator Mode's own "precomputed,
+// never live-computed" principle. renderFleetStats() is pure display, safe
+// to call any time (including at load, before any interaction);
+// applyFleetScenarioToRoute() is the one function that mutates
+// state.route/state.routeLayer and touches the map. Depends on BOTH
+// fleetSize (the scenario itself) and the current equity thresholds (for
+// the overlap line), so it's re-run from setEquityThreshold() too, not
+// just from setFleetSize().
+function renderFleetStats(fleetSize) {
+  const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
+  const deficitRemaining = scenario.n_deficit_flagged - scenario.n_deficit_serviced;
+  const surplusRemaining = scenario.n_surplus_flagged - scenario.n_surplus_serviced;
+  const overlap = computeServicedEquityOverlap(scenario, state.investigatorState.equityThresholds);
+  document.getElementById('fleet-stats').textContent =
+    `${deficitRemaining.toLocaleString()} of ${scenario.n_deficit_flagged.toLocaleString()} deficit stations still unserved ` +
+    `(${scenario.n_deficit_serviced.toLocaleString()} cleared); ${surplusRemaining.toLocaleString()} of ` +
+    `${scenario.n_surplus_flagged.toLocaleString()} surplus stations still unserved (${scenario.n_surplus_serviced.toLocaleString()} cleared). ` +
+    `Of the ${overlap.totalServiced.toLocaleString()} stations serviced, ${overlap.equityServiced.toLocaleString()} are within your equity thresholds.`;
+  document.getElementById('fleet-badge').textContent = `${fleetSize} truck(s)`;
+}
+
+// Swaps the SAME route layer/toggle the historical "Show route" control
+// uses over to this fleet-size scenario, rather than drawing a second
+// parallel route on the map -- two simultaneous route layers would be
+// visually confusing, and there's only ever one "current" route to show.
+// Explicitly removes the previous layer from the map before swapping:
+// applyRouteVisibility()/setRouteVisible() only ever act on whichever
+// state.routeLayer is CURRENT, so an unremoved stale layer would silently
+// leak onto the map forever otherwise. Auto-shows the route
+// (setRouteVisible(true)) so moving the slider gives immediate visual
+// feedback -- the Guideline's own "Simulate" intent, without a separate
+// button (confirmed with the user: live-on-drag, consistent with every
+// other slider already built).
+function applyFleetScenarioToRoute(fleetSize) {
+  const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
+  if (state.routeLayer) map.removeLayer(state.routeLayer);
+  state.route = scenario;
+  state.routeLayer = buildRouteLayer(scenario);
+  setRouteVisible(true);
+}
+
+function setFleetSize(fleetSize) {
+  state.investigatorState.fleetSize = fleetSize;
+  renderFleetStats(fleetSize);
+  applyFleetScenarioToRoute(fleetSize);
+  renderDiffBar();
+}
+
+// ---- Investigator Mode Phase 6: diff bar, presets, reset ----
+
+// "Baseline" per section reuses each phase's own existing convention
+// (confirmed with the user) rather than inventing new diff-bar-specific
+// semantics: equity = CLAUDE.md's fixed 300m/800m defaults, weather =
+// the 'ideal' reference preset, fleet = 0 trucks (the flagged count
+// before any truck runs -- the same "Y" renderFleetStats() already uses
+// as its own "before" number, not a lookup into a nonexistent scenario
+// "0"). EQUITY_BASELINE_THRESHOLDS is intentionally its own constant,
+// not read from state.investigatorState -- the whole point is a FIXED
+// reference independent of whatever the user's sliders currently show.
+const EQUITY_BASELINE_THRESHOLDS = { nycha_school_m: 300, subway_gap_m: 800 };
+
+// Whether ANY of the three real controls has moved from its own default
+// -- gates the whole diff bar's visibility (zero height when nothing's
+// been explored yet, same "don't cost vertical space in the common
+// case" rule as every other card in this sidebar). Deliberately compares
+// against defaultInvestigatorState() (each field's OWN default), not
+// against the diff-bar's per-section baseline concept above -- fleetSize
+// is always >=1 by construction, so comparing it to "0 trucks" would
+// make this always true even completely untouched.
+function investigatorStateDiffersFromDefault() {
+  const current = state.investigatorState;
+  const def = defaultInvestigatorState();
+  const equityChanged = current.equityThresholds.nycha_school_m !== def.equityThresholds.nycha_school_m
+    || current.equityThresholds.subway_gap_m !== def.equityThresholds.subway_gap_m;
+  const fleetChanged = current.fleetSize !== def.fleetSize;
+  const weatherChanged = current.weatherScenario.temp_c !== def.weatherScenario.temp_c
+    || current.weatherScenario.precip_mm !== def.weatherScenario.precip_mm;
+  return equityChanged || fleetChanged || weatherChanged;
+}
+
+// Writes one scenario-row's pill/bar-fill/baseline-scenario text. Pure DOM
+// writer -- all the real computation (what counts as "changed," what the
+// bar's domain is) lives in each renderDiffBar() call site below,
+// specifically so each metric's domain choice is visible right next to the
+// numbers it's computed from.
+//
+// Design critique task 04: deltaPct replaces the old fillPct/tickPct pair.
+// It's (scenario - baseline) / domain, already signed, clamped to [-1, 1]
+// here (once, in the one place that writes it) -- the bar is zero-centered
+// at the track's own 50% mark (see .scenario-bar-track::before), growing
+// left for a negative delta and right for a positive one, so a bar that's
+// visually empty now means "at baseline" by construction, matching
+// whatever the pill says, instead of a bar showing an absolute level that
+// could disagree with a "No change" pill sitting right next to it.
+function renderScenarioRow(name, { pillText, pillWarn, baselineText, scenarioText, deltaPct }) {
+  const pill = document.getElementById(`scenario-pill-${name}`);
+  pill.textContent = pillText;
+  pill.classList.toggle('warn', pillWarn);
+  pill.classList.toggle('neutral', !pillWarn);
+
+  const clamped = Math.max(-1, Math.min(1, deltaPct)) * 50;
+  const fill = document.getElementById(`scenario-fill-${name}`);
+  fill.style.left = `${50 + Math.min(0, clamped)}%`;
+  fill.style.width = `${Math.abs(clamped)}%`;
+
+  document.getElementById(`scenario-baseline-${name}`).textContent = baselineText;
+  document.getElementById(`scenario-scenario-${name}`).textContent = scenarioText;
+}
+
+// Renders the Scenario-vs-baseline card (and the Investigator tab's badge
+// dot) whenever anything that feeds it changes.
+//
+// Design critique task 04: each bar now plots (scenario - baseline) / a
+// real domain -- a delta, zero-centered -- not an absolute level:
+//   Equity: delta in stations flagged, as a share of the real 2,516-
+//     station total. Fleet: delta in unserved deficit stations (vs. the
+//     TRUE default fleet size, 1 truck -- not zero trucks, which never
+//     actually occurs), as a share of the real flagged total. Both rows
+//     now plot the same KIND of quantity (a change in station count, as
+//     a share of a real total), so they're actually comparable to each
+//     other for the first time. Weather has no bar at all -- it's a
+//     projection input, not an outcome measured in "stations affected,"
+//     and forcing it onto the same axis is exactly what needed its own
+//     "not comparable" disclaimer before.
+// Each section still degrades independently if its own data source never
+// loaded, same graceful-degradation rule as every other optional layer.
+function renderDiffBar() {
+  const bar = document.getElementById('investigator-diff-bar');
+  const badge = document.getElementById('investigator-badge');
+  badge.classList.toggle('hidden', !investigatorStateDiffersFromDefault());
+
+  // Visible whenever the Investigator panel is EXPANDED (even if every
+  // control is still at its own default) OR whenever something differs
+  // from baseline even after collapsing it again -- a reviewer who
+  // applies a scenario then collapses Investigator to look at the map
+  // must not lose the cue that a non-default scenario is still active.
+  // Hidden only when BOTH true: collapsed AND everything's at baseline.
+  if (!document.getElementById('investigator-panel').open && !investigatorStateDiffersFromDefault()) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+
+  // Plain-English synthesis (template-built, not an LLM call) -- one
+  // clause per section that actually differs from baseline, collected
+  // here as each section below computes its own numbers, then joined at
+  // the very end. A category still at baseline contributes nothing,
+  // rather than a hollow "no change" sentence for every single control.
+  const summaryClauses = [];
+
+  const totalStations = Object.keys(state.stations).length;
+  const equityBaseline = computeEquityCounts(state.stations, EQUITY_BASELINE_THRESHOLDS);
+  const equityScenario = computeEquityCounts(state.stations, state.investigatorState.equityThresholds);
+  const equityDelta = equityScenario.nychaOrSchoolCount - equityBaseline.nychaOrSchoolCount;
+  if (equityDelta !== 0) {
+    summaryClauses.push(
+      `Equity threshold change ${equityDelta > 0 ? 'flagged' : 'unflagged'} ${Math.abs(equityDelta).toLocaleString()} station${Math.abs(equityDelta) === 1 ? '' : 's'} (${equityBaseline.nychaOrSchoolCount.toLocaleString()} → ${equityScenario.nychaOrSchoolCount.toLocaleString()}).`
+    );
+  }
+  renderScenarioRow('equity', {
+    pillText: equityDelta === 0 ? 'No change' : `${equityDelta > 0 ? '+' : '−'}${Math.abs(equityDelta).toLocaleString()} flagged`,
+    pillWarn: equityDelta !== 0,
+    baselineText: `${equityBaseline.nychaOrSchoolCount.toLocaleString()} baseline`,
+    scenarioText: `${equityScenario.nychaOrSchoolCount.toLocaleString()} scenario`,
+    deltaPct: totalStations ? equityDelta / totalStations : 0,
+  });
+
+  const fleetRow = document.getElementById('scenario-row-fleet');
+  if (state.fleetScenarios) {
+    fleetRow.classList.remove('hidden');
+    const fleetSize = state.investigatorState.fleetSize;
+    const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
+    const flagged = scenario.n_deficit_flagged;
+    const remaining = flagged - scenario.n_deficit_serviced;
+    const cleared = flagged - remaining;
+
+    // Real baseline is the TRUE default fleet size (1 truck), not zero
+    // trucks -- fleetSize is always >= 1 by construction, and 1 truck
+    // already clears real stations in the real data. This fixes a real
+    // bug the previous version's own comment already flagged: the old
+    // pillText used `cleared === 0` (never true at the real default,
+    // since 1 truck always clears something), so the pill/bar showed a
+    // real-looking change even when fleetSize was completely untouched --
+    // exactly the "bar disagrees with the pill" problem the design
+    // critique caught, just via a different mechanism than the equity
+    // row's.
+    const isDefaultFleetSize = fleetSize === defaultInvestigatorState().fleetSize;
+    const defaultScenario = state.fleetScenarios.scenarios[String(defaultInvestigatorState().fleetSize)];
+    const defaultRemaining = defaultScenario.n_deficit_flagged - defaultScenario.n_deficit_serviced;
+    const fleetDelta = remaining - defaultRemaining; // negative = fewer unserved than baseline = real improvement
+
+    if (!isDefaultFleetSize) {
+      const overlap = computeServicedEquityOverlap(scenario, state.investigatorState.equityThresholds);
+      let clause = `${fleetSize} truck${fleetSize === 1 ? '' : 's'} cleared ${cleared.toLocaleString()} of ${flagged.toLocaleString()} flagged deficit stations`;
+      if (overlap.totalServiced > 0) {
+        clause += `, including ${overlap.equityServiced.toLocaleString()} of ${overlap.totalServiced.toLocaleString()} serviced stations within equity thresholds`;
+      }
+      summaryClauses.push(clause + '.');
+    }
+    renderScenarioRow('fleet', {
+      pillText: isDefaultFleetSize ? 'No change' : `${fleetDelta > 0 ? '+' : '−'}${Math.abs(fleetDelta).toLocaleString()} unserved`,
+      pillWarn: !isDefaultFleetSize,
+      baselineText: `${defaultRemaining.toLocaleString()} baseline (${defaultInvestigatorState().fleetSize} truck)`,
+      scenarioText: `${remaining.toLocaleString()} scenario (${fleetSize} truck(s))`,
+      deltaPct: flagged ? fleetDelta / flagged : 0,
+    });
+  } else {
+    fleetRow.classList.add('hidden');
+  }
+
+  const weatherRow = document.getElementById('scenario-row-weather');
+  if (state.scenarioPresets) {
+    weatherRow.classList.remove('hidden');
+    const label = isBaselineWeatherScenario()
+      ? 'ideal (baseline)'
+      : (matchingWeatherPreset() ? matchingWeatherPreset().label : 'custom scenario');
+    const scenarioTempF = Math.round(state.investigatorState.weatherScenario.temp_c * 9 / 5 + 32);
+    if (!isBaselineWeatherScenario()) {
+      summaryClauses.push(`Weather scenario "${label}" is projected onto historical flow using real fitted elasticities (not a live forecast).`);
+    }
+    const weatherPill = document.getElementById('scenario-pill-weather');
+    weatherPill.textContent = isBaselineWeatherScenario() ? 'No change' : label;
+    weatherPill.classList.toggle('warn', !isBaselineWeatherScenario());
+    weatherPill.classList.toggle('neutral', isBaselineWeatherScenario());
+    const precipIn = mmToInches(state.investigatorState.weatherScenario.precip_mm);
+    document.getElementById('scenario-weather-value').textContent = `${scenarioTempF}°F · ${precipIn.toFixed(1)} in`;
+  } else {
+    weatherRow.classList.add('hidden');
+  }
+
+  document.getElementById('scenario-summary').textContent = summaryClauses.length > 0
+    ? summaryClauses.join(' ')
+    : 'Currently at baseline — no adjustments applied yet.';
+}
+
+// Applies a (possibly partial) investigatorState object -- from a loaded
+// preset or a page-load ?scenario= param -- by delegating to the SAME
+// state-mutation functions manual interaction already uses
+// (setEquityThreshold-equivalent updates/setFleetSize/the weather
+// re-render path), so there is exactly one code path for "the equity
+// threshold changed," not two that could drift apart. A missing key
+// (e.g. dockOverrides, which doesn't exist as a real field yet -- Phase
+// 5 is deferred, see PROGRESS.md's Deferred list) is simply never read
+// here at all, not an error and not defaulted to a placeholder -- a
+// preset saved today will keep loading correctly once Phase 5
+// eventually adds that key back to the real schema.
+// Rejects NaN/undefined/strings/Infinity alike -- the URL preset (and a
+// pasted Load Preset blob) is the one place in this dashboard where
+// fully external, unvalidated input reaches app state directly, so every
+// field below is validated the same way fleetSize's own crash fix
+// established: malformed input is silently skipped for that section,
+// never applied as NaN/garbage and never allowed to throw.
+function isFiniteNumber(x) {
+  return typeof x === 'number' && Number.isFinite(x);
+}
+
+function applyInvestigatorState(loaded) {
+  if (
+    loaded && loaded.equityThresholds
+    && isFiniteNumber(loaded.equityThresholds.nycha_school_m) && loaded.equityThresholds.nycha_school_m >= 0
+    && isFiniteNumber(loaded.equityThresholds.subway_gap_m) && loaded.equityThresholds.subway_gap_m >= 0
+  ) {
+    state.investigatorState.equityThresholds = {
+      nycha_school_m: loaded.equityThresholds.nycha_school_m,
+      subway_gap_m: loaded.equityThresholds.subway_gap_m,
+    };
+    const nychaSchoolSlider = document.getElementById('nycha-school-slider');
+    const subwayGapSlider = document.getElementById('subway-gap-slider');
+    nychaSchoolSlider.value = String(loaded.equityThresholds.nycha_school_m);
+    document.getElementById('nycha-school-value').textContent = String(loaded.equityThresholds.nycha_school_m);
+    subwayGapSlider.value = String(loaded.equityThresholds.subway_gap_m);
+    document.getElementById('subway-gap-value').textContent = String(loaded.equityThresholds.subway_gap_m);
+    if (state.stations) renderEquityCounts();
+  }
+
+  // A malformed or version-mismatched fleetSize (e.g. shared before
+  // fleet_scenarios.json's own range changed) must degrade gracefully,
+  // not crash the page. Checked against the CURRENT fleet_scenarios.json's
+  // own scenarios, not just "is it a number."
+  if (loaded && loaded.fleetSize && state.fleetScenarios && state.fleetScenarios.scenarios[String(loaded.fleetSize)]) {
+    document.getElementById('fleet-size-slider').value = String(loaded.fleetSize);
+    document.getElementById('fleet-size-value').textContent = String(loaded.fleetSize);
+    setFleetSize(loaded.fleetSize); // also calls renderDiffBar(), but a second call below is harmless (idempotent)
+  }
+
+  if (
+    loaded && loaded.weatherScenario && state.elasticities && state.scenarioPresets
+    && isFiniteNumber(loaded.weatherScenario.temp_c)
+    && isFiniteNumber(loaded.weatherScenario.precip_mm) && loaded.weatherScenario.precip_mm >= 0
+  ) {
+    // presetId is cosmetic labeling only -- matchingWeatherPreset() looks
+    // stations up by temp_c/precip_mm VALUES, never by this id -- so an
+    // unrecognized id is normalized to null (reads as "custom scenario"
+    // in the status line) rather than rejecting the whole section over a
+    // bad label.
+    const knownPresetId = state.scenarioPresets.presets.some(p => p.id === loaded.weatherScenario.presetId)
+      ? loaded.weatherScenario.presetId
+      : null;
+    state.investigatorState.weatherScenario = {
+      temp_c: loaded.weatherScenario.temp_c,
+      precip_mm: loaded.weatherScenario.precip_mm,
+      presetId: knownPresetId,
+    };
+    const tempF = Math.round(loaded.weatherScenario.temp_c * 9 / 5 + 32);
+    const precipIn = mmToInches(loaded.weatherScenario.precip_mm);
+    document.getElementById('weather-preset-select').value = knownPresetId || '';
+    document.getElementById('weather-temp-slider').value = String(tempF);
+    document.getElementById('weather-temp-value').textContent = String(tempF);
+    document.getElementById('weather-precip-slider').value = precipIn.toFixed(2);
+    document.getElementById('weather-precip-value').textContent = precipIn.toFixed(1);
+    renderHour(state.currentHour);
+    updateStatusMessage();
+    renderWeatherScenarioStatus();
+  }
+
+  renderDiffBar();
+}
+
+function resetToBaseline() {
+  applyInvestigatorState(defaultInvestigatorState());
+}
+
+const PRESET_QUERY_PARAM = 'scenario';
+
+function buildShareableUrl() {
+  const encoded = encodeURIComponent(JSON.stringify(state.investigatorState));
+  const base = (typeof location !== 'undefined' && location.origin) ? `${location.origin}${location.pathname}` : '';
+  return `${base}?${PRESET_QUERY_PARAM}=${encoded}`;
+}
+
+// Accepts either a full shared URL (extracts the ?scenario= param) or a
+// raw encoded/JSON blob pasted directly -- a user might paste just the
+// query-string portion, not necessarily a full link. Deliberately does
+// NOT use URLSearchParams (a Node/browser API, not a core ECMAScript
+// built-in -- unavailable in the Node smoke test's vm sandbox unless
+// explicitly added there, unlike JSON/encodeURIComponent/decodeURIComponent,
+// which are standard and always present) -- plain string search keeps
+// this portable to both environments with no sandbox changes needed.
+function parsePresetInput(text) {
+  if (!text) return null;
+  const trimmed = text.trim();
+  let raw = trimmed;
+  const paramMarker = `${PRESET_QUERY_PARAM}=`;
+  const markerIndex = trimmed.indexOf(paramMarker);
+  if (markerIndex !== -1) {
+    raw = trimmed.slice(markerIndex + paramMarker.length);
+    const ampIndex = raw.indexOf('&');
+    if (ampIndex !== -1) raw = raw.slice(0, ampIndex);
+  }
+  try {
+    return JSON.parse(decodeURIComponent(raw));
+  } catch (error) {
+    return null;
+  }
+}
+
+// Legend is permanent now (no tab, always on the map); Detail is its own
+// independent card that only exists while a station is selected. Purely a
+// visibility switch -- content population is handled separately by
+// updateStationDetail() (called whenever state.selectedId changes or the
+// underlying data changes), so this never needs to re-fetch or re-render
+// anything itself.
+function setDetailVisible(visible) {
+  document.getElementById('detail-card').classList.toggle('hidden', !visible);
+}
+
+// "More info" (cluster typology + equity context): collapsed by default,
+// same standing pattern as every other disclosure in this dashboard.
+function setDetailMoreInfoExpanded(expanded) {
+  state.detailMoreInfoExpanded = expanded;
+  document.getElementById('detail-more-content').classList.toggle('hidden', !expanded);
+  document.getElementById('detail-more-chevron').textContent = expanded ? '▾' : '▸';
+}
+
+// Stroke (selection ring) and fill styling, kept as one lookup table so
+// "selected" and "has no data for the current period" compose correctly
+// instead of two separate setStyle() calls fighting over the same marker.
+const DEFAULT_STROKE = '#ffffff';
+const SELECTED_STROKE = '#2a2a28';
+const NO_DATA_STROKE = '#b5b3ad';
+const DEFAULT_WEIGHT = 0.75;
+const SELECTED_WEIGHT = 2;
+const NO_DATA_WEIGHT = 1; // slightly heavier than default so a hollow ring reads clearly against the basemap
+
+function noDataStyle(selected) {
+  return {
+    fillColor: '#ffffff',
+    fillOpacity: 0,
+    color: selected ? SELECTED_STROKE : NO_DATA_STROKE,
+    weight: selected ? SELECTED_WEIGHT : NO_DATA_WEIGHT,
+  };
+}
+
+// Unit conversion, display-only -- the weather-scenario projection math
+// below always works in Celsius/mm (matching elasticities.json/
+// scenario_presets.json's own units), never Fahrenheit/inches. A US-based
+// DOT-reviewer audience reads degF/inches more naturally, so that's what
+// the sliders show, but converting at the display boundary keeps the
+// underlying math in the same units as every other file in this project.
+function fahrenheitToCelsius(f) { return (f - 32) * 5 / 9; }
+function inchesToMm(inches) { return inches * 25.4; }
+function mmToInches(mm) { return mm / 25.4; }
+
+// Mirrors pipeline/elasticities.py's own TYPOLOGY_SLUGS mapping exactly --
+// matched by cluster_name text, not assumed index, same reasoning as the
+// Python side (a future station_typology.py re-run could flip which index
+// is "0" vs "1"). Duplicated here (not fetched) because it's a fixed,
+// rarely-changing mapping, same treatment as elasticities.py's own
+// hardcoded copy.
+const TYPOLOGY_SLUG_BY_CLUSTER_NAME = {
+  'Commuter core (fills AM, drains PM)': 'commuter_core',
+  'Residential feeder (drains AM, fills PM)': 'residential_feeder',
+};
+
+// station_elasticity/typology_elasticity may each be null (no fetch) or
+// missing the field (e.g. by_station's capacity_elasticity is sometimes
+// absent -- same optional-field shape here for temp/precip, even though
+// in practice every by_station entry does carry them). Station-specific
+// wins if present, per the Guideline's own documented fallback contract.
+function pickElasticity(stationElasticity, typologyElasticity, field) {
+  if (stationElasticity && stationElasticity[field] != null) return stationElasticity[field];
+  if (typologyElasticity && typologyElasticity[field] != null) return typologyElasticity[field];
+  return null;
+}
+
+// Returns the multiplier baseline_flow gets scaled by under the current
+// weather scenario: 1 + temp_elasticity*Δtemp + precip_elasticity*Δprecip,
+// per Investigator Mode Phase 4's own contract formula. Returns exactly 1
+// (no adjustment) when: elasticities.json/scenario_presets.json didn't
+// load, the reference preset can't be found, OR the station has neither a
+// by_station nor a by_typology elasticity at all -- a low-signal (cluster
+// -1) station has NO typology group and often no by_station entry either,
+// and CLAUDE.md's "never invent numbers" rule means such a station is
+// shown unadjusted, not silently guessed at (documented in the panel's
+// own weather-scenario-note text, not just here).
+function weatherMultiplierFor(id) {
+  if (!state.elasticities || !state.scenarioPresets) return 1;
+  const referencePreset = state.scenarioPresets.presets.find(
+    p => p.id === state.scenarioPresets.reference_preset_id
+  );
+  if (!referencePreset) return 1;
+
+  const scenario = state.investigatorState.weatherScenario;
+  const deltaTemp = scenario.temp_c - referencePreset.temp_c;
+  const deltaPrecip = scenario.precip_mm - referencePreset.precip_mm;
+
+  const station = state.stations[id];
+  const slug = TYPOLOGY_SLUG_BY_CLUSTER_NAME[station.cluster_name];
+  const stationElasticity = state.elasticities.by_station[id];
+  const typologyElasticity = slug ? state.elasticities.by_typology[slug] : null;
+
+  const tempElasticity = pickElasticity(stationElasticity, typologyElasticity, 'temp_elasticity');
+  const precipElasticity = pickElasticity(stationElasticity, typologyElasticity, 'precip_elasticity');
+  if (tempElasticity === null && precipElasticity === null) return 1;
+
+  return 1 + (tempElasticity || 0) * deltaTemp + (precipElasticity || 0) * deltaPrecip;
+}
+
+// True when the current weather scenario is exactly the reference preset's
+// own values (temp_c/precip_mm), i.e. produces exactly zero adjustment --
+// not "close to baseline," genuinely identical, since the reference IS
+// the zero point by construction. Also true (deliberately, not just a
+// fallback) when scenario_presets.json hasn't loaded: no reference point
+// means no projection is possible, so nothing should claim to be a
+// scenario.
+function isBaselineWeatherScenario() {
+  if (!state.scenarioPresets) return true;
+  const referencePreset = state.scenarioPresets.presets.find(
+    p => p.id === state.scenarioPresets.reference_preset_id
+  );
+  if (!referencePreset) return true;
+  const scenario = state.investigatorState.weatherScenario;
+  return scenario.temp_c === referencePreset.temp_c && scenario.precip_mm === referencePreset.precip_mm;
+}
+
+// The preset (if any) whose own values exactly match the current slider
+// state -- null once the user has dragged either slider away from every
+// preset's exact values, i.e. a genuinely custom scenario, not a stale
+// dropdown selection.
+function matchingWeatherPreset() {
+  if (!state.scenarioPresets) return null;
+  const scenario = state.investigatorState.weatherScenario;
+  return state.scenarioPresets.presets.find(
+    p => p.temp_c === scenario.temp_c && p.precip_mm === scenario.precip_mm
+  ) || null;
+}
+
+// Short suffix for #title-meta -- lets a collapsed Investigator panel's
+// active scenario stay visible somewhere, so recolored markers are never
+// silently unexplained. Historical-mode concept only (weather elasticities
+// were derived from historical flow, not live dock fill %); callers only
+// use this from historical-mode branches.
+function weatherScenarioMetaSuffix() {
+  if (isBaselineWeatherScenario()) return '';
+  const preset = matchingWeatherPreset();
+  const label = preset ? preset.label : 'custom weather scenario';
+  return ` · ${label} (projected)`;
+}
+
+// Populates the investigator panel's own status line -- the primary,
+// always-visible-when-expanded explanation of what's currently applied,
+// independent of whether #title-meta's compact suffix is also showing.
+function renderWeatherScenarioStatus() {
+  const statusEl = document.getElementById('weather-scenario-status');
+  if (isBaselineWeatherScenario()) {
+    statusEl.textContent = 'Currently showing: baseline (no adjustment).';
+    return;
+  }
+  const preset = matchingWeatherPreset();
+  const label = preset ? preset.label : 'Custom scenario';
+  statusEl.textContent = `Currently showing: ${label} (projected, not baseline).`;
+}
+
+// The single source of truth for one marker's full visual style, given the
+// CURRENT state (mode, period, dayType, currentHour, domainMax,
+// selectedId). A station missing data for whatever's currently selected --
+// a historical period (see hasPeriodData) or a live reading (see
+// hasLiveData) -- renders hollow: fillOpacity 0, gray stroke, rather than
+// being hidden or showing an invented value; per-project rule, a data gap
+// must stay visible, not silently vanish (same precedent as typology's
+// low-volume exclusion).
+function markerStyleFor(id) {
+  const selected = id === state.selectedId;
+
+  if (state.mode === 'live') {
+    if (!hasLiveData(id)) return noDataStyle(selected);
+    const live = state.liveStations[id];
+    const pctFull = (live.bikes_available / live.capacity) * 100;
+    const centered = pctFull - 50;
+    return {
+      fillColor: rampColor(centered, LIVE_FILL_DOMAIN),
+      fillOpacity: rampOpacity(centered, LIVE_FILL_DOMAIN),
+      color: selected ? SELECTED_STROKE : DEFAULT_STROKE,
+      weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
+    };
+  }
+
+  const station = state.stations[id];
+  const curve = curveForPeriod(station, state.period, state.dayType);
+  if (curve === null) return noDataStyle(selected);
+  // Weather-scenario projection is historical-mode only (elasticities were
+  // derived from historical flow data, not live dock fill %) -- applied
+  // here, at the single source of truth every marker's color already goes
+  // through, rather than a second parallel coloring path.
+  const adjustedValue = curve[state.currentHour] * weatherMultiplierFor(id);
+  return {
+    fillColor: rampColor(adjustedValue, state.domainMax),
+    fillOpacity: rampOpacity(adjustedValue, state.domainMax),
+    color: selected ? SELECTED_STROKE : DEFAULT_STROKE,
+    weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
+  };
+}
+
+function restyleMarker(id) {
+  state.markers[id].setStyle(markerStyleFor(id));
+}
+
+// Recolors/restyles every existing marker for the CURRENT state (mode,
+// hour, dayType, period) and updates all the mode-dependent text (title
+// subtitle, legend title+note+labels, slider label). Does NOT touch the
+// legend gradient bar or recompute domainMax -- both are fixed once, at
+// load time, by design (see computeDomainMax above).
+function renderHour(hour) {
+  state.currentHour = hour;
+  for (const id in state.markers) restyleMarker(id);
+
+  // Same wording in both modes -- red/blue already mean the same real
+  // thing either way (0% full IS a deficit: no bikes to pick up; 100%
+  // full IS a surplus: no docks to return to), so a mode switch must not
+  // make the legend look like a different, unrelated scale.
+  document.getElementById('legend-label-low').textContent = 'Deficit (no bikes)';
+  document.getElementById('legend-label-high').textContent = 'Surplus (no docks)';
+  renderLegendScale();
+
+  if (state.mode === 'live') {
+    document.getElementById('legend-caption').textContent = 'Click a station for its live status';
+    document.getElementById('live-as-of-timestamp').textContent = `Live as of ${formatAsOf(state.liveAsOf)} · via GBFS`;
+  } else {
+    const label = formatHourLabel(hour);
+    document.getElementById('legend-caption').textContent = 'Click a station for its daily flow';
+    document.getElementById('hour-label').textContent = label;
+    // Design critique task 11: the slider's own accessible name reads "7"
+    // without this -- aria-valuetext overrides the announced value with
+    // the same real formatted label sighted users already see.
+    document.getElementById('hour-slider').setAttribute('aria-valuetext', label);
+  }
+
+  // Keeps the detail card (when a station is selected) AND grouped-view
+  // cluster icons in sync with whatever just changed -- the slider, the
+  // day-type toggle, the period selector, or the historical/live mode
+  // toggle (all call renderHour). One hook point covers all four, so
+  // there's only one place that can drift out of sync. Safe to call
+  // unconditionally: updateStationDetail() itself no-ops when nothing is
+  // selected.
+  updateStationDetail();
+  refreshClusters();
+  renderReadout(); // task 03: keeps the permanent readout + "worst now" list in sync with every hour/dayType/period/mode change, same one-hook-point reasoning as updateStationDetail() above
+}
+
+// One hour-step per tick, looping back to 0 after 23 -- this is what
+// makes a weather scenario's (or just the base historical pattern's)
+// hour-by-hour effect visible without manually dragging the slider. No
+// new rendering path: every tick just calls renderHour() (the exact same
+// function the slider's own 'input' handler calls), so markers/legend/
+// chart all stay perfectly in sync with playback, same as a manual drag.
+// hourPlayTimer is a plain closure variable, not part of state, same
+// "internal implementation detail, not real app state" treatment
+// pendingHour/rafScheduled already get for the slider's own throttling
+// below -- only the boolean state.hourPlaying (is it running or not) is
+// meaningful enough to expose.
+const HOUR_PLAY_INTERVAL_MS = 700;
+let hourPlayTimer = null;
+
+function setHourPlaying(playing) {
+  state.hourPlaying = playing;
+  const btn = document.getElementById('hour-play-btn');
+  const icon = document.getElementById('hour-play-icon');
+  btn.classList.toggle('active', playing);
+  const label = playing ? 'Pause' : 'Play through the day';
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
+  icon.innerHTML = playing
+    ? '<rect x="5" y="4" width="5" height="16"/><rect x="14" y="4" width="5" height="16"/>'
+    : '<path d="M6 4l14 8-14 8z"/>';
+
+  if (hourPlayTimer !== null) {
+    clearInterval(hourPlayTimer);
+    hourPlayTimer = null;
+  }
+  if (playing) {
+    hourPlayTimer = setInterval(() => {
+      const nextHour = (state.currentHour + 1) % 24;
+      document.getElementById('hour-slider').value = String(nextHour);
+      renderHour(nextHour);
+    }, HOUR_PLAY_INTERVAL_MS);
+  }
+}
+
+// Design critique task 11: real ARIA radiogroup semantics for the three
+// segmented controls (mode/view/day), not just role=radiogroup +
+// role=radio attributes with no matching keyboard behavior -- these are
+// plain <button>s, not native <input type=radio>, so declaring the role
+// without also wiring Arrow-key navigation + roving tabindex would leave
+// a screen reader announcing "radio button" while arrow keys silently do
+// nothing (worse than not labeling it at all). setRadioActive keeps the
+// visual .active class, aria-checked, and roving tabindex in sync in one
+// place; wireRadiogroup adds the actual keyboard behavior once per group.
+function setRadioActive(id, checked) {
+  const btn = document.getElementById(id);
+  btn.classList.toggle('active', checked);
+  btn.setAttribute('aria-checked', String(checked));
+  btn.tabIndex = checked ? 0 : -1;
+}
+
+function wireRadiogroup(groupEl, buttonIds) {
+  groupEl.setAttribute('role', 'radiogroup');
+  const buttons = buttonIds.map(id => document.getElementById(id));
+  for (const btn of buttons) btn.setAttribute('role', 'radio');
+  groupEl.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    const enabled = buttons.filter(b => !b.disabled);
+    const current = enabled.indexOf(document.activeElement);
+    if (current === -1) return;
+    event.preventDefault();
+    const dir = (event.key === 'ArrowLeft' || event.key === 'ArrowUp') ? -1 : 1;
+    const next = enabled[(current + dir + enabled.length) % enabled.length];
+    next.focus();
+    next.click();
+  });
+}
+
+// Switches the active day type and re-renders through the same renderHour
+// path the slider uses, so there is exactly one place markers get recolored.
+// domainMax is deliberately NOT recomputed here (see computeDomainMax above).
+function setDayType(dayType) {
+  state.dayType = dayType;
+  setRadioActive('day-weekday', dayType === 'weekday');
+  setRadioActive('day-weekend', dayType === 'weekend');
+  renderHour(state.currentHour);
+}
+
+// Switches the active period and re-renders through the same renderHour
+// path, for the same reason setDayType does -- one recolor/resync path,
+// not a parallel one. Also refreshes the status line's coverage count,
+// which is period-dependent but not hour/dayType-dependent, so it doesn't
+// belong inside renderHour itself.
+function setPeriod(period) {
+  state.period = period;
+  renderHour(state.currentHour);
+  updateStatusMessage();
+}
+
+// Writes the station-count/coverage message into #title-meta -- now the
+// ONLY subtitle content (the old "Net flow at HH:MM, weekday (period)"
+// phrase was dropped as pure duplication of the Map controls panel's own
+// hour/day/period controls). Hidden entirely in the common case now (zero
+// extra height budget, same rule as every other disclosure in this
+// dashboard) -- a plain "2,347 stations" count with nothing to flag isn't
+// worth a permanent 3rd line under a now-2-line hero; it's decorative,
+// the map itself already communicates "lots of stations" via marker
+// density. Shown only when there's something real to disclose: a
+// coverage gap (fewer stations have data than exist) or an active
+// weather scenario. Not the boxed #status banner -- that's reserved for
+// the loading flash and real errors, so it costs zero vertical space in
+// the common case. Always hides #status here: this only runs after a
+// successful load (or a period/mode switch after one), never during the
+// error path.
+function updateStatusMessage() {
+  const ids = Object.keys(state.stations);
+  // The demo-mode banner (built once by showDemoBanner(), see the flows.json
+  // fetch fallback below) has to survive every later call to this function
+  // -- renderHour()/setMode()/setPeriod() all call it on every interaction,
+  // and none of them know or care whether we're in demo mode. Only hide
+  // #status here on the real-data path.
+  if (!state.demoMode) {
+    document.getElementById('status').classList.add('hidden');
+  }
+  // Text is always computed and written regardless of visibility (same
+  // "testable/inspectable even while hidden" pattern the diff bar and
+  // every other conditional disclosure in this dashboard already
+  // follows) -- only the .hidden toggle below is conditional.
+  const meta = document.getElementById('title-meta');
+  const line = document.getElementById('title-subtitle-line');
+  const total = ids.length;
+
+  if (state.mode === 'live') {
+    // Live coverage lives next to "Live as of ..." in the Map controls
+    // card now, not the hero -- it's Live-mode-specific, so it belongs
+    // beside the other live-only fact rather than the title. The hero
+    // subtitle line itself stays hidden in Live mode unconditionally.
+    line.classList.add('hidden');
+    const withData = ids.filter(hasLiveData).length;
+    const note = document.getElementById('live-coverage-note');
+    note.textContent = `${withData.toLocaleString()} of ${total.toLocaleString()} stations have live data`;
+    note.classList.toggle('hidden', withData === total); // every station has live data -- nothing to flag
+    return;
+  }
+
+  const weatherSuffix = weatherScenarioMetaSuffix();
+  if (state.period === 'all') {
+    meta.textContent = `${total.toLocaleString()} stations` + weatherSuffix;
+    line.classList.toggle('hidden', !weatherSuffix); // full coverage by construction -- only a weather scenario makes this worth showing
+    return;
+  }
+  const withData = ids.filter(id => hasPeriodData(state.stations[id], state.period)).length;
+  meta.textContent = `${withData.toLocaleString()} of ${total.toLocaleString()} stations have data for ${formatPeriodLabel(state.period)}` + weatherSuffix;
+  line.classList.toggle('hidden', withData === total && !weatherSuffix); // full coverage AND no weather scenario -- nothing to flag
+}
+
+// Switches historical <-> live and re-renders through the same renderHour
+// path everything else uses. Hides/shows the historical-only controls card
+// and the live "as of" card as single units (one .hidden toggle per
+// container, never per-sub-control), exactly opposite each other. The
+// route toggle button lives inside #historical-controls, so it already
+// hides/shows with that card; applyRouteVisibility() additionally makes
+// sure the route layer itself leaves the map in live mode (regardless of
+// the user's last toggle preference) and reappears automatically on
+// returning to historical mode, without the user needing to re-toggle it.
+// #timebar's real left/width, not a fixed CSS right:Npx -- see its own
+// CSS comment for why: #body-row (the positioning ancestor) spans both
+// the map and the sidebar, so a plain right:Npx measures from the
+// SIDEBAR's edge, not the map's, and drifts (or collides with Leaflet's
+// own zoom control) at different window widths. Recomputed on resize,
+// not just once at load. Below the mobile breakpoint, the CSS media
+// query switches #timebar to a normal static block -- left/width are
+// cleared so they don't fight the stylesheet there.
+const TIMEBAR_MOBILE_BREAKPOINT_PX = 768; // matches the @media rule above
+const TIMEBAR_ZOOM_CONTROL_CLEARANCE_PX = 62; // 16px margin + ~46px for Leaflet's zoom control
+function positionTimebar() {
+  const timebar = document.getElementById('timebar');
+  if (window.innerWidth <= TIMEBAR_MOBILE_BREAKPOINT_PX) {
+    timebar.style.left = '';
+    timebar.style.width = '';
+    return;
+  }
+  const mapWidth = document.getElementById('map-col').getBoundingClientRect().width;
+  timebar.style.left = '16px';
+  timebar.style.width = `${mapWidth - 16 - TIMEBAR_ZOOM_CONTROL_CLEARANCE_PX}px`;
+}
+window.addEventListener('resize', positionTimebar);
+
+function setMode(mode) {
+  // Live mode has no hour concept at all (#historical-controls, which
+  // contains the play button, is hidden below) -- playback left running
+  // in the background would just waste ticks nobody can see or stop via
+  // the now-hidden button, so it stops explicitly here rather than
+  // relying on the button becoming unreachable.
+  if (mode === 'live' && state.hourPlaying) setHourPlaying(false);
+  state.mode = mode;
+  setRadioActive('mode-historical', mode === 'historical');
+  setRadioActive('mode-live', mode === 'live');
+  document.getElementById('historical-controls').classList.toggle('hidden', mode !== 'historical');
+  document.getElementById('timebar').classList.toggle('hidden', mode !== 'historical'); // task 07: timebar moved out of historical-controls, so it needs its own explicit toggle now
+  document.getElementById('live-as-of').classList.toggle('hidden', mode !== 'live');
+  applyRouteVisibility();
+  renderHour(state.currentHour);
+  updateStatusMessage();
+}
+
+// Swaps which layer is actually on the map -- explicit removeLayer BEFORE
+// addLayer (never relying on addLayer alone), so the two containers can
+// never both be attached at once. Doesn't need to force a cluster refresh
+// itself: renderHour() already calls refreshClusters() on every hour/
+// dayType/period/mode change regardless of which view is currently
+// visible, so grouped view's icons are already current by the time you
+// switch to it.
+function setViewMode(viewMode) {
+  const oldGroup = state.viewMode === 'individual' ? state.individualLayer : state.clusterLayer;
+  const newGroup = viewMode === 'individual' ? state.individualLayer : state.clusterLayer;
+  state.viewMode = viewMode;
+  setRadioActive('view-individual', viewMode === 'individual');
+  setRadioActive('view-grouped', viewMode === 'grouped');
+  map.removeLayer(oldGroup);
+  map.addLayer(newGroup);
+}
+
+// Design critique task 08: 2,516 markers at city zoom is real over-
+// plotting (confirmed against the actual data, not assumed) -- below
+// z14, individual dots merge into a solid mass in dense areas. z14 is
+// roughly "close enough to tell streets apart," a real, checkable
+// cartographic threshold, not a number picked to match a mockup.
+function autoViewModeForZoom(zoom) {
+  return zoom >= 14 ? 'individual' : 'grouped';
+}
+
+// Builds the equity-context lines shown in the detail panel from flows.json's
+// real `context` fields (near_nycha, near_school, nycha/school/subway
+// distances+names, transit_gap) -- confirmed against actual data/flows.json
+// before writing this, not guessed from the schema doc. `capacity` is
+// deliberately not shown: the flows.json contract lists it, but it is not
+// actually present in the current data (see PROGRESS.md's Deferred list).
+function contextLines(context) {
+  const lines = [];
+  const gapNote = context.transit_gap ? ' — beyond the 800 m subway-gap threshold' : '';
+  lines.push(`Nearest subway: ${context.subway_nearest} (${context.subway_dist_m} m)${gapNote}`);
+  if (context.near_nycha) {
+    lines.push(`Within 300 m of NYCHA: ${context.nycha_nearest} (${context.nycha_dist_m} m)`);
+  }
+  if (context.near_school) {
+    lines.push(`Within 300 m of school: ${context.school_nearest} (${context.school_dist_m} m)`);
+  }
+  return lines;
+}
+
+// Session 37: the school-proximity dataset's vintage caveat (computed by
+// pipeline/equity_join.py, carried in flows.json's equity_join.layers.school
+// block) was being computed but never actually shown anywhere in this
+// dashboard -- a real gap between what that module's own docstring claimed
+// ("must be surfaced anywhere school-proximity numbers are shown") and what
+// the UI actually did. Only relevant when a school-proximity line is
+// actually shown (near_school) -- no note for a station with no nearby
+// school to begin with, and no note if equityJoinMeta itself failed to
+// load (graceful, same as every other optional layer).
+function schoolVintageNote(context, equityJoinMeta) {
+  if (!context.near_school) return null;
+  const vintage = equityJoinMeta && equityJoinMeta.layers && equityJoinMeta.layers.school
+    ? equityJoinMeta.layers.school.vintage_label
+    : null;
+  return vintage ? `School data: ${vintage}` : null;
+}
+
+// Opens (or switches) the detail card for `id`. Populates the fields that
+// don't depend on hour/dayType/period once here; updateStationDetail()
+// (called at the end of this function, and again from renderHour whenever a
+// station is selected) handles everything that does. Restyles only the
+// previously- and newly-selected markers (via markerStyleFor, the same
+// lookup renderHour uses for every marker) rather than looping over all
+// ~2,300 -- selection only ever changes 1-2 markers' styles. "More info"
+// always resets to collapsed on a new selection -- each station starts
+// from the same "graph first" default, rather than staying expanded from
+// whatever the previously-selected station was showing.
+function selectStation(id) {
+  const previous = state.selectedId;
+  state.selectedId = id;
+  if (previous && state.markers[previous]) restyleMarker(previous);
+  restyleMarker(id);
+
+  const s = state.stations[id];
+  document.getElementById('detail-name').textContent = s.name;
+  document.getElementById('detail-cluster').textContent = s.cluster_name;
+
+  const contextEl = document.getElementById('detail-context');
+  contextEl.textContent = '';
+  for (const line of contextLines(s.context)) {
+    const div = document.createElement('div');
+    div.textContent = line;
+    contextEl.appendChild(div);
+  }
+
+  const noteEl = document.getElementById('detail-context-note');
+  const note = schoolVintageNote(s.context, state.equityJoinMeta);
+  noteEl.textContent = note || '';
+  noteEl.classList.toggle('hidden', !note);
+
+  updateStationDetail();
+  setDetailVisible(true);
+  setDetailMoreInfoExpanded(false);
+}
+
+// Clears the selection and hides the detail card -- Legend (a permanent,
+// separate element now, not a tab) is entirely unaffected by this.
+function closeStation() {
+  const previous = state.selectedId;
+  state.selectedId = null;
+  if (previous) restyleMarker(previous);
+  setDetailVisible(false);
+}
+
+const STRIP_W = 240, STRIP_H = 70, STRIP_MID = STRIP_H / 2, STRIP_PAD = 4;
+
+function stripX(hour) { return (hour / 23) * STRIP_W; }
+
+// Same clamped-t logic as divergingColor's domain mapping, just producing a
+// y-coordinate instead of a color -- so a station's own strip and its map
+// marker are always describing the same domain the same way.
+function stripY(value, domainMax) {
+  const t = Math.max(-1, Math.min(1, value / domainMax));
+  return STRIP_MID - t * (STRIP_MID - STRIP_PAD);
+}
+
+// Builds the strip's static markup: baseline, diverging area washes (split
+// at the zero baseline, not by an exact zero-crossing -- a fine approximation
+// at hourly resolution), the line, the persistent current-hour dot, and a
+// hidden crosshair/tooltip group that previewStripHour()/clearStripPreview()
+// toggle on hover without rebuilding this markup.
+function buildStripMarkup(curve, domainMax, currentHour) {
+  const linePoints = [], surplusPoints = [], deficitPoints = [];
+  for (let h = 0; h < 24; h++) {
+    const x = stripX(h);
+    const y = stripY(curve[h], domainMax);
+    linePoints.push(`${x},${y}`);
+    surplusPoints.push(`${x},${Math.min(y, STRIP_MID)}`);
+    deficitPoints.push(`${x},${Math.max(y, STRIP_MID)}`);
+  }
+  const surplusArea = `M${stripX(0)},${STRIP_MID} L${surplusPoints.join(' L')} L${stripX(23)},${STRIP_MID} Z`;
+  const deficitArea = `M${stripX(0)},${STRIP_MID} L${deficitPoints.join(' L')} L${stripX(23)},${STRIP_MID} Z`;
+  const linePath = `M${linePoints.join(' L')}`;
+
+  const dotX = stripX(currentHour);
+  const dotY = stripY(curve[currentHour], domainMax);
+  const dotColor = divergingColor(curve[currentHour], domainMax);
+
+  return `
+    <line x1="0" y1="${STRIP_MID}" x2="${STRIP_W}" y2="${STRIP_MID}" stroke="#d8d7d3" stroke-width="1" />
+    <path d="${surplusArea}" fill="${rgba(SURPLUS_COLOR, 0.1)}" stroke="none" />
+    <path d="${deficitArea}" fill="${rgba(DEFICIT_COLOR, 0.1)}" stroke="none" />
+    <path d="${linePath}" fill="none" stroke="#3a3a38" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+    <circle id="strip-dot" cx="${dotX}" cy="${dotY}" r="4" fill="${dotColor}" stroke="#fcfcfb" stroke-width="2" />
+    <line id="strip-crosshair" x1="0" y1="0" x2="0" y2="${STRIP_H}" stroke="#898781" stroke-width="1" style="display:none" />
+    <circle id="strip-crosshair-dot" r="3" fill="#3a3a38" stroke="#fcfcfb" stroke-width="2" style="display:none" />
+    <text id="strip-tooltip-value" x="0" y="10" font-size="9" font-weight="600" fill="#0b0b0b" text-anchor="middle" style="display:none"></text>
+    <text id="strip-tooltip-hour" x="0" y="20" font-size="7" fill="#52514e" text-anchor="middle" style="display:none"></text>
+  `;
+}
+
+// Builds the live-mode detail panel content: a plain bikes/docks/capacity
+// readout plus the feed's as-of time, rather than branching the historical
+// chart-drawing code (buildStripMarkup/stripX/stripY) to also understand
+// a live reading -- these are different enough datasets that one shared
+// drawing function would need more special-casing than it's worth.
+function buildLiveDetailMarkup(live) {
+  return `
+    <text x="${STRIP_W / 2}" y="28" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="middle">${live.bikes_available} bikes / ${live.docks_available} docks</text>
+    <text x="${STRIP_W / 2}" y="46" font-size="10" fill="#52514e" text-anchor="middle">capacity ${live.capacity}</text>
+  `;
+}
+
+// Redraws the selected station's detail content for the CURRENT state
+// (mode, dayType, period, currentHour). In historical mode this is the
+// rhythm strip, using state.domainMax -- the same pooled domain (every
+// hour x both day types x every period) the map markers use, never
+// recomputed per station or per chart. In live mode it's the bikes/docks
+// readout. Either way, the panel always agrees with the map: if this
+// station has no data for whatever's currently selected, that's shown
+// explicitly, never silently falling back to something else.
+//
+// With no station selected, this is a no-op -- the detail card itself is
+// entirely absent from the map then (see setDetailVisible()), so there's
+// no visible element left needing a placeholder.
+function updateStationDetail() {
+  if (!state.selectedId) return;
+  const stripEl = document.getElementById('detail-strip');
+
+  if (state.mode === 'live') {
+    document.getElementById('detail-daylabel').textContent = `live, as of ${formatAsOf(state.liveAsOf)}`;
+    if (!hasLiveData(state.selectedId)) {
+      stripEl.innerHTML = `<text x="${STRIP_W / 2}" y="${STRIP_MID}" font-size="11" fill="#666057" text-anchor="middle">No live data</text>`;
+      return;
+    }
+    stripEl.innerHTML = buildLiveDetailMarkup(state.liveStations[state.selectedId]);
+    return;
+  }
+
+  const s = state.stations[state.selectedId];
+  const curve = curveForPeriod(s, state.period, state.dayType);
+  const periodLabel = formatPeriodLabel(state.period);
+  document.getElementById('detail-daylabel').textContent = `${state.dayType}, ${periodLabel}`;
+  if (curve === null) {
+    stripEl.innerHTML = `<text x="${STRIP_W / 2}" y="${STRIP_MID}" font-size="11" fill="#666057" text-anchor="middle">No data for ${periodLabel}</text>`;
+    return;
+  }
+  stripEl.innerHTML = buildStripMarkup(curve, state.domainMax, state.currentHour);
+}
+
+// Read-only hover preview: repositions the crosshair/tooltip elements for
+// `hour` on the CURRENTLY SELECTED station's CURRENT dayType curve. Must
+// never call renderHour/setDayType or write state.currentHour/state.dayType
+// -- only the persistent dot (drawn from those) reflects the real slider
+// position; this is strictly a local "what if" preview under the pointer.
+function previewStripHour(hour) {
+  if (!state.selectedId) return;
+  if (state.mode === 'live') return; // live mode has no rhythm strip at all -- nothing to preview
+  const curve = curveForPeriod(state.stations[state.selectedId], state.period, state.dayType);
+  if (curve === null) return; // no strip is drawn for a no-data period; nothing to preview
+  const x = stripX(hour);
+  const y = stripY(curve[hour], state.domainMax);
+
+  const crosshair = document.getElementById('strip-crosshair');
+  crosshair.setAttribute('x1', x);
+  crosshair.setAttribute('x2', x);
+  crosshair.style.display = '';
+
+  const dot = document.getElementById('strip-crosshair-dot');
+  dot.setAttribute('cx', x);
+  dot.setAttribute('cy', y);
+  dot.style.display = '';
+
+  const value = curve[hour];
+  const valueText = document.getElementById('strip-tooltip-value');
+  valueText.textContent = `${value >= 0 ? '+' : ''}${value.toFixed(1)}`;
+  valueText.setAttribute('x', x);
+  valueText.style.display = '';
+
+  const hourText = document.getElementById('strip-tooltip-hour');
+  hourText.textContent = formatHourLabel(hour);
+  hourText.setAttribute('x', x);
+  hourText.style.display = '';
+}
+
+function clearStripPreview() {
+  for (const id of ['strip-crosshair', 'strip-crosshair-dot', 'strip-tooltip-value', 'strip-tooltip-hour']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  }
+}
+
+// 5 hard-edged bands, not a smooth gradient -- must match classOf()'s
+// bins exactly (task 02), so the legend is never able to misrepresent a
+// scale that isn't actually continuous on the map.
+// Design critique task 10: the legend's title + three numeric anchors,
+// real values from whichever domain is actually driving marker color
+// right now -- state.domainMax (a real computed p95 magnitude, historical
+// mode) or LIVE_FILL_DOMAIN (live mode's fixed +/-50-point-from-half-full
+// scale). Called from renderHour(), the same hook already keeping every
+// other mode-dependent legend string in sync, so this never drifts out
+// of step with a mode switch the way a separate one-off call could.
+function renderLegendScale() {
+  const title = document.getElementById('legend-title');
+  const low = document.getElementById('legend-tick-low');
+  const high = document.getElementById('legend-tick-high');
+  if (state.mode === 'live') {
+    title.textContent = 'Dock fill';
+    low.textContent = '0% full';
+    high.textContent = '100% full';
+  } else {
+    title.textContent = 'Net daily flow (bikes/day)';
+    const max = state.domainMax ? state.domainMax.toFixed(1) : '0.0';
+    low.textContent = `-${max}`;
+    high.textContent = `+${max}`;
+  }
+}
+
+function drawLegendGradient(domainMax) {
+  const stops = RAMP.map((color, i) => {
+    const start = (i / RAMP.length) * 100;
+    const end = ((i + 1) / RAMP.length) * 100;
+    return `${color} ${start}%, ${color} ${end}%`;
+  });
+  document.getElementById('legend-bar').style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+}
+
+// zoomControl:false + a manually-added bottomright control, not Leaflet's
+// default topleft placement -- #map-controls-bar now occupies top-left,
+// and moving the (much lower-stakes, no positional expectation) zoom
+// buttons out of its way is simpler than trying to fit both in one corner.
+const map = L.map('map', { zoomControl: false }).setView([40.73, -73.95], 11); // NYC default, replaced by fitBounds once real station coords load
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+// Design critique task 08. Guarded on state.markers existing: fitBounds()
+// itself (called later, once station data loads) fires its own zoomend,
+// and this listener is registered before any station marker exists --
+// verified below, not left as an unchecked assumption.
+map.on('zoomend', () => {
+  if (!state.markers || Object.keys(state.markers).length === 0) return;
+  const zoom = map.getZoom();
+  setViewMode(state.viewModeUserForced ?? autoViewModeForZoom(zoom));
+  state.markerRadius = markerRadiusForZoom(zoom);
+  for (const id in state.markers) state.markers[id].setRadius(state.markerRadius);
+});
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 19,
+}).addTo(map);
+
+
+function fetchJSON(url) {
+  return fetch(url).then(response => {
+    if (!response.ok) throw new Error(`${url} fetch failed: HTTP ${response.status}`);
+    return response.json();
+  });
+}
+
+// Illustrative-only fallback for when flows.json itself can't be loaded --
+// "demo mode guarantees it always shows something" (build plan Part F,
+// Session 16). Five fabricated stations, never fetched (so they can't
+// themselves fail to load, including under file://), covering all three
+// real cluster_name values Session 9's k-means/typology step actually
+// produces against real data (confirmed against the live flows.json before
+// writing this, not guessed): two "Commuter core", two "Residential
+// feeder", and one "Low signal (excluded from clustering)" -- the exact
+// same strings real stations carry, not a paraphrase, so the detail panel
+// never displays two different phrasings for the same concept. No
+// seasons/months coverage (empty granularity) -- demo mode's job is
+// proving the map/slider/typology/detail-panel machinery still works, not
+// fabricating a full seasonal dataset. All names/ids are obviously
+// fictional ("Demo ... (illustrative)") so a reviewer can never mistake a
+// demo marker for a real station.
+const DEMO_FLOWS_PAYLOAD = {
+  granularity: { seasons: [], months: [] },
+  stations: {
+    'demo-1': {
+      name: 'Demo Commuter Plaza (illustrative)', lat: 40.745, lng: -73.985,
+      weekday: [0, 0, 0, 0, 0, 0, 1, 3, 4, 2, 0, 0, 0, 0, 0, 0, -1, -3, -4, -2, 0, 0, 0, 0],
+      weekend: [0, 0, 0, 0, 0, 0, 0.5, 1, 1, 0.5, 0, 0, 0, 0, 0, 0, -0.5, -1, -1, -0.5, 0, 0, 0, 0],
+      seasons: {}, months: {}, cluster: 0, cluster_name: 'Commuter core (fills AM, drains PM)',
+      context: {
+        near_nycha: 0, near_school: 0, nycha_dist_m: 900, nycha_nearest: 'Demo NYCHA Houses',
+        school_dist_m: 850, school_nearest: 'Demo PS 000',
+        subway_dist_m: 220, subway_nearest: 'Demo Ave-Illustrative St', transit_gap: 0,
+      },
+    },
+    'demo-2': {
+      name: 'Demo Transit Hub (illustrative)', lat: 40.758, lng: -73.968,
+      weekday: [0, 0, 0, 0, 0, 0.5, 2, 4, 3, 1, 0, 0, 0, 0, 0, -1, -2, -4, -3, -1, 0, 0, 0, 0],
+      weekend: [0, 0, 0, 0, 0, 0, 1, 1.5, 1, 0.5, 0, 0, 0, 0, 0, 0, -1, -1.5, -1, -0.5, 0, 0, 0, 0],
+      seasons: {}, months: {}, cluster: 0, cluster_name: 'Commuter core (fills AM, drains PM)',
+      context: {
+        near_nycha: 1, near_school: 0, nycha_dist_m: 180, nycha_nearest: 'Demo Riverside Houses',
+        school_dist_m: 1200, school_nearest: 'Demo PS 001',
+        subway_dist_m: 410, subway_nearest: 'Demo Blvd Station', transit_gap: 0,
+      },
+    },
+    'demo-3': {
+      name: 'Demo Residential Corner (illustrative)', lat: 40.706, lng: -73.958,
+      weekday: [0, 0, 0, 0, 0, 0, -1, -3, -4, -2, 0, 0, 0, 0, 0, 0, 1, 3, 4, 2, 0, 0, 0, 0],
+      weekend: [0, 0, 0, 0, 0, 0, -0.5, -1, -1, -0.5, 0, 0, 0, 0, 0, 0, 0.5, 1, 1, 0.5, 0, 0, 0, 0],
+      seasons: {}, months: {}, cluster: 1, cluster_name: 'Residential feeder (drains AM, fills PM)',
+      context: {
+        near_nycha: 0, near_school: 1, nycha_dist_m: 1500, nycha_nearest: 'Demo Court Houses',
+        school_dist_m: 210, school_nearest: 'Demo Elementary',
+        subway_dist_m: 900, subway_nearest: 'Demo Corner Stop', transit_gap: 1,
+      },
+    },
+    'demo-4': {
+      name: 'Demo Neighborhood Dock (illustrative)', lat: 40.712, lng: -73.942,
+      weekday: [0, 0, 0, 0, 0, -0.5, -2, -4, -3, -1, 0, 0, 0, 0, 0, 1, 2, 4, 3, 1, 0, 0, 0, 0],
+      weekend: [0, 0, 0, 0, 0, 0, -1, -1.5, -1, -0.5, 0, 0, 0, 0, 0, 0, 1, 1.5, 1, 0.5, 0, 0, 0, 0],
+      seasons: {}, months: {}, cluster: 1, cluster_name: 'Residential feeder (drains AM, fills PM)',
+      context: {
+        near_nycha: 0, near_school: 0, nycha_dist_m: 2000, nycha_nearest: 'Demo Court Houses',
+        school_dist_m: 2000, school_nearest: 'Demo Elementary',
+        subway_dist_m: 300, subway_nearest: 'Demo Park Station', transit_gap: 0,
+      },
+    },
+    'demo-5': {
+      name: 'Demo Low-Volume Dock (illustrative)', lat: 40.729, lng: -73.995,
+      weekday: [0.1, -0.1, 0.2, -0.2, 0.1, 0, -0.1, 0.2, -0.1, 0.1, -0.2, 0.1, 0, -0.1, 0.2, -0.1, 0.1, -0.2, 0.1, 0, -0.1, 0.2, -0.1, 0.1],
+      weekend: [0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1, 0, 0.1, -0.1],
+      seasons: {}, months: {}, cluster: -1, cluster_name: 'Low signal (excluded from clustering)',
+      context: {
+        near_nycha: 0, near_school: 0, nycha_dist_m: 1800, nycha_nearest: 'Demo NYCHA Houses',
+        school_dist_m: 1600, school_nearest: 'Demo PS 000',
+        subway_dist_m: 650, subway_nearest: 'Demo Terminal', transit_gap: 0,
+      },
+    },
+  },
+};
+
+// Builds the reason shown behind the demo banner's expandable Details
+// toggle -- kept out of the main banner text per instruction, so a
+// reviewer sees a plain "showing illustrative data" statement up front,
+// not a raw fetch error. file:// keeps its existing distinct, actionable
+// message (the exact bug reported ("Failed to load data/flows.json:
+// undefined") stays fixed); every other failure shows the real error
+// message.
+function describeFetchError(error) {
+  if (typeof location !== 'undefined' && location.protocol === 'file:') {
+    return 'This dashboard needs to be served over http, not opened directly. Run: python3 -m http.server, then open http://localhost:8000/dashboard2.html';
+  }
+  return `flows.json fetch failed: ${error && error.message ? error.message : error}`;
+}
+
+// Switches #status into the persistent demo-mode banner. Deliberately
+// reuses #status's default neutral styling (never .error -- this isn't a
+// broken dashboard, it's a working one showing fabricated data) and the
+// model-eval footer's own ▸/▾ collapsed-by-default disclosure pattern for
+// the error detail, rather than a new widget. state.demoMode = true is
+// read by updateStatusMessage() so every later render (hour/mode/period
+// changes) leaves this banner alone instead of hiding it.
+function showDemoBanner(reason) {
+  state.demoMode = true;
+  const status = document.getElementById('status');
+  document.getElementById('status-text').textContent = 'Showing illustrative demo data — flows.json could not be loaded.';
+  const toggle = document.getElementById('status-detail-toggle');
+  const detail = document.getElementById('status-detail');
+  detail.textContent = reason;
+  detail.classList.add('hidden'); // explicit, not just relying on the static markup's class="hidden" -- same standing fix as Sessions 19/20A/20B
+  toggle.textContent = 'Details ▸';
+  toggle.classList.remove('hidden');
+  toggle.addEventListener('click', () => {
+    const expanded = detail.classList.contains('hidden');
+    detail.classList.toggle('hidden', !expanded);
+    toggle.textContent = `Details ${expanded ? '▾' : '▸'}`;
+  });
+  status.classList.remove('hidden');
+  status.classList.remove('error');
+}
+
+// route.json is fetched alongside the other two, but non-fatally: unlike
+// flows.json/live_status.json (both required for the dashboard to mean
+// anything), route.json is one optional analysis layer -- graceful
+// degradation, same rule as every other layer in this project. A failed
+// fetch resolves to null rather than rejecting, so it can never trip the
+// top-level .catch() and never blocks the rest of the dashboard from
+// loading.
+const routeReady = fetchJSON('data/route.json').catch(() => null);
+
+// fleet_scenarios.json (Investigator Mode Phase 3) is optional and non-fatal
+// for the same reason route.json is -- it's an additive analysis layer, not
+// required data. Generated by pipeline/fleet_simulator.py; won't exist at
+// all until that script has been run once.
+const fleetScenariosReady = fetchJSON('data/fleet_scenarios.json').catch(() => null);
+
+// elasticities.json/scenario_presets.json (Investigator Mode Phase 4) --
+// same optional/non-fatal treatment. BOTH are needed for a meaningful
+// weather-scenario projection (elasticities to project with, presets for
+// the reference point and quick-fill values), so the dashboard checks for
+// both before revealing that sub-section, but each still fails
+// independently rather than one dragging the other down.
+const elasticitiesReady = fetchJSON('data/elasticities.json').catch(() => null);
+const scenarioPresetsReady = fetchJSON('data/scenario_presets.json').catch(() => null);
+
+// model_performance.json (pipeline/demand_model.py's walk-forward run,
+// Session 30) -- same optional/non-fatal treatment as every other analysis
+// layer above. Won't exist until that script has been run at least once.
+const modelPerformanceReady = fetchJSON('data/model_performance.json').catch(() => null);
+
+// flows.json and live_status.json now fail INDEPENDENTLY -- a live-feed
+// hiccup must not take down real historical data, and a historical-data
+// problem must not be masked by fabricating live counts under real
+// station identities. Each settles to a result object instead of
+// rejecting, so Promise.all below can never reject on either of these two
+// (same non-fatal shape as routeReady above, extended to the two
+// previously-required files).
+const flowsReady = fetchJSON('data/flows.json')
+  .then(payload => ({ payload, isDemo: false, error: null }))
+  .catch(error => ({ payload: DEMO_FLOWS_PAYLOAD, isDemo: true, error }));
+
+const liveReady = fetchJSON('data/live_status.json')
+  .then(payload => ({ payload, ok: true }))
+  .catch(error => ({ payload: null, ok: false, error }));
+
+const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady])
+  .then(([flowsResult, liveResult, routePayload, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload]) => {
+    state.stations = flowsResult.payload.stations;
+    state.equityJoinMeta = flowsResult.payload.equity_join || null;
+    state.liveAvailable = liveResult.ok;
+    state.liveStations = liveResult.ok ? liveResult.payload.stations : {};
+    state.liveAsOf = liveResult.ok ? liveResult.payload.last_updated : null;
+    const ids = Object.keys(state.stations);
+
+    // Bounding box derived from the real station coordinates in flows.json,
+    // never hardcoded -- the map frames whatever data it was actually given.
+    let bounds = null;
+    for (const id of ids) {
+      const latlng = [state.stations[id].lat, state.stations[id].lng];
+      bounds = bounds ? bounds.extend(latlng) : L.latLngBounds([latlng, latlng]);
+    }
+    map.fitBounds(bounds, { padding: [28, 28] });
+    // A bounding box around NYC's real, diagonal station footprint is
+    // necessarily much bigger than the footprint itself (it has to cover
+    // the empty corners too -- Long Island Sound, NJ inland, the Rockaways
+    // gap), so fitBounds alone still leaves a lot of visible non-station
+    // area. What actually fixes "the map reaches Elizabeth/New Rochelle/
+    // Long Beach" is bounding how far a user can pan/zoom AWAY from the
+    // fitted view, not the initial fit itself (which was already real,
+    // not hardcoded -- see the loop above).
+    map.setMaxBounds(bounds.pad(0.30));
+    map.setMinZoom(map.getBoundsZoom(bounds) - 1);
+
+    state.domainMax = computeDomainMax(state.stations);
+
+    // Real starting zoom (post-fitBounds/setMinZoom above), not a
+    // hardcoded guess -- markers are created at the radius this exact
+    // view will actually show, not a fixed default that would visibly
+    // jump on the first zoomend.
+    state.markerRadius = markerRadiusForZoom(map.getZoom());
+    for (const id of ids) {
+      const s = state.stations[id];
+      const marker = L.circleMarker([s.lat, s.lng], Object.assign(
+        { radius: state.markerRadius },
+        markerStyleFor(id)
+      ));
+      marker.stationId = id; // lets clusterIconCreateFunction map a grouped child back to its station
+      marker.on('click', () => selectStation(id));
+      marker.on('mouseover', () => marker.setRadius(state.markerRadius + MARKER_HOVER_RADIUS_DELTA_PX));
+      marker.on('mouseout', () => marker.setRadius(state.markerRadius));
+      state.markers[id] = marker;
+    }
+
+    // Two containers holding the SAME marker objects (never duplicated) --
+    // only one is ever actually attached to the map at a time, swapped by
+    // setViewMode(). Individual markers keep their existing click behavior
+    // unchanged either way; clustering only changes how they're grouped for
+    // display, not what a click on a revealed marker does.
+    const allMarkers = Object.values(state.markers);
+    state.individualLayer = L.layerGroup(allMarkers);
+    state.clusterLayer = L.markerClusterGroup({ iconCreateFunction: clusterIconCreateFunction });
+    state.clusterLayer.addLayers(allMarkers);
+    // Design critique task 08: the initial view now follows the same
+    // zoom-based rule as every later zoomend (see autoViewModeForZoom()
+    // below) instead of always hardcoding 'individual' -- the map's real
+    // starting zoom (post-fitBounds) is usually well below the z>=14
+    // threshold, so opening in 'individual' by default was exactly the
+    // over-plotted city-wide view this task exists to fix. setViewMode()
+    // itself (not a raw map.addLayer) so the toggle buttons' active state
+    // and state.viewMode both stay consistent with what's actually
+    // shown -- explicit, not left to the static HTML markup's own
+    // hardcoded `active` class to happen to match.
+    setViewMode(state.viewModeUserForced ?? autoViewModeForZoom(map.getZoom()));
+
+    // route.json is optional (see routeReady above) -- if it loaded, build
+    // the route layer; if not, state.route/routeLayer stay null. Not added
+    // to the map yet -- state.routeVisible defaults to false, so it stays
+    // off until the user turns it on.
+    state.route = routePayload;
+    if (state.route) {
+      state.routeLayer = buildRouteLayer(state.route);
+    }
+
+    // route-toggle-btn's click listener is attached UNCONDITIONALLY (not
+    // only when route.json succeeded) because Investigator Mode's fleet-
+    // size slider (below) can populate state.route/routeLayer later even
+    // if route.json itself failed to load -- the toggle has to already be
+    // wired for that case. It's a safe no-op via applyRouteVisibility()'s
+    // own guard (`if (!state.routeLayer) return;`) until SOME route data
+    // exists either way.
+    document.getElementById('route-toggle-btn').addEventListener('click', () => setRouteVisible(!state.routeVisible));
+
+    // The toggle wrap is visible whenever EITHER source could produce a
+    // route to show -- explicit either way, not just relying on the static
+    // HTML default to already match (same standing fix as Sessions 19/
+    // 20A/20B/21/23).
+    state.fleetScenarios = fleetScenariosPayload;
+    if (state.route || state.fleetScenarios) {
+      document.getElementById('route-toggle-wrap').classList.remove('hidden');
+    } else {
+      document.getElementById('route-toggle-wrap').classList.add('hidden');
+    }
+
+    // Fleet simulator sub-section: visible only if fleet_scenarios.json
+    // loaded. Slider's initial .value/label text set explicitly here from
+    // state.investigatorState.fleetSize, not left to the static HTML's
+    // value="1" attribute to already agree with it -- same standing fix as
+    // the equity sliders above. renderFleetStats() runs once at load (pure
+    // text, safe before any interaction) but applyFleetScenarioToRoute() is
+    // deliberately NOT called at load -- moving the fleet slider is what
+    // takes over the map's route display, not just loading the page.
+    if (state.fleetScenarios) {
+      document.getElementById('fleet-accordion').classList.remove('hidden');
+      const fleetSlider = document.getElementById('fleet-size-slider');
+      const fleetValueEl = document.getElementById('fleet-size-value');
+      const initialFleetSize = state.investigatorState.fleetSize;
+      fleetSlider.value = String(initialFleetSize);
+      fleetValueEl.textContent = String(initialFleetSize);
+      renderFleetStats(initialFleetSize);
+
+      let pendingFleetSize = null;
+      let fleetRafScheduled = false;
+      fleetSlider.addEventListener('input', event => {
+        pendingFleetSize = Number(event.target.value);
+        fleetValueEl.textContent = String(pendingFleetSize);
+        if (!fleetRafScheduled) {
+          fleetRafScheduled = true;
+          requestAnimationFrame(() => {
+            setFleetSize(pendingFleetSize);
+            fleetRafScheduled = false;
+          });
+        }
+      });
+    } else {
+      document.getElementById('fleet-accordion').classList.add('hidden');
+    }
+
+    // Weather scenario sub-section (Phase 4): visible only if BOTH
+    // elasticities.json and scenario_presets.json loaded -- a projection
+    // needs both (elasticities to project with, presets for the reference
+    // point and quick-fill values). Preset/slider initial state set
+    // explicitly here from state.investigatorState.weatherScenario, same
+    // standing fix as every other control above. Every change re-renders
+    // through renderHour() (the one existing render path every marker's
+    // color already goes through, not a second parallel coloring path),
+    // rAF-throttled the same as the hour slider.
+    state.elasticities = elasticitiesPayload;
+    state.scenarioPresets = scenarioPresetsPayload;
+    if (state.elasticities && state.scenarioPresets) {
+      document.getElementById('weather-accordion').classList.remove('hidden');
+      const presetSelect = document.getElementById('weather-preset-select');
+      const tempSlider = document.getElementById('weather-temp-slider');
+      const tempValueEl = document.getElementById('weather-temp-value');
+      const precipSlider = document.getElementById('weather-precip-slider');
+      const precipValueEl = document.getElementById('weather-precip-value');
+
+      // Options built from scenario_presets.json's own preset list, never a
+      // hardcoded static markup list -- the exact same fix applied to the
+      // period selector (see periodSelect below) applied here after a real
+      // gap was found: the static HTML only ever had ideal/rain_day/snow_day,
+      // so hot_day (Session 43) would have been silently unreachable in the
+      // dropdown despite existing in the real data file.
+      presetSelect.innerHTML = '';
+      for (const preset of state.scenarioPresets.presets) {
+        const opt = document.createElement('option');
+        opt.value = preset.id;
+        opt.textContent = preset.id === state.scenarioPresets.reference_preset_id
+          ? `${preset.label} (baseline)`
+          : preset.label;
+        presetSelect.appendChild(opt);
+      }
+
+      const initialScenario = state.investigatorState.weatherScenario;
+      presetSelect.value = initialScenario.presetId;
+      const initialTempF = Math.round(initialScenario.temp_c * 9 / 5 + 32);
+      tempSlider.value = String(initialTempF);
+      tempValueEl.textContent = String(initialTempF);
+      const initialPrecipIn = mmToInches(initialScenario.precip_mm);
+      precipSlider.value = initialPrecipIn.toFixed(2);
+      precipValueEl.textContent = initialPrecipIn.toFixed(1);
+      renderWeatherScenarioStatus();
+
+      let weatherRafScheduled = false;
+      function scheduleWeatherRerender() {
+        if (!weatherRafScheduled) {
+          weatherRafScheduled = true;
+          requestAnimationFrame(() => {
+            renderHour(state.currentHour);
+            updateStatusMessage(); // renderHour() alone doesn't refresh #title-meta's weather-scenario suffix
+            renderWeatherScenarioStatus();
+            renderDiffBar();
+            weatherRafScheduled = false;
+          });
+        }
+      }
+
+      presetSelect.addEventListener('change', event => {
+        const preset = state.scenarioPresets.presets.find(p => p.id === event.target.value);
+        if (!preset) return;
+        state.investigatorState.weatherScenario = {
+          temp_c: preset.temp_c, precip_mm: preset.precip_mm, presetId: preset.id,
+        };
+        const tempF = Math.round(preset.temp_c * 9 / 5 + 32);
+        tempSlider.value = String(tempF);
+        tempValueEl.textContent = String(tempF);
+        const precipIn = mmToInches(preset.precip_mm);
+        precipSlider.value = precipIn.toFixed(2);
+        precipValueEl.textContent = precipIn.toFixed(1);
+        scheduleWeatherRerender();
+      });
+
+      tempSlider.addEventListener('input', event => {
+        const f = Number(event.target.value);
+        tempValueEl.textContent = String(f);
+        state.investigatorState.weatherScenario.temp_c = fahrenheitToCelsius(f);
+        scheduleWeatherRerender();
+      });
+
+      precipSlider.addEventListener('input', event => {
+        const inches = Number(event.target.value);
+        precipValueEl.textContent = inches.toFixed(1);
+        state.investigatorState.weatherScenario.precip_mm = inchesToMm(inches);
+        scheduleWeatherRerender();
+      });
+    } else {
+      document.getElementById('weather-accordion').classList.add('hidden');
+    }
+
+    // Investigator Mode Phase 6: save/load/reset, wired regardless of
+    // which of the three data sources loaded -- applyInvestigatorState()
+    // itself already guards each section independently.
+    document.getElementById('save-preset-btn').addEventListener('click', () => {
+      document.getElementById('preset-url-output').value = buildShareableUrl();
+    });
+    document.getElementById('load-preset-btn').addEventListener('click', () => {
+      const loaded = parsePresetInput(document.getElementById('preset-load-input').value);
+      if (loaded) applyInvestigatorState(loaded);
+    });
+    document.getElementById('reset-baseline-btn').addEventListener('click', resetToBaseline);
+
+    // Auto-apply a shared scenario from the URL on load, if present --
+    // "reload the page, load the preset back, confirm state restores
+    // exactly" (Guideline's own verify step) works via a real shared
+    // link, not a manual extra click after navigating there.
+    if (typeof location !== 'undefined' && location.search) {
+      const loadedFromUrl = parsePresetInput(location.search);
+      if (loadedFromUrl) applyInvestigatorState(loadedFromUrl);
+    }
+    renderDiffBar(); // initial render either way -- hides itself if nothing loaded from the URL and nothing's been touched yet
+
+    // Period options built from flows.json's own granularity block, never a
+    // hardcoded season/month list -- 'all' (the existing all-period average)
+    // always comes first as the default.
+    const periodSelect = document.getElementById('period-select');
+    const periods = ['all'];
+    for (const season of flowsResult.payload.granularity.seasons) periods.push(`season:${season}`);
+    for (const month of flowsResult.payload.granularity.months) periods.push(`month:${month}`);
+    for (const period of periods) {
+      const opt = document.createElement('option');
+      opt.value = period;
+      opt.textContent = periodOptionLabel(period);
+      periodSelect.appendChild(opt);
+    }
+    periodSelect.value = state.period;
+
+    // mode-live is disabled (not hidden -- unlike route-toggle-wrap, this
+    // is one button in an always-two-button toggle group, and hiding one
+    // side would look broken) whenever live_status.json failed on its own.
+    // The click-listener guard below matters for real browsers too:
+    // .disabled blocks native click dispatch, but the Node test stubs
+    // don't emulate that, so the guard is the actual enforcement in tests.
+    const liveBtn = document.getElementById('mode-live');
+    liveBtn.disabled = !state.liveAvailable;
+    if (!state.liveAvailable) {
+      liveBtn.setAttribute('title', 'Live data unavailable (live_status.json failed to load)');
+    }
+
+    drawLegendGradient(state.domainMax);
+    renderHour(state.currentHour); // sets initial title/legend/slider text consistently with the markers just drawn
+    if (flowsResult.isDemo) showDemoBanner(describeFetchError(flowsResult.error)); // must run before updateStatusMessage() so the banner isn't hidden immediately after being shown
+    updateStatusMessage();
+    setDetailVisible(false); // explicit, not just relying on the static HTML markup's class="hidden" to already match -- same standing fix as Sessions 19/20A/20B/21
+    setDetailMoreInfoExpanded(false);
+
+    // Slider updates are throttled to one render per animation frame rather
+    // than one per 'input' event: dragging can fire far more events than
+    // the browser can usefully restyle 2,347 markers for, so rapid events
+    // are coalesced and only the latest value is ever rendered.
+    const slider = document.getElementById('hour-slider');
+    let pendingHour = null;
+    let rafScheduled = false;
+    slider.addEventListener('input', event => {
+      // A manual drag while playback is running would otherwise fight
+      // the auto-advancing interval for control of the same slider --
+      // dragging implicitly pauses it, same as touching any other
+      // playback control while it's running would.
+      if (state.hourPlaying) setHourPlaying(false);
+      pendingHour = Number(event.target.value);
+      if (!rafScheduled) {
+        rafScheduled = true;
+        requestAnimationFrame(() => {
+          renderHour(pendingHour);
+          rafScheduled = false;
+        });
+      }
+    });
+
+    document.getElementById('hour-play-btn').addEventListener('click', () => setHourPlaying(!state.hourPlaying));
+    setHourPlaying(false); // explicit, not just relying on the static HTML default to already match -- same standing fix as Sessions 19/20A/20B/21
+
+    document.getElementById('day-weekday').addEventListener('click', () => setDayType('weekday'));
+    document.getElementById('day-weekend').addEventListener('click', () => setDayType('weekend'));
+    // Explicit, not left to the static markup's own active class to
+    // already match state.dayType's default -- same standing fix as
+    // Sessions 19/20A/20B/21 (this group never had an explicit call
+    // before either, same latent gap setMode('historical') below already
+    // had prior to task 07).
+    setDayType(state.dayType);
+    wireRadiogroup(document.getElementById('day-toggle'), ['day-weekday', 'day-weekend']);
+
+    periodSelect.addEventListener('change', event => setPeriod(event.target.value));
+
+    document.getElementById('mode-historical').addEventListener('click', () => setMode('historical'));
+    document.getElementById('mode-live').addEventListener('click', () => {
+      if (!state.liveAvailable) return; // belt-and-suspenders: liveBtn.disabled already blocks this in a real browser
+      setMode('live');
+    });
+    // Explicit, not just relying on the static HTML markup's default
+    // classes to already match state.mode's own default -- same standing
+    // fix as Sessions 19/20A/20B/21, applied here retroactively while
+    // touching this area for task 07 (the app never actually had this
+    // explicit call before; it happened to work because the static
+    // markup's defaults matched, which is exactly the fragile pattern the
+    // standing rule warns about).
+    setMode('historical');
+    wireRadiogroup(document.getElementById('mode-toggle'), ['mode-historical', 'mode-live']);
+    positionTimebar(); // real map width wasn't known until layout settled just above
+
+    // Design critique task 08: a manual click is a real override, not
+    // just the current auto-computed state -- see viewModeUserForced's
+    // own comment for why it doesn't get cleared on further zooming.
+    document.getElementById('view-individual').addEventListener('click', () => {
+      state.viewModeUserForced = 'individual';
+      setViewMode('individual');
+    });
+    document.getElementById('view-grouped').addEventListener('click', () => {
+      state.viewModeUserForced = 'grouped';
+      setViewMode('grouped');
+    });
+    wireRadiogroup(document.getElementById('view-toggle'), ['view-individual', 'view-grouped']);
+
+    document.getElementById('detail-close').addEventListener('click', closeStation);
+    document.getElementById('detail-more-toggle').addEventListener('click', () => setDetailMoreInfoExpanded(!state.detailMoreInfoExpanded));
+
+    // Investigator mode: native <details> now (design critique task 09)
+    // -- open/close itself is free (browser-native, no JS), but
+    // renderDiffBar() still needs to run on every open/close because the
+    // diff bar's own visibility rule depends on whether the panel is open
+    // (see renderDiffBar()'s comment). Wired here, not top-level like
+    // Model's element below, because renderDiffBar() genuinely depends on
+    // state.stations, so there's nothing meaningful to render before data
+    // loads.
+    const investigatorPanel = document.getElementById('investigator-panel');
+    investigatorPanel.addEventListener('toggle', renderDiffBar);
+    // Design critique: Investigator Mode is the standout feature of this
+    // dashboard, and collapsing it by default undersold it -- a first-time
+    // viewer's eye should land here, not on a plain accordion row
+    // competing with Model performance right below it. Expanded by
+    // default now; still an explicit JS call, not left to the static HTML
+    // markup to imply -- same standing fix as Sessions 19/20A/20B/21.
+    // renderDiffBar() is called directly rather than relied upon to fire
+    // via the 'toggle' listener above, since a programmatic .open
+    // assignment firing a native 'toggle' event is not safe to assume.
+    investigatorPanel.open = true;
+    renderDiffBar();
+
+    // Model performance: a native <details> (design critique task 09) --
+    // its table content comes from renderModelPerformance() below, called
+    // once at load regardless of open/closed state (Session 30's
+    // walk-forward result doesn't change per hour/period/mode, so there's
+    // nothing to re-render on toggle). Stays collapsed by default (no
+    // .open assignment needed -- that's the element's native default).
+    state.modelPerformance = modelPerformancePayload;
+    renderModelPerformance(state.modelPerformance);
+
+    renderEquityCounts(); // populate the three count lines at the default 300m/800m thresholds before any slider interaction
+
+    // Same rAF-coalescing pattern as the hour slider above -- 2,347
+    // stations recomputed on every 'input' event during a drag would be
+    // wasteful; only the latest value per animation frame is ever rendered.
+    // The numeric label next to each slider updates immediately regardless
+    // (cheap, just a textContent write), only the count recomputation itself
+    // is throttled. The slider's initial .value and label text are set
+    // explicitly here from state.investigatorState, not left to the static
+    // HTML's value="300"/value="800" attributes to already agree with it --
+    // same standing-rule fix as Sessions 19/20A/20B/21 (a test stub doesn't
+    // read static markup attributes, only JS-driven changes).
+    function wireEquitySlider(sliderId, valueId, thresholdKey) {
+      const sliderEl = document.getElementById(sliderId);
+      const valueEl = document.getElementById(valueId);
+      const initialValue = state.investigatorState.equityThresholds[thresholdKey];
+      sliderEl.value = String(initialValue);
+      valueEl.textContent = String(initialValue);
+      let pendingValue = null;
+      let rafScheduled = false;
+      sliderEl.addEventListener('input', event => {
+        pendingValue = Number(event.target.value);
+        valueEl.textContent = String(pendingValue);
+        if (!rafScheduled) {
+          rafScheduled = true;
+          requestAnimationFrame(() => {
+            setEquityThreshold(thresholdKey, pendingValue);
+            rafScheduled = false;
+          });
+        }
+      });
+    }
+    wireEquitySlider('nycha-school-slider', 'nycha-school-value', 'nycha_school_m');
+    wireEquitySlider('subway-gap-slider', 'subway-gap-value', 'subway_gap_m');
+
+    // Attached once, directly on the (never-replaced) <svg> element -- its
+    // children get rebuilt by updateStationDetail()'s innerHTML assignment,
+    // but that doesn't detach a listener bound to the svg itself.
+    const stripSvg = document.getElementById('detail-strip');
+    stripSvg.addEventListener('pointermove', event => {
+      const rect = stripSvg.getBoundingClientRect();
+      if (!rect.width) return;
+      const localX = ((event.clientX - rect.left) / rect.width) * STRIP_W;
+      const hour = Math.max(0, Math.min(23, Math.round((localX / STRIP_W) * 23)));
+      previewStripHour(hour);
+    });
+    stripSvg.addEventListener('pointerleave', clearStripPreview);
+  })
+  .catch(error => {
+    // flows.json and live_status.json can no longer reject (see
+    // flowsReady/liveReady above -- both settle to a result object, demo
+    // or otherwise), and routeReady already resolves to null on failure.
+    // So this only fires for a genuinely unexpected bug in the .then()
+    // callback itself, not a data-loading problem -- those are all
+    // graceful now. Real error styling (.error) is still correct here,
+    // since this path really does mean something broke.
+    const status = document.getElementById('status');
+    document.getElementById('status-text').textContent = `Something went wrong loading the dashboard: ${error && error.message ? error.message : error}`;
+    status.classList.remove('hidden');
+    status.classList.add('error');
+    console.error(error);
+  });
+
+// Test hook for the Node smoke test (tests/dashboard.test.js) -- an extra
+// harmless global in a real browser, never read outside the test.
+if (typeof globalThis !== 'undefined') {
+  globalThis.__dashboard = {
+    divergingColor, percentile, computeDomainMax, formatHourLabel, renderHour, setDayType,
+    selectStation, closeStation, previewStripHour, clearStripPreview, stripX, stripY,
+    setPeriod, formatPeriodLabel, curveForPeriod, hasPeriodData, setHourPlaying,
+    setMode, hasLiveData, formatAsOf,
+    setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,
+    setDetailVisible, setDetailMoreInfoExpanded, updateStationDetail, contextLines, schoolVintageNote,
+    computeStopOffset, assignVisitIndices, buildStopIconHTML, buildRouteLayer, setRouteVisible, applyRouteVisibility, renderLegendScale, renderLegendRoute,
+    renderModelPerformance, formatSignificance, computeEquityCounts, renderEquityCounts, setEquityThreshold,
+    renderFleetStats, computeServicedEquityOverlap, applyFleetScenarioToRoute, setFleetSize,
+    fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
+    isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,
+    defaultInvestigatorState, investigatorStateDiffersFromDefault, renderDiffBar, renderScenarioRow, applyInvestigatorState,
+    resetToBaseline, buildShareableUrl, parsePresetInput,
+    getState: () => state,
+    ready,
+  };
+}
+</script>
+</body>
+</html>

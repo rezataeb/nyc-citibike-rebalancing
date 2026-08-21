@@ -359,17 +359,20 @@ The 14 deletions were committed in `9fb1d0b`, after verifying where each file ac
 |---|---|
 | `00_*.{html,pdf}`, `01–04 *.html`, `04_*.pdf`, `assets/report.css` | byte-identical in `../docs V2/` |
 | `01`, `02`, `03` `*.pdf` | in `../docs V2/` as **larger annotated re-renders** (e.g. `02`: 384,694 → 899,674 bytes) |
-| `Dashboard_Planner_Review_and_Design_Options.{html,md,pdf}` | ⚠️ **nowhere in the working tree — history only, at `7e9f58d`** |
+| `Dashboard_Planner_Review_and_Design_Options.md` | ✅ **restored and tracked** — see below |
+| `Dashboard_Planner_Review_and_Design_Options.{html,pdf}` | history only, at `7e9f58d` (renders; regenerate from the `.md` if needed) |
 
-⚠️ **The one thing to remember:** the planner review is gone from disk. Its `.md` is the source of
-the Session 46 accuracy analysis this document cites as raw material for the metrics-rationale
-report (§7's last item) — sign-confidence by slice ~93% all-period / ~82% season / ~60% single
-month, and the weather regression's R² of only 0.04–0.07 despite very tight CIs. If you write that
-report, get it back first:
+✅ **The planner review `.md` was restored and is tracked again.** It is the source of the Session
+46 accuracy analysis this document cites as raw material for the metrics-rationale report (§7's
+last item): sign-confidence by slice ~93% all-period / ~82% season / ~60% single month, and the
+weather regression's R² of only 0.04–0.07 despite very tight CIs. Keeping the *source* under git
+while its `.html`/`.pdf` renders stay in history is effectively option 3 of the original three
+("track the sources, not the renders"), reached by way of option 1.
 
-```
-git checkout 7e9f58d -- docs_v2/Dashboard_Planner_Review_and_Design_Options.md
-```
+⚠️ **Read it for Part 1, not Parts 2 and 4.** Part 1 (accuracy analysis) is durable and still the
+best evidence in the project. Parts 2–4 are *proposals* written before Sessions 47–49 — Part 4
+("Top-left controls: redesign options") in particular discusses controls that have since been
+removed outright, not redesigned.
 
 Not gitignored, deliberately: the paths are empty now, so there is nothing to keep resurfacing, and
 an ignore rule would only make a future re-render silently invisible to `git status`.

@@ -2419,6 +2419,16 @@ function showDemoBanner(reason) {
 // fetch resolves to null rather than rejecting, so it can never trip the
 // top-level .catch() and never blocks the rest of the dashboard from
 // loading.
+//
+// HEADS UP (Session 48): data/route.json no longer exists -- it was retired
+// in favor of fleet_scenarios.json's scenario 1, and only dashboard2.html
+// (the canonical file) was migrated. So this fetch now always 404s and this
+// older dashboard silently has no route layer: it degrades exactly as
+// designed (resolves to null, no crash, the toggle just never appears), but
+// the feature is gone here, not broken. Left as-is deliberately rather than
+// half-migrating a file that is on its way out. Note that
+// tests/test_dashboard_slider.js feeds this a FAKE route payload, so the
+// suite keeps passing and will NOT tell you about this.
 const routeReady = fetchJSON('data/route.json').catch(() => null);
 
 // fleet_scenarios.json (Investigator Mode Phase 3) is optional and non-fatal

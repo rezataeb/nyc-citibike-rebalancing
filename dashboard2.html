@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Citi Bike Rebalancing Explorer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow-x: clip; }
   body { display: flex; flex-direction: column; }
@@ -73,8 +71,8 @@
   #map { position: absolute; inset: 0; }
 
   /* Map controls, floating top-left on the map itself -- reuses the same
-     compact classes (.segmented.compact, .hour-control.compact,
-     .pill-btn.compact) built for the sidebar toolbar version, so this is
+     compact classes (.segmented.compact, .hour-control.compact)
+     built for the sidebar toolbar version, so this is
      the slim variant, not the old spacious stacked card, specifically to
      minimize how much of the map it covers. Leaflet's zoom control moves
      to bottom-right (see the map init in the script below) to make room
@@ -114,9 +112,6 @@
   #legend-ticks { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 11px; color: #52514e; font-variant-numeric: tabular-nums; margin: 4px 0 6px; }
   #legend-ticks span:nth-child(2) { text-align: center; }
   #legend-ticks span:nth-child(3) { text-align: right; }
-  #legend-route-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #d8d7d3; font-size: 11.5px; color: #52514e; }
-  #legend-route-row.hidden { display: none; }
-  #legend-route-swatch { width: 20px; height: 3px; border-radius: 2px; background: #7c4dbd; flex-shrink: 0; }
 
   #legend-card .bar { width: 100%; height: 12px; border-radius: 6px; margin: 0 0 6px; box-sizing: border-box; }
   #legend-card .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; flex-wrap: wrap; gap: 4px 12px; }
@@ -290,9 +285,6 @@
      .compact drops it back to content width for the condensed toolbar,
      where a full-width button would look oversized next to the slim
      rows around it. */
-  .pill-btn { width: 100%; font: inherit; font-size: 14px; font-weight: 700; padding: 12px; border-radius: 24px; border: 1.5px solid #0b0b0b; background: #fff; color: #0b0b0b; cursor: pointer; }
-  .pill-btn.active { background: #0b0b0b; color: #fff; } /* route's own dedicated color story: black/white, not the flow-scale red/blue -- see JS comment on ROUTE_COLOR for the map layer itself */
-  .pill-btn.compact { width: auto; font-size: 12px; padding: 7px 16px; }
 
   #live-as-of { color: #52514e; font-size: 12px; }
   /* Coverage gap lives here now, not in the hero -- it's specific to Live
@@ -592,11 +584,13 @@
        -- zoom buttons carry much less positional expectation than the
        controls a reviewer actually reads. -->
   <div id="map-controls-bar">
-    <div id="view-toggle" class="segmented light compact">
-      <button id="view-individual" class="segmented-btn active">Individual</button>
-      <button id="view-grouped" class="segmented-btn">Grouped</button>
-    </div>
-
+    <!-- Session 47 removed the Individual/Grouped toggle from here (it only
+         restated what zooming had already decided). Session 49 then removed
+         grouped view itself: there is no clustering any more, every station
+         is one dot at every zoom, so there is no view mode left to toggle.
+         Nothing replaces either control -- no hidden control, no map-corner
+         button. The "Show route" button that also lived here is gone too
+         (Session 49); see the removal note in the script. -->
     <div id="historical-controls" tabindex="-1">
       <div id="controls-row">
         <div id="day-toggle" class="segmented light compact">
@@ -604,9 +598,6 @@
           <button id="day-weekend" class="segmented-btn">Weekend</button>
         </div>
         <select id="period-select"></select>
-      </div>
-      <div id="route-toggle-wrap" class="hidden">
-        <button id="route-toggle-btn" class="pill-btn compact">Show route</button>
       </div>
     </div>
 
@@ -642,7 +633,6 @@
       <div id="legend-ticks"><span id="legend-tick-low"></span><span id="legend-tick-mid">0</span><span id="legend-tick-high"></span></div>
       <div class="labels"><span id="legend-label-low">Deficit (no bikes)</span><span id="legend-label-high">Surplus (no docks)</span></div>
       <div id="legend-caption">Click a station for its daily flow</div>
-      <div id="legend-route-row" class="hidden"><span id="legend-route-swatch"></span><span id="legend-route-text"></span></div>
     </div>
 
     <div id="detail-card" class="hidden">
@@ -902,7 +892,7 @@
            went stale after Session 5/7.5, still showing a single Feb+April
            -> June split long after Session 30's real 12-fold walk-forward
            superseded it. Hidden entirely if that file is missing, same
-           graceful-degradation rule as route.json/fleet_scenarios.json. -->
+           graceful-degradation rule as fleet_scenarios.json. -->
       <!-- Design critique task 09: native <details> -- the outer
            class="hidden" (graceful degradation if model_performance.json
            failed to load, toggled by renderModelPerformance()) is
@@ -939,7 +929,6 @@
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 // Session 10 built the map skeleton (fixed 8am, no interactivity). Session 11
 // added the 24h time slider. Session 12 added the weekday/weekend toggle.
@@ -956,8 +945,9 @@
 // (no separate boxed row), the Legend/Station-detail pair share one
 // fixed-height tabbed container instead of two independently-growing
 // blocks, and a condensed footer was added (none existed before). Session
-// 20 adds the rebalancing-route layer (route.json, historical-mode-only,
-// graceful degradation if the file is missing) and a collapsed-by-default
+// 20 adds the rebalancing-route layer (historical-mode-only, graceful
+// degradation if its data is missing; sourced from route.json until
+// Session 48 retired that file in favor of fleet scenario 1) and a collapsed-by-default
 // model-eval footer (real Session 7.5 MAE-by-volume-tercile numbers, not
 // fetched -- see PROGRESS.md for where they came from) -- each
 // interaction lands as its own commit. Equity filter is a standing scope
@@ -986,6 +976,28 @@ const MARKER_MAX_RADIUS_PX = 8;
 function markerRadiusForZoom(zoom) {
   const r = 2.5 + (zoom - 12) * 0.7;
   return Math.max(MARKER_MIN_RADIUS_PX, Math.min(MARKER_MAX_RADIUS_PX, r));
+}
+
+// Over-plot compensation, Session 49. Clustering used to hide the problem
+// Session 44's task 08 measured: below z14, 2,516 dots merge into a solid
+// mass in dense areas. With clustering gone the dots are all drawn, so the
+// smear is managed optically instead -- when many marks overlap, LOWER
+// per-mark alpha lets the overlap itself read as density (darker where more
+// stations stack) rather than as one flat blob. Above the threshold nothing
+// is scaled at all, so the street-level view a reviewer actually reads is
+// pixel-for-pixel unchanged from before.
+//
+// Deliberately NOT done by shrinking the dots further: at z10 they are
+// already at the 2.5px floor, and anything smaller stops being clickable or
+// even visible. Alpha is the channel with room left.
+const OVERPLOT_FADE_MIN_ZOOM = 11; // at/below this, maximum fade
+const OVERPLOT_FADE_MAX_ZOOM = 14; // at/above this, no fade at all (the old look)
+const OVERPLOT_MIN_ALPHA_SCALE = 0.55; // most-faded case keeps 55% of the normal alpha
+function overplotAlphaForZoom(zoom) {
+  if (zoom >= OVERPLOT_FADE_MAX_ZOOM) return 1;
+  if (zoom <= OVERPLOT_FADE_MIN_ZOOM) return OVERPLOT_MIN_ALPHA_SCALE;
+  const t = (zoom - OVERPLOT_FADE_MIN_ZOOM) / (OVERPLOT_FADE_MAX_ZOOM - OVERPLOT_FADE_MIN_ZOOM);
+  return OVERPLOT_MIN_ALPHA_SCALE + t * (1 - OVERPLOT_MIN_ALPHA_SCALE);
 }
 
 // Hover-only "grow" affordance, deliberately independent of the selection
@@ -1200,241 +1212,46 @@ function formatAsOf(isoString) {
   return `${isoString.replace('T', ' ').replace(/[+-]\d{2}:\d{2}$/, '').replace(/Z$/, '')} UTC`;
 }
 
-// Mean net flow of children that HAVE data for the current hour/dayType/
-// period, colored via the same divergingColor()/domainMax every individual
-// historical marker uses -- a cluster's color is directly comparable to an
-// individual marker's, not a separately-scaled summary. Pure and Leaflet-
-// free: takes plain numbers in, a color (or null) out, so it's testable
-// without stubbing markercluster's clustering geometry at all. Returns null
-// -- never averages in a missing child as zero -- when childFlows is empty,
-// so the caller can render the same hollow-gray no-data convention as an
-// individual no-data marker.
-function computeClusterColor(childFlows, domainMax) {
-  if (childFlows.length === 0) return null;
-  const mean = childFlows.reduce((sum, value) => sum + value, 0) / childFlows.length;
-  return rampColor(mean, domainMax);
-}
-
-// Same shape and same "empty -> null, never zero-filled" rule as
-// computeClusterColor, but for live fill percentages: mean deviation-from-50
-// of children with a valid live reading, against the FIXED LIVE_FILL_DOMAIN
-// (never state.domainMax) -- same reasoning as individual live markers.
-function computeLiveClusterColor(childFillPcts) {
-  if (childFillPcts.length === 0) return null;
-  const mean = childFillPcts.reduce((sum, value) => sum + value, 0) / childFillPcts.length;
-  return rampColor(mean - 50, LIVE_FILL_DOMAIN);
-}
-
-// Pure HTML-string builder for one cluster icon -- no Leaflet involved, so
-// the visual/color logic is testable on its own. A null color (no valid
-// children for the current mode/period) renders the same hollow-gray
-// convention as an individual no-data marker: transparent fill, gray ring.
+// Session 49: marker CLUSTERING was removed here -- computeClusterColor(),
+// computeLiveClusterColor(), clusterIconHTML(), clusterIconCreateFunction()
+// and refreshClusters() all went with it, along with the Leaflet.markercluster
+// script/stylesheet tags, state.clusterLayer, setViewMode() and
+// autoViewModeForZoom(). Every station is now one dot, at every zoom.
 //
-// User-reported gap, not from the critique: unlike individual markers,
-// clusters never used rampStroke() -- a "balanced" cluster (mean flow near
-// 0) rendered as a solid near-white (#f7f7f7) 40px disc with a WHITE
-// border, at full opacity (clusters don't fade the way rampOpacity makes
-// individual balanced markers do -- the count number needs to stay
-// legible regardless of class, so opacity isn't touched here, only the
-// border). A second issue found while fixing that one: the count text
-// itself was hardcoded white, which is just as invisible on a near-white
-// fill as the white border was -- same root cause, same fix.
-function clusterIconHTML(color, count) {
-  const isNoData = color === null;
-  const isBalanced = color === RAMP[2];
-  const background = isNoData ? 'transparent' : color;
-  const border = isNoData ? NO_DATA_STROKE : (isBalanced ? BALANCED_STROKE : '#ffffff');
-  const textColor = isNoData ? '#666057' : (isBalanced ? '#52514e' : '#ffffff');
-  return `<div style="width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${background};border:2px solid ${border};color:${textColor};font-weight:600;font-size:13px;font-family:system-ui,-apple-system,sans-serif;">${count}</div>`;
-}
-
-// Leaflet.markercluster's iconCreateFunction hook -- called whenever a
-// cluster needs (re)drawing. Resolves each child marker back to its station
-// id via marker.stationId (tagged at creation time), looks up exactly the
-// same underlying value an individual marker would use for the CURRENT
-// state.mode, and delegates the aggregation/coloring to the pure functions
-// above. `cluster` only needs .getAllChildMarkers()/.getChildCount() here --
-// no spatial clustering geometry -- so a plain fake object with those two
-// methods is enough to test this directly.
-function clusterIconCreateFunction(cluster) {
-  const children = cluster.getAllChildMarkers();
-  let color;
-  if (state.mode === 'live') {
-    const fillPcts = [];
-    for (const marker of children) {
-      if (hasLiveData(marker.stationId)) {
-        const live = state.liveStations[marker.stationId];
-        fillPcts.push((live.bikes_available / live.capacity) * 100);
-      }
-    }
-    color = computeLiveClusterColor(fillPcts);
-  } else {
-    const flows = [];
-    for (const marker of children) {
-      const curve = curveForPeriod(state.stations[marker.stationId], state.period, state.dayType);
-      if (curve !== null) flows.push(curve[state.currentHour]);
-    }
-    color = computeClusterColor(flows, state.domainMax);
-  }
-  return L.divIcon({
-    html: clusterIconHTML(color, cluster.getChildCount()),
-    className: 'cluster-icon',
-    iconSize: L.point(40, 40),
-  });
-}
-
-// Forces every currently-visible cluster icon to re-run
-// clusterIconCreateFunction against the latest state -- Leaflet.markercluster
-// caches icons otherwise, so without this, grouped view would show stale
-// colors after the hour/dayType/period/mode changes. Called from exactly one
-// place (renderHour, below) rather than separately from setDayType/setPeriod/
-// setMode, because all three already funnel through renderHour -- same "one
-// hook point" reasoning already used for updateStationDetail().
+// This also removed the blue polygons that appeared when hovering a cluster:
+// that was markercluster's showCoverageOnHover option, which defaults to true
+// and drew the convex hull of a cluster's children.
 //
-// Guarded behind map.hasLayer(state.clusterLayer): markercluster's
-// refreshClusters() reads internal state (_topClusterLevel) that's only set
-// up once the group has actually been added to the map via its own onAdd
-// lifecycle. renderHour() runs once at initial load -- before the user has
-// ever switched to grouped view -- so calling refreshClusters() unconditionally
-// throws on every single page load, not just when toggling views (confirmed
-// bug, not a hypothetical: this uncaught exception aborted the load .then()
-// callback before it reached ANY of the addEventListener calls below it,
-// which is why controls appeared completely unresponsive).
-function refreshClusters() {
-  if (state.clusterLayer && map.hasLayer(state.clusterLayer)) state.clusterLayer.refreshClusters();
-}
+// Trade-off, deliberately accepted: Session 44's task 08 measured real
+// over-plotting below z14 (2,516 dots merge into a solid mass in dense
+// areas), and clustering was the fix. Compensating instead with zoom-aware
+// dot styling -- see markerStyleFor()/overplotAlphaForZoom() -- which
+// reduces the smear without hiding any station behind a count bubble.
 
-// route.json's own dedicated color -- deliberately NOT reused from
-// DEFICIT_COLOR/SURPLUS_COLOR/NEUTRAL_COLOR. Those three already carry a
-// specific meaning (net-flow magnitude/sign) on this same map; a route
-// stop is a truck-visit-sequence marker, not a flow value, so painting it
-// red or blue would misleadingly suggest a deficit/surplus reading that
-// isn't what the marker means.
-const ROUTE_COLOR = '#7c4dbd';
-
-// Golden-angle spiral offset for the Nth visit to the same station within
-// one truck's tour (route.json's stops can and do revisit a station --
-// confirmed against the real data before building this, not assumed).
-// sqrt(visitIndex) growth keeps consecutive repeats close together at
-// first and only fans out further for a station visited many times,
-// rather than every repeat jumping the same fixed distance. Pure and
-// Leaflet-free: testable with plain integers.
-const STOP_OFFSET_STEP = 0.00004; // ~4-5m in latitude degrees at NYC's latitude
-const GOLDEN_ANGLE_DEG = 137.5;
-function computeStopOffset(visitIndex) {
-  if (visitIndex === 0) return { dLat: 0, dLng: 0 };
-  const angleRad = visitIndex * GOLDEN_ANGLE_DEG * (Math.PI / 180);
-  const radius = STOP_OFFSET_STEP * Math.sqrt(visitIndex);
-  return { dLat: radius * Math.cos(angleRad), dLng: radius * Math.sin(angleRad) };
-}
-
-// For each stop in one truck's tour (in visit order), how many times its
-// station has already appeared earlier in the SAME tour -- 0 for a
-// station's first visit, 1 for its second, etc. Pure: takes route.json's
-// own stop objects, returns a parallel array of integers, no Leaflet.
-function assignVisitIndices(stops) {
-  const seenCounts = {};
-  return stops.map(stop => {
-    const visitIndex = seenCounts[stop.station_id] || 0;
-    seenCounts[stop.station_id] = visitIndex + 1;
-    return visitIndex;
-  });
-}
-
-// Pure HTML-string builder for one route stop marker -- pickup is a
-// circle, dropoff is a diamond (a rotated square), so the two are
-// distinguishable by SHAPE, not color (color is one dedicated route hue
-// for both, per ROUTE_COLOR's own comment -- shape carries the
-// pickup/dropoff distinction, same "don't spend the same channel twice"
-// reasoning as the rest of this dashboard's color usage). The visit-order
-// number sits inside either shape; the diamond's number is counter-
-// rotated so it reads upright.
-function buildStopIconHTML(action, stopNumber, color) {
-  if (action === 'pickup') {
-    return `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #ffffff;color:#ffffff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(11,11,11,0.35);">${stopNumber}</div>`;
-  }
-  return `<div style="width:20px;height:20px;background:${color};border:2px solid #ffffff;transform:rotate(45deg);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(11,11,11,0.35);"><span style="display:inline-block;transform:rotate(-45deg);color:#ffffff;font-size:10px;font-weight:700;">${stopNumber}</span></div>`;
-}
-
-// Builds the route layer from route.json's real shape: one polyline plus
-// one numbered stop marker per truck's stops, in visit order. Independent
-// of individualLayer/clusterLayer entirely -- this is its own layer group,
-// drawn on top of whichever of those is currently on the map, never part
-// of the Individual/Grouped swap. Each stop marker's click opens that
-// station's detail panel via the same selectStation() every other marker
-// uses, regardless of how many times that station appears in the tour.
-function buildRouteLayer(routeData) {
-  const layers = [];
-  for (const truck of routeData.trucks) {
-    const visitIndices = assignVisitIndices(truck.stops);
-    const latlngs = [];
-    truck.stops.forEach((stop, i) => {
-      const offset = computeStopOffset(visitIndices[i]);
-      const lat = stop.lat + offset.dLat;
-      const lng = stop.lng + offset.dLng;
-      latlngs.push([lat, lng]);
-
-      const marker = L.marker([lat, lng], {
-        icon: L.divIcon({
-          html: buildStopIconHTML(stop.action, i + 1, ROUTE_COLOR),
-          className: 'route-stop-icon',
-          iconSize: [24, 24],
-        }),
-      });
-      marker.on('click', () => selectStation(stop.station_id));
-      layers.push(marker);
-    });
-    // Design critique task 10: a white casing under the colored line so
-    // the route survives visually over ~2,500 packed station dots -- two
-    // overlapping polylines (casing pushed first, so it renders below),
-    // not one thicker colored line, which would just be a wider smear of
-    // the same low-contrast-over-dots problem.
-    layers.push(L.polyline(latlngs, { color: '#ffffff', weight: 5, opacity: 0.9 }));
-    layers.push(L.polyline(latlngs, { color: ROUTE_COLOR, weight: 3, opacity: 0.9 }));
-  }
-  return L.layerGroup(layers);
-}
-
-// Route visibility is the AND of two independent things: the user's own
-// toggle preference (state.routeVisible, which persists across mode
-// switches so the route reappears automatically on returning to
-// historical mode rather than needing to be re-toggled) and whether
-// historical mode is even active (route planning is based on historical
-// deficit/surplus data, never live GBFS, so it's never shown in live mode
-// regardless of the toggle's last state). Both setRouteVisible() and
-// setMode() recompute from this one rule, rather than each independently
-// deciding when to add/remove the layer.
-function applyRouteVisibility() {
-  const shouldShow = !!state.routeLayer && state.routeVisible && state.mode === 'historical';
-  if (state.routeLayer) {
-    if (shouldShow) map.addLayer(state.routeLayer);
-    else map.removeLayer(state.routeLayer);
-  }
-  renderLegendRoute(shouldShow);
-}
-
-// Design critique task 10: the legend's route row, real stop count from
-// state.route's own trucks/stops (never a hardcoded placeholder like the
-// critique's own mockup "42"). Explicit hide-path runs even when
-// state.routeLayer is null (route.json never loaded, or hasn't yet) --
-// same standing rule as every other control in this file: default
-// visible/hidden state is set in JS, never left to the static markup's
-// class="hidden" to already be correct (Sessions 19/20A/20B/21).
-function renderLegendRoute(shouldShow) {
-  const row = document.getElementById('legend-route-row');
-  row.classList.toggle('hidden', !shouldShow);
-  if (!shouldShow || !state.route) return;
-  const stopCount = state.route.trucks.reduce((sum, truck) => sum + truck.stops.length, 0);
-  document.getElementById('legend-route-text').textContent = `Simulated route · ${stopCount} stop${stopCount === 1 ? '' : 's'}`;
-}
-
-function setRouteVisible(visible) {
-  state.routeVisible = visible;
-  const btn = document.getElementById('route-toggle-btn');
-  btn.textContent = visible ? 'Hide route' : 'Show route';
-  btn.classList.toggle('active', visible);
-  applyRouteVisibility();
-}
+// Session 49: the drawn rebalancing route was REMOVED here -- ROUTE_COLOR,
+// computeStopOffset(), assignVisitIndices(), buildStopIconHTML(),
+// buildRouteLayer(), applyRouteVisibility(), renderLegendRoute() and
+// setRouteVisible() all went with it, along with the "Show route" button and
+// the legend's route row.
+//
+// Why: the tour was the one thing on this map that LOOKED like an
+// optimization output without being one. plan_routes.py has no depot data
+// (its own depot_assumption field says so: tours start at "whichever surplus
+// station has the largest remaining forecast surplus -- a stopgap simplifying
+// assumption, not a modeled depot or garage location"), no travel times, and
+// a max_stops cap that is "a rough single-shift estimate, not a modeled
+// time/distance budget". Every truck in every scenario 1-10 hits that cap
+// (any_truck_capped is always true), which is why coverage is suspiciously
+// linear at ~14.5 stations per truck -- that number is the cap, not a
+// rebalancing finding. Drawing a polyline over it implied routing capability
+// this project does not have, in a project whose whole pitch is plain
+// auditable methods.
+//
+// What SURVIVES: the fleet-size slider and renderFleetStats(). The counts
+// ("N trucks clear M of 1,037 deficit stations") are an honest capacity
+// illustration -- the WHICH-stations set is real, derived from real net-flow
+// data; only the tour through them was invented. data/fleet_scenarios.json
+// is still the source and is still fetched.
 
 // Factored out (not just inlined into state's own initializer below) so
 // Phase 6's "Reset to baseline" control can produce the exact same
@@ -1467,21 +1284,9 @@ const state = {
   mode: 'historical', // 'historical' | 'live'
   liveStations: null, // station_id -> {capacity, bikes_available, docks_available, is_renting, is_returning}, from live_status.json
   liveAsOf: null, // live_status.json's own last_updated (ISO string), never the viewer's local load time
-  viewMode: 'individual', // 'individual' | 'grouped'
-  // Design critique task 08: null until the user explicitly picks a view
-  // via the toggle -- auto-switch-by-zoom (see the zoomend handler below)
-  // only applies while this is null. Once set, it's a real override, not
-  // just a snapshot of the current auto-computed mode -- zooming further
-  // never clears it back to null; only clicking the OTHER toggle button
-  // changes it.
-  viewModeUserForced: null, // 'individual' | 'grouped' | null
   markerRadius: null, // set for real once the map's actual starting zoom is known, see markerRadiusForZoom()
-  individualLayer: null, // L.layerGroup holding the same marker objects as state.markers
-  clusterLayer: null, // L.markerClusterGroup holding the same marker objects as state.markers
+  stationLayer: null, // the single L.layerGroup holding every station marker -- always on the map (Session 49: no more individual/cluster swap)
   detailMoreInfoExpanded: false, // collapsed by default -- see setDetailMoreInfoExpanded()
-  route: null, // route.json's raw payload, or null if it failed to load (graceful degradation, not fatal)
-  routeLayer: null, // L.layerGroup of polylines + numbered stop markers, built once if route.json loads
-  routeVisible: false, // the user's own toggle preference, independent of state.mode -- see applyRouteVisibility()
   hourPlaying: false, // whether the hour slider is currently auto-advancing -- see setHourPlaying()
   demoMode: false, // true when flows.json failed and state.stations is DEMO_FLOWS_PAYLOAD instead of real data
   liveAvailable: true, // false when live_status.json failed independently -- gates the Live mode tab, not tied to demoMode
@@ -1490,7 +1295,7 @@ const state = {
   // Phase 2)'s only field; fleetSize/weatherScenario/dockOverrides join it
   // in later phases rather than each getting a separate ad hoc variable.
   investigatorState: defaultInvestigatorState(),
-  fleetScenarios: null, // raw fleet_scenarios.json payload, or null if it failed/wasn't generated -- graceful degradation, same rule as route.json
+  fleetScenarios: null, // raw fleet_scenarios.json payload, or null if it failed/wasn't generated. Since Session 48 this is the ONLY route source -- null here means no route feature at all.
   elasticities: null, // raw elasticities.json payload, or null if missing -- Phase 4's weather-scenario projection needs this
   scenarioPresets: null, // raw scenario_presets.json payload, or null if missing
   modelPerformance: null, // raw model_performance.json payload, or null if missing -- Session 30's walk-forward result
@@ -1503,7 +1308,7 @@ const state = {
 // can't go stale the way the old Session 7.5 numbers did (still showing a
 // single Feb+April -> June split long after the 12-fold walk-forward
 // superseded it). #model-eval hides entirely if the file is missing, same
-// graceful-degradation rule as route.json/fleet_scenarios.json.
+// graceful-degradation rule as fleet_scenarios.json.
 function renderModelPerformance(payload) {
   const wrap = document.getElementById('model-eval');
   if (!payload) {
@@ -1790,13 +1595,12 @@ function computeServicedEquityOverlap(scenario, thresholds) {
 // Fleet simulator (Phase 3): reads a precomputed scenario for the selected
 // fleet size from state.fleetScenarios -- never runs plan_routes.py's
 // greedy algorithm in-browser, per Investigator Mode's own "precomputed,
-// never live-computed" principle. renderFleetStats() is pure display, safe
-// to call any time (including at load, before any interaction);
-// applyFleetScenarioToRoute() is the one function that mutates
-// state.route/state.routeLayer and touches the map. Depends on BOTH
-// fleetSize (the scenario itself) and the current equity thresholds (for
-// the overlap line), so it's re-run from setEquityThreshold() too, not
-// just from setFleetSize().
+// never live-computed" principle. renderFleetStats() is pure display and
+// touches nothing on the map -- since Session 49 removed the drawn route,
+// the fleet slider's ONLY effect is these counts. Depends on BOTH fleetSize
+// (the scenario itself) and the current equity thresholds (for the overlap
+// line), so it's re-run from setEquityThreshold() too, not just from
+// setFleetSize().
 function renderFleetStats(fleetSize) {
   const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
   const deficitRemaining = scenario.n_deficit_flagged - scenario.n_deficit_serviced;
@@ -1810,30 +1614,9 @@ function renderFleetStats(fleetSize) {
   document.getElementById('fleet-badge').textContent = `${fleetSize} truck(s)`;
 }
 
-// Swaps the SAME route layer/toggle the historical "Show route" control
-// uses over to this fleet-size scenario, rather than drawing a second
-// parallel route on the map -- two simultaneous route layers would be
-// visually confusing, and there's only ever one "current" route to show.
-// Explicitly removes the previous layer from the map before swapping:
-// applyRouteVisibility()/setRouteVisible() only ever act on whichever
-// state.routeLayer is CURRENT, so an unremoved stale layer would silently
-// leak onto the map forever otherwise. Auto-shows the route
-// (setRouteVisible(true)) so moving the slider gives immediate visual
-// feedback -- the Guideline's own "Simulate" intent, without a separate
-// button (confirmed with the user: live-on-drag, consistent with every
-// other slider already built).
-function applyFleetScenarioToRoute(fleetSize) {
-  const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
-  if (state.routeLayer) map.removeLayer(state.routeLayer);
-  state.route = scenario;
-  state.routeLayer = buildRouteLayer(scenario);
-  setRouteVisible(true);
-}
-
 function setFleetSize(fleetSize) {
   state.investigatorState.fleetSize = fleetSize;
   renderFleetStats(fleetSize);
-  applyFleetScenarioToRoute(fleetSize);
   renderDiffBar();
 }
 
@@ -2192,6 +1975,11 @@ function noDataStyle(selected) {
     fillColor: '#ffffff',
     fillOpacity: 0,
     color: selected ? SELECTED_STROKE : NO_DATA_STROKE,
+    // Hollow no-data markers fade with the same zoom rule as filled ones
+    // (Session 49) -- they are the emptiest marks on the map, so leaving
+    // them at full stroke while everything else fades would make missing
+    // data the most prominent thing in a zoomed-out view.
+    opacity: selected ? 1 : overplotAlphaForZoom(map.getZoom()),
     weight: selected ? SELECTED_WEIGHT : NO_DATA_WEIGHT,
   };
 }
@@ -2326,6 +2114,10 @@ function renderWeatherScenarioStatus() {
 // low-volume exclusion).
 function markerStyleFor(id) {
   const selected = id === state.selectedId;
+  // Session 49 over-plot compensation. Never applied to the SELECTED marker:
+  // the whole point of selection styling is that it stays findable in a dense
+  // field, so fading it would defeat it.
+  const alpha = selected ? 1 : overplotAlphaForZoom(map.getZoom());
 
   if (state.mode === 'live') {
     if (!hasLiveData(id)) return noDataStyle(selected);
@@ -2334,8 +2126,9 @@ function markerStyleFor(id) {
     const centered = pctFull - 50;
     return {
       fillColor: rampColor(centered, LIVE_FILL_DOMAIN),
-      fillOpacity: rampOpacity(centered, LIVE_FILL_DOMAIN),
+      fillOpacity: rampOpacity(centered, LIVE_FILL_DOMAIN) * alpha,
       color: selected ? SELECTED_STROKE : rampStroke(centered, LIVE_FILL_DOMAIN),
+      opacity: alpha,
       weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
     };
   }
@@ -2350,8 +2143,9 @@ function markerStyleFor(id) {
   const adjustedValue = curve[state.currentHour] * weatherMultiplierFor(id);
   return {
     fillColor: rampColor(adjustedValue, state.domainMax),
-    fillOpacity: rampOpacity(adjustedValue, state.domainMax),
+    fillOpacity: rampOpacity(adjustedValue, state.domainMax) * alpha,
     color: selected ? SELECTED_STROKE : rampStroke(adjustedValue, state.domainMax),
+    opacity: alpha,
     weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
   };
 }
@@ -2400,7 +2194,6 @@ function renderHour(hour) {
   // unconditionally: updateStationDetail() itself no-ops when nothing is
   // selected.
   updateStationDetail();
-  refreshClusters();
   renderReadout(); // task 03: keeps the permanent readout + "worst now" list in sync with every hour/dayType/period/mode change, same one-hook-point reasoning as updateStationDetail() above
 }
 
@@ -2557,12 +2350,7 @@ function updateStatusMessage() {
 // Switches historical <-> live and re-renders through the same renderHour
 // path everything else uses. Hides/shows the historical-only controls card
 // and the live "as of" card as single units (one .hidden toggle per
-// container, never per-sub-control), exactly opposite each other. The
-// route toggle button lives inside #historical-controls, so it already
-// hides/shows with that card; applyRouteVisibility() additionally makes
-// sure the route layer itself leaves the map in live mode (regardless of
-// the user's last toggle preference) and reappears automatically on
-// returning to historical mode, without the user needing to re-toggle it.
+// container, never per-sub-control), exactly opposite each other.
 // #timebar's real center point + width, not a fixed CSS left:50% -- see
 // its own CSS comment for why: #body-row (the positioning ancestor) spans
 // both the map and the sidebar, so a plain left:50% would center on the
@@ -2659,36 +2447,11 @@ function setMode(mode) {
   document.getElementById('historical-controls').classList.toggle('hidden', mode !== 'historical');
   document.getElementById('timebar').classList.toggle('hidden', mode !== 'historical'); // task 07: timebar moved out of historical-controls, so it needs its own explicit toggle now
   document.getElementById('live-as-of').classList.toggle('hidden', mode !== 'live');
-  applyRouteVisibility();
   renderHour(state.currentHour);
   updateStatusMessage();
 }
 
-// Swaps which layer is actually on the map -- explicit removeLayer BEFORE
-// addLayer (never relying on addLayer alone), so the two containers can
-// never both be attached at once. Doesn't need to force a cluster refresh
-// itself: renderHour() already calls refreshClusters() on every hour/
-// dayType/period/mode change regardless of which view is currently
-// visible, so grouped view's icons are already current by the time you
-// switch to it.
-function setViewMode(viewMode) {
-  const oldGroup = state.viewMode === 'individual' ? state.individualLayer : state.clusterLayer;
-  const newGroup = viewMode === 'individual' ? state.individualLayer : state.clusterLayer;
-  state.viewMode = viewMode;
-  setRadioActive('view-individual', viewMode === 'individual');
-  setRadioActive('view-grouped', viewMode === 'grouped');
-  map.removeLayer(oldGroup);
-  map.addLayer(newGroup);
-}
 
-// Design critique task 08: 2,516 markers at city zoom is real over-
-// plotting (confirmed against the actual data, not assumed) -- below
-// z14, individual dots merge into a solid mass in dense areas. z14 is
-// roughly "close enough to tell streets apart," a real, checkable
-// cartographic threshold, not a number picked to match a mockup.
-function autoViewModeForZoom(zoom) {
-  return zoom >= 14 ? 'individual' : 'grouped';
-}
 
 // Builds the equity-context lines shown in the detail panel from flows.json's
 // real `context` fields (near_nycha, near_school, nycha/school/subway
@@ -2953,16 +2716,58 @@ function drawLegendGradient(domainMax) {
 const map = L.map('map', { zoomControl: false }).setView([40.73, -73.95], 11); // NYC default, replaced by fitBounds once real station coords load
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-// Design critique task 08. Guarded on state.markers existing: fitBounds()
-// itself (called later, once station data loads) fires its own zoomend,
-// and this listener is registered before any station marker exists --
-// verified below, not left as an unchecked assumption.
+// Click tolerance (Session 49). Station dots are 2.5-8px, so at city zoom a
+// reviewer is aiming at a 2.5px target and a near-miss selects nothing --
+// the reported "choosing each station needs exact click" problem.
+//
+// This is a MAP-level handler, not a bigger hit area on each marker: in
+// Leaflet, a click that actually lands on an interactive vector layer is
+// consumed by that layer and never reaches the map, so this only ever runs
+// on a genuine miss. Exact hits keep going through the marker's own click
+// handler unchanged. The alternative -- a second, larger invisible marker
+// per station -- would double 2,516 markers to 5,032 for the same effect.
+//
+// Distance is measured in SCREEN pixels via latLngToContainerPoint, not in
+// degrees: a fixed degree tolerance would cover a wildly different visual
+// distance at z10 than at z18, which is exactly backwards from what the
+// user experiences.
+const CLICK_TOLERANCE_PX = 14;
+function nearestStationWithin(latlng, tolerancePx) {
+  if (!state.markers) return null;
+  const target = map.latLngToContainerPoint(latlng);
+  let bestId = null;
+  let bestDistance = tolerancePx; // anything farther than the tolerance is not a candidate at all
+  for (const id in state.markers) {
+    const point = map.latLngToContainerPoint(state.markers[id].getLatLng());
+    const distance = Math.hypot(point.x - target.x, point.y - target.y);
+    if (distance <= bestDistance) {
+      bestDistance = distance;
+      bestId = id;
+    }
+  }
+  return bestId;
+}
+
+map.on('click', event => {
+  const id = nearestStationWithin(event.latlng, CLICK_TOLERANCE_PX);
+  if (id !== null) selectStation(id);
+});
+
+// Guarded on state.markers existing: fitBounds() itself (called later, once
+// station data loads) fires its own zoomend, and this listener is registered
+// before any station marker exists -- verified below, not left as an
+// unchecked assumption.
 map.on('zoomend', () => {
   if (!state.markers || Object.keys(state.markers).length === 0) return;
   const zoom = map.getZoom();
-  setViewMode(state.viewModeUserForced ?? autoViewModeForZoom(zoom));
   state.markerRadius = markerRadiusForZoom(zoom);
-  for (const id in state.markers) state.markers[id].setRadius(radiusFor(id)); // radiusFor keeps the selected marker's own +2px bump across zoom changes
+  // Session 49: with clustering gone, zoom drives BOTH the dot size and the
+  // over-plot compensation (fill/stroke alpha), so restyle rather than just
+  // resize. radiusFor() keeps the selected marker's own +2px bump.
+  for (const id in state.markers) {
+    state.markers[id].setRadius(radiusFor(id));
+    state.markers[id].setStyle(markerStyleFor(id));
+  }
 });
 
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -3095,19 +2900,16 @@ function showDemoBanner(reason) {
   status.classList.remove('error');
 }
 
-// route.json is fetched alongside the other two, but non-fatally: unlike
-// flows.json/live_status.json (both required for the dashboard to mean
-// anything), route.json is one optional analysis layer -- graceful
-// degradation, same rule as every other layer in this project. A failed
-// fetch resolves to null rather than rejecting, so it can never trip the
-// top-level .catch() and never blocks the rest of the dashboard from
-// loading.
-const routeReady = fetchJSON('data/route.json').catch(() => null);
-
-// fleet_scenarios.json (Investigator Mode Phase 3) is optional and non-fatal
-// for the same reason route.json is -- it's an additive analysis layer, not
-// required data. Generated by pipeline/fleet_simulator.py; won't exist at
-// all until that script has been run once.
+// Session 48 retired data/route.json; Session 49 removed the drawn route
+// entirely (see the removal note further up). What remains is
+// fleet_scenarios.json, which now feeds only the fleet-size slider's
+// counts -- no map layer.
+//
+// Kept optional and non-fatal, same as every other additive analysis
+// layer: a failed fetch resolves to null rather than rejecting, so it can
+// never trip the top-level .catch(). Generated by
+// pipeline/fleet_simulator.py; won't exist until that script has run once.
+// Without it the Investigator's fleet section simply doesn't appear.
 const fleetScenariosReady = fetchJSON('data/fleet_scenarios.json').catch(() => null);
 
 // elasticities.json/scenario_presets.json (Investigator Mode Phase 4) --
@@ -3129,7 +2931,7 @@ const modelPerformanceReady = fetchJSON('data/model_performance.json').catch(() 
 // problem must not be masked by fabricating live counts under real
 // station identities. Each settles to a result object instead of
 // rejecting, so Promise.all below can never reject on either of these two
-// (same non-fatal shape as routeReady above, extended to the two
+// (same non-fatal shape as fleetScenariosReady above, extended to the two
 // previously-required files).
 const flowsReady = fetchJSON('data/flows.json')
   .then(payload => ({ payload, isDemo: false, error: null }))
@@ -3139,8 +2941,8 @@ const liveReady = fetchJSON('data/live_status.json')
   .then(payload => ({ payload, ok: true }))
   .catch(error => ({ payload: null, ok: false, error }));
 
-const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady])
-  .then(([flowsResult, liveResult, routePayload, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload]) => {
+const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady])
+  .then(([flowsResult, liveResult, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload]) => {
     state.stations = flowsResult.payload.stations;
     state.equityJoinMeta = flowsResult.payload.equity_join || null;
     state.liveAvailable = liveResult.ok;
@@ -3180,71 +2982,30 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
         { radius: state.markerRadius },
         markerStyleFor(id)
       ));
-      marker.stationId = id; // lets clusterIconCreateFunction map a grouped child back to its station
       marker.on('click', () => selectStation(id));
       marker.on('mouseover', () => marker.setRadius(radiusFor(id) + MARKER_HOVER_RADIUS_DELTA_PX));
       marker.on('mouseout', () => marker.setRadius(radiusFor(id)));
       state.markers[id] = marker;
     }
 
-    // Two containers holding the SAME marker objects (never duplicated) --
-    // only one is ever actually attached to the map at a time, swapped by
-    // setViewMode(). Individual markers keep their existing click behavior
-    // unchanged either way; clustering only changes how they're grouped for
-    // display, not what a click on a revealed marker does.
-    const allMarkers = Object.values(state.markers);
-    state.individualLayer = L.layerGroup(allMarkers);
-    state.clusterLayer = L.markerClusterGroup({ iconCreateFunction: clusterIconCreateFunction });
-    state.clusterLayer.addLayers(allMarkers);
-    // Design critique task 08: the initial view now follows the same
-    // zoom-based rule as every later zoomend (see autoViewModeForZoom()
-    // below) instead of always hardcoding 'individual' -- the map's real
-    // starting zoom (post-fitBounds) is usually well below the z>=14
-    // threshold, so opening in 'individual' by default was exactly the
-    // over-plotted city-wide view this task exists to fix. setViewMode()
-    // itself (not a raw map.addLayer) so the toggle buttons' active state
-    // and state.viewMode both stay consistent with what's actually
-    // shown -- explicit, not left to the static HTML markup's own
-    // hardcoded `active` class to happen to match.
-    setViewMode(state.viewModeUserForced ?? autoViewModeForZoom(map.getZoom()));
+    // One container, always on the map (Session 49). No swap, no second
+    // copy of the markers.
+    state.stationLayer = L.layerGroup(Object.values(state.markers));
+    map.addLayer(state.stationLayer);
 
-    // route.json is optional (see routeReady above) -- if it loaded, build
-    // the route layer; if not, state.route/routeLayer stay null. Not added
-    // to the map yet -- state.routeVisible defaults to false, so it stays
-    // off until the user turns it on.
-    state.route = routePayload;
-    if (state.route) {
-      state.routeLayer = buildRouteLayer(state.route);
-    }
-
-    // route-toggle-btn's click listener is attached UNCONDITIONALLY (not
-    // only when route.json succeeded) because Investigator Mode's fleet-
-    // size slider (below) can populate state.route/routeLayer later even
-    // if route.json itself failed to load -- the toggle has to already be
-    // wired for that case. It's a safe no-op via applyRouteVisibility()'s
-    // own guard (`if (!state.routeLayer) return;`) until SOME route data
-    // exists either way.
-    document.getElementById('route-toggle-btn').addEventListener('click', () => setRouteVisible(!state.routeVisible));
-
-    // The toggle wrap is visible whenever EITHER source could produce a
-    // route to show -- explicit either way, not just relying on the static
-    // HTML default to already match (same standing fix as Sessions 19/
-    // 20A/20B/21/23).
+    // fleet_scenarios.json still drives the fleet-size slider's counts.
+    // Session 49 removed the drawn route, so there is no route layer to
+    // build here any more and no Show route control to reveal.
     state.fleetScenarios = fleetScenariosPayload;
-    if (state.route || state.fleetScenarios) {
-      document.getElementById('route-toggle-wrap').classList.remove('hidden');
-    } else {
-      document.getElementById('route-toggle-wrap').classList.add('hidden');
-    }
 
     // Fleet simulator sub-section: visible only if fleet_scenarios.json
     // loaded. Slider's initial .value/label text set explicitly here from
     // state.investigatorState.fleetSize, not left to the static HTML's
     // value="1" attribute to already agree with it -- same standing fix as
     // the equity sliders above. renderFleetStats() runs once at load (pure
-    // text, safe before any interaction) but applyFleetScenarioToRoute() is
-    // deliberately NOT called at load -- moving the fleet slider is what
-    // takes over the map's route display, not just loading the page.
+    // text, safe before any interaction). Since Session 49 removed the
+    // drawn route, the slider has no map side effect at all -- it only
+    // recomputes these counts.
     if (state.fleetScenarios) {
       document.getElementById('fleet-accordion').classList.remove('hidden');
       const fleetSlider = document.getElementById('fleet-size-slider');
@@ -3399,9 +3160,9 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
     }
     periodSelect.value = state.period;
 
-    // mode-live is disabled (not hidden -- unlike route-toggle-wrap, this
-    // is one button in an always-two-button toggle group, and hiding one
-    // side would look broken) whenever live_status.json failed on its own.
+    // mode-live is disabled, not hidden -- it is one button in an
+    // always-two-button toggle group, and hiding one side would look
+    // broken -- whenever live_status.json failed on its own.
     // The click-listener guard below matters for real browsers too:
     // .disabled blocks native click dispatch, but the Node test stubs
     // don't emulate that, so the guard is the actual enforcement in tests.
@@ -3472,18 +3233,9 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
     wireRadiogroup(document.getElementById('mode-toggle'), ['mode-historical', 'mode-live']);
     positionFloatingMapControls(); // real map width wasn't known until layout settled just above
 
-    // Design critique task 08: a manual click is a real override, not
-    // just the current auto-computed state -- see viewModeUserForced's
-    // own comment for why it doesn't get cleared on further zooming.
-    document.getElementById('view-individual').addEventListener('click', () => {
-      state.viewModeUserForced = 'individual';
-      setViewMode('individual');
-    });
-    document.getElementById('view-grouped').addEventListener('click', () => {
-      state.viewModeUserForced = 'grouped';
-      setViewMode('grouped');
-    });
-    wireRadiogroup(document.getElementById('view-toggle'), ['view-individual', 'view-grouped']);
+    // (Session C: the view-individual/view-grouped click listeners and
+    // their wireRadiogroup() call were removed here along with the toggle
+    // markup. View mode is zoom-driven only -- see the zoomend handler.)
 
     document.getElementById('detail-close').addEventListener('click', closeStation);
     document.getElementById('detail-more-toggle').addEventListener('click', () => setDetailMoreInfoExpanded(!state.detailMoreInfoExpanded));
@@ -3570,7 +3322,7 @@ const ready = Promise.all([flowsReady, liveReady, routeReady, fleetScenariosRead
   .catch(error => {
     // flows.json and live_status.json can no longer reject (see
     // flowsReady/liveReady above -- both settle to a result object, demo
-    // or otherwise), and routeReady already resolves to null on failure.
+    // or otherwise), and fleetScenariosReady already resolves to null on failure.
     // So this only fires for a genuinely unexpected bug in the .then()
     // callback itself, not a data-loading problem -- those are all
     // graceful now. Real error styling (.error) is still correct here,
@@ -3590,11 +3342,11 @@ if (typeof globalThis !== 'undefined') {
     selectStation, closeStation, previewStripHour, clearStripPreview, stripX, stripY, flyToStation,
     setPeriod, formatPeriodLabel, curveForPeriod, hasPeriodData, setHourPlaying,
     setMode, hasLiveData, formatAsOf,
-    setViewMode, computeClusterColor, computeLiveClusterColor, clusterIconHTML, clusterIconCreateFunction, refreshClusters,
+    markerRadiusForZoom,
     setDetailVisible, setDetailMoreInfoExpanded, updateStationDetail, contextLines, schoolVintageNote,
-    computeStopOffset, assignVisitIndices, buildStopIconHTML, buildRouteLayer, setRouteVisible, applyRouteVisibility, renderLegendScale, renderLegendRoute,
+    renderLegendScale, overplotAlphaForZoom, nearestStationWithin, CLICK_TOLERANCE_PX, markerStyleFor,
     renderModelPerformance, formatSignificance, computeEquityCounts, renderEquityCounts, setEquityThreshold,
-    renderFleetStats, computeServicedEquityOverlap, applyFleetScenarioToRoute, setFleetSize,
+    renderFleetStats, computeServicedEquityOverlap, setFleetSize,
     fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
     isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,
     defaultInvestigatorState, investigatorStateDiffersFromDefault, renderDiffBar, renderScenarioRow, applyInvestigatorState,

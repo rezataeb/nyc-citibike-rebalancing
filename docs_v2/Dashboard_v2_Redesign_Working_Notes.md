@@ -343,32 +343,40 @@ behind a tab, slightly undercutting the visibility goal.
 
 ---
 
-## 9. Housekeeping — two doc folders  *(status updated 2026-08-18)*
+## 9. Housekeeping — two doc folders  ✅ **CLOSED 2026-08-20**
 
-**Effectively resolved by hand, but not yet recorded in git.** The annotated copy won:
+**Resolved: the annotated copy won, and git now records it.** Option 1 of the three that were on
+the table ("commit the move") was chosen and executed — nothing here is still open.
 
-- `../docs V2/` (with a space, one level up) — **now the only copy of the doc set.** Holds the
-  annotated PDFs (highlights + margin comments on docs 01–03) plus a newer
-  `Project_QA_and_Annotations.pdf`. Outside git.
-- `app/docs_v2/` — now contains **only this working-notes file** (itself still untracked).
+- `../docs V2/` (with a space, one level up) — **the doc set's home.** Annotated PDFs (highlights
+  + margin comments on docs 01–03) plus `Project_QA_and_Annotations.pdf`. **Outside git, so it
+  has no version control at all** — that's the accepted cost of keeping the annotations.
+- `app/docs_v2/` — **only this working-notes file**, now tracked (commit `5fb7c3f`).
 
-⚠️ **Open action, and it's no longer "doesn't block anything":** all 14 previously-committed
-`docs_v2/*.html|*.pdf` files (+ `assets/report.css`, + `Dashboard_Planner_Review_and_Design_Options.md`)
-show as **unstaged deletions** against commit `7e9f58d`. So the tracked doc set was committed and
-then removed from the working tree without a follow-up commit. Decide one of:
+The 14 deletions were committed in `9fb1d0b`, after verifying where each file actually went:
 
-1. **Commit the move** — accept that the doc set lives outside git, and commit the deletions
-   (losing the tracked HTML/PDF history going forward). If so, `.gitignore` the path so it
-   doesn't keep resurfacing.
-2. **Restore them** (`git checkout -- docs_v2/`) and keep `app/docs_v2/` canonical for the
-   *unannotated* set, treating `../docs V2/` as the annotation workspace only.
-3. **Track the sources, not the renders** — restore/keep the `.md` sources under git, leave
-   `.html`/`.pdf` generated-and-ignored.
+| What | Where it is now |
+|---|---|
+| `00_*.{html,pdf}`, `01–04 *.html`, `04_*.pdf`, `assets/report.css` | byte-identical in `../docs V2/` |
+| `01`, `02`, `03` `*.pdf` | in `../docs V2/` as **larger annotated re-renders** (e.g. `02`: 384,694 → 899,674 bytes) |
+| `Dashboard_Planner_Review_and_Design_Options.{html,md,pdf}` | ⚠️ **nowhere in the working tree — history only, at `7e9f58d`** |
 
-Also still untracked and probably *should* be committed: this file
-(`docs_v2/Dashboard_v2_Redesign_Working_Notes.md`). The two root PDFs
-(`Project_Summary_and_Roadmap.pdf`, `AI_Assisted_Development_Retrospective_and_Playbook.pdf`)
-stay untracked per the standing instruction.
+⚠️ **The one thing to remember:** the planner review is gone from disk. Its `.md` is the source of
+the Session 46 accuracy analysis this document cites as raw material for the metrics-rationale
+report (§7's last item) — sign-confidence by slice ~93% all-period / ~82% season / ~60% single
+month, and the weather regression's R² of only 0.04–0.07 despite very tight CIs. If you write that
+report, get it back first:
+
+```
+git checkout 7e9f58d -- docs_v2/Dashboard_Planner_Review_and_Design_Options.md
+```
+
+Not gitignored, deliberately: the paths are empty now, so there is nothing to keep resurfacing, and
+an ignore rule would only make a future re-render silently invisible to `git status`.
+
+The two root PDFs (`Project_Summary_and_Roadmap.pdf`,
+`AI_Assisted_Development_Retrospective_and_Playbook.pdf`) stay untracked per the standing
+instruction. `PROGRESS.md` and `CLAUDE.md` are in `.gitignore` by the same earlier decision.
 
 ---
 

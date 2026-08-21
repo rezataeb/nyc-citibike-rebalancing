@@ -35,15 +35,17 @@ async function testHistoricalTilesTrackTheHourSlider() {
   // (B, -9) and 2 needing docks (A, C), and 9 bikes to move.
   dash.renderHour(8);
   assert.strictEqual(value(sandbox, 1), '22', 'hour 8 bikes-out-of-place');
-  assert.strictEqual(value(sandbox, 2), '1 / 2', 'hour 8 need-bikes / need-docks');
-  assert.strictEqual(value(sandbox, 3), '9', 'hour 8 bikes-to-move');
+  assert.strictEqual(value(sandbox, 2), '1', 'hour 8 stations needing bikes');
+  assert.strictEqual(value(sandbox, 3), '2', 'hour 8 stations needing docks');
+  assert.strictEqual(value(sandbox, 4), '9', 'hour 8 bikes-to-move');
 
   // At hour 17: A -6, B +4, C 0. Only nonzero stations are counted on either
   // side, so C (exactly 0) is in neither -- 1 needing bikes, 1 needing docks.
   dash.renderHour(17);
   assert.strictEqual(value(sandbox, 1), '10', 'hour 17 bikes-out-of-place');
-  assert.strictEqual(value(sandbox, 2), '1 / 1', 'hour 17 need-bikes / need-docks');
-  assert.strictEqual(value(sandbox, 3), '6', 'hour 17 bikes-to-move');
+  assert.strictEqual(value(sandbox, 2), '1', 'hour 17 stations needing bikes');
+  assert.strictEqual(value(sandbox, 3), '1', 'hour 17 stations needing docks');
+  assert.strictEqual(value(sandbox, 4), '6', 'hour 17 bikes-to-move');
 
   console.log('  historical tiles recompute per hour -- the §10B regression');
 }
@@ -51,42 +53,42 @@ async function testHistoricalTilesTrackTheHourSlider() {
 async function testHistoricalTilesTrackDayType() {
   const { dash, sandbox } = await loadDashboard2();
   dash.renderHour(8);
-  const weekday = [1, 2, 3].map(i => value(sandbox, i));
+  const weekday = [1, 2, 3, 4].map(i => value(sandbox, i));
 
   // Weekend curves at hour 8: A +2, B -1, C +0.5 -- a different slice of the
   // same stations, so every tile must move even though the hour did not.
   dash.setDayType('weekend');
-  const weekend = [1, 2, 3].map(i => value(sandbox, i));
+  const weekend = [1, 2, 3, 4].map(i => value(sandbox, i));
 
   assert.notDeepStrictEqual(weekend, weekday, 'day-type switch left the ribbon unchanged');
   assert.strictEqual(value(sandbox, 1), '4', 'weekend hour 8 bikes-out-of-place (|2|+|1|+|0.5| = 3.5, rounded)');
-  assert.strictEqual(value(sandbox, 2), '1 / 2', 'weekend hour 8 need-bikes / need-docks');
+  assert.strictEqual(value(sandbox, 2), '1', 'weekend hour 8 stations needing bikes');
+  assert.strictEqual(value(sandbox, 3), '2', 'weekend hour 8 stations needing docks');
 
   console.log('  historical tiles recompute per day type');
 }
 
-async function testLiveModeSwapsAllThreeTiles() {
+async function testLiveModeSwapsEveryTile() {
   const { dash, sandbox } = await loadDashboard2({ reliability: FAKE_RELIABILITY });
   dash.renderHour(8);
-  const historical = [1, 2, 3].map(i => value(sandbox, i));
+  const historical = [1, 2, 3, 4].map(i => value(sandbox, i));
 
   dash.setMode('live');
-  const live = [1, 2, 3].map(i => value(sandbox, i));
+  const live = [1, 2, 3, 4].map(i => value(sandbox, i));
   assert.notDeepStrictEqual(live, historical, 'mode switch left the ribbon unchanged');
 
-  // All three fake stations have usable live data. A is empty (0 bikes), B is
+  // All four tiles must change. All three fake stations have usable live data. A is empty (0 bikes), B is
   // full (0 docks), C is neither -- but A and B are ~5 km apart, far beyond
-  // the 500 m adjacency radius, so NEITHER is in breach. 3 of 3 meeting.
-  assert.strictEqual(value(sandbox, 1), '100.0%', 'no unusable station has an unusable neighbour within 500 m');
+  // the 500 m adjacency radius, so NEITHER is in breach.
+  assert.strictEqual(value(sandbox, 1), '0', 'no unusable station has an unusable neighbour within 500 m');
+  assert.ok(label(sandbox, 1).includes('100.0% meeting'), 'the compliance % survives as the hero caption');
 
+  assert.strictEqual(value(sandbox, 2), '1', 'one station empty');
+  assert.strictEqual(value(sandbox, 3), '1', 'one station full');
   // Median fill across A (0/30 = 0%), B (25/25 = 100%), C (10/20 = 50%) is 50%.
-  assert.strictEqual(value(sandbox, 2), '50%', 'median fill');
-  assert.ok(label(sandbox, 2).includes('1 empty'), 'empty count on the fill tile');
-  assert.ok(label(sandbox, 2).includes('1 full'), 'full count on the fill tile');
+  assert.strictEqual(value(sandbox, 4), '50%', 'median fill');
 
-  assert.strictEqual(value(sandbox, 3), '25.0%', 'observed unusable rate from reliability.json');
-
-  console.log('  live mode swaps all three tiles');
+  console.log('  live mode swaps every tile');
 }
 
 async function testAdjacencyRuleActuallyBites() {
@@ -106,7 +108,8 @@ async function testAdjacencyRuleActuallyBites() {
   assert.strictEqual(standard.total, 3, 'three stations have usable live data');
   assert.strictEqual(standard.nUnusable, 2, 'A empty and B full are both unusable');
   assert.strictEqual(standard.inBreach, 2, 'adjacent unusable pair puts both in breach');
-  assert.strictEqual(value(sandbox, 1), '33.3%', 'one of three stations meets the standard');
+  assert.strictEqual(value(sandbox, 1), '2', 'hero reports the double-outage count');
+  assert.ok(label(sandbox, 1).includes('33.3% meeting'), 'and the compliance % as caption');
 
   console.log('  adjacency rule changes the result -- it is not decorative');
 }
@@ -131,37 +134,41 @@ async function testOfflineStationsLeaveBothSides() {
 }
 
 async function testMissingReliabilityDegradesGracefully() {
-  // reliability.json does not exist until pipeline/reliability.py has run.
-  // The harness 404s it by default, so this is the no-file path.
+  // Session 52 moved the observed-rate figure out of the ribbon and into the
+  // distribution card, where its historical window sits beside a distribution
+  // rather than beside four live counts. Without reliability.json the line is
+  // hidden outright -- no em dash, no placeholder rate.
   const { dash, sandbox } = await loadDashboard2();
   dash.setMode('live');
 
-  assert.strictEqual(value(sandbox, 3), '—', 'missing reliability.json shows an em dash, not NaN or 0');
   assert.ok(
-    /pipeline\/reliability\.py/.test(tooltip(sandbox, 3)),
-    'the empty tile says how to populate it'
+    sandbox._elements['distribution-rate'].classList.contains('hidden'),
+    'no reliability.json -> the rate line is hidden, not filled with a placeholder'
   );
-  // The other two tiles are unaffected -- one missing optional file must not
-  // take the ribbon down with it.
-  assert.strictEqual(value(sandbox, 1), '100.0%', 'hero tile still renders without reliability.json');
+  // Every ribbon tile is unaffected: one missing optional file must not take
+  // the rest of the dashboard down with it.
+  assert.strictEqual(value(sandbox, 1), '0', 'ribbon still renders without reliability.json');
+  assert.strictEqual(value(sandbox, 4), '50%', 'and so does the last tile');
 
-  console.log('  missing reliability.json degrades to one em dash, not a broken ribbon');
+  console.log('  missing reliability.json hides one line, nothing else');
 }
 
-async function testHistoricalRateTileIsLabelledAsAWindow() {
-  // The one tile that is not a "now" reading sits between two that are. If it
-  // ever loses its window stamp it becomes a live-looking number that is up to
-  // a month stale -- the single most misleading thing this ribbon could do.
+async function testHistoricalRateIsLabelledAsAWindow() {
+  // The observed rate is the only non-"now" figure shown in live mode. If it
+  // ever loses its window stamp it becomes a live-looking number that is weeks
+  // stale -- the single most misleading thing this dashboard could show.
   const { dash, sandbox } = await loadDashboard2({ reliability: FAKE_RELIABILITY });
   dash.setMode('live');
 
-  assert.ok(label(sandbox, 3).includes('Jul 13–Jul 26'), 'window range is on the tile face');
-  assert.ok(/not outage hours|frequency, not outage hours/.test(tooltip(sandbox, 3)),
-    'tooltip states this is a frequency, not outage hours');
-  assert.ok(!/\$/.test(label(sandbox, 3) + tooltip(sandbox, 3)),
-    'no dollar figure anywhere on the tile -- the cadence cannot support a penalty claim');
+  const rate = sandbox._elements['distribution-rate'];
+  assert.ok(!rate.classList.contains('hidden'), 'rate line shows when the data exists');
+  assert.ok(rate.innerHTML.includes('25.0%'), 'reports the payload rate');
+  assert.ok(rate.innerHTML.includes('Jul 13–Jul 26'), 'window range is on its face');
+  assert.ok(/not outage hours/.test(rate.title), 'states it is a frequency, not outage hours');
+  assert.ok(!/\$/.test(rate.innerHTML + rate.title),
+    'no dollar figure -- the cadence cannot support a penalty claim');
 
-  console.log('  historical-rate tile carries its window and refuses the $ claim');
+  console.log('  observed-rate line carries its window and refuses the $ claim');
 }
 
 function testTheOldReadoutIsGoneFromTheMarkup() {
@@ -194,14 +201,163 @@ async function testRibbonTilesAreNotHardcodedInMarkup() {
   console.log('  no tile content is baked into the markup');
 }
 
+
+async function testDistributionBinsEveryStationTheMapDraws() {
+  // The ribbon reports the tails; the distribution is the shape they are tails
+  // of. It must cover the same population the map draws, and its buckets must
+  // come from the same classifier that colours the markers -- a second,
+  // independently-derived binning could drift from the map it describes.
+  const { dash, sandbox } = await loadDashboard2();
+  dash.renderHour(8);
+
+  const historical = dash.computeDistribution();
+  assert.strictEqual(historical.total, 3, 'all three fixture stations are binned');
+  assert.strictEqual(historical.counts.reduce((a, b) => a + b, 0), 3, 'counts sum to the total');
+  assert.strictEqual(historical.excluded, 0, 'no station lacks all-period data');
+
+  const key = sandbox._elements['distribution-key'].innerHTML;
+  assert.ok(/near balanced/.test(key), 'historical buckets are net-flow buckets');
+  assert.strictEqual(sandbox._elements['distribution-total'].textContent, '3 stations');
+
+  console.log('  distribution bins every station, historical mode');
+}
+
+async function testDistributionSwitchesQuantityWithMode() {
+  const { dash, sandbox } = await loadDashboard2();
+  dash.renderHour(8);
+  const before = sandbox._elements['distribution-title'].textContent;
+
+  dash.setMode('live');
+  const after = sandbox._elements['distribution-title'].textContent;
+  assert.notStrictEqual(before, after, 'the distributed quantity changes with mode');
+  assert.strictEqual(after, 'Dock fill distribution');
+
+  // A empty (0/30), B full (25/25), C mid (10/20) -> one in each end bucket
+  // and one in the middle.
+  const live = dash.computeDistribution();
+  // Spread into a test-realm array first: values built inside the vm sandbox
+  // carry that realm's Array prototype, and deepStrictEqual compares
+  // prototypes -- it fails on two identical-looking [1,0,1,0,1]s otherwise.
+  assert.deepStrictEqual([...live.counts], [1, 0, 1, 0, 1], 'fill buckets: empty / mid / full');
+
+  console.log('  distribution swaps quantity with mode');
+}
+
+async function testDistributionStatesWhatItExcluded() {
+  // A distribution over an unstated subset is a quiet denominator change.
+  const live = JSON.parse(JSON.stringify(FAKE_LIVE));
+  live.stations.C.is_renting = 0;
+
+  const { dash, sandbox } = await loadDashboard2({ live });
+  dash.setMode('live');
+
+  const result = dash.computeDistribution();
+  assert.strictEqual(result.total, 2, 'offline station is out of the distribution');
+  assert.strictEqual(result.excluded, 1, 'and counted as excluded rather than dropped');
+  assert.ok(
+    /1 of 3 excluded/.test(sandbox._elements['distribution-note'].textContent),
+    'the exclusion is stated on the card, not left implicit'
+  );
+
+  console.log('  distribution states its own exclusions');
+}
+
+async function testDistributionEndsAgreeWithTheRibbonTiles() {
+  // "full now 220" beside "full 26" actually shipped in a screenshot. The
+  // distribution had binned its end buckets by fill PERCENTAGE while the
+  // ribbon counted 0 docks -- and capacity is not bikes + docks when docks
+  // are out of service, so the two diverge. Same word, two questions.
+  // These counts must be the same number or one of them is lying.
+  const { dash, sandbox } = await loadDashboard2();
+  dash.setMode('live');
+
+  const counts = dash.computeDistribution().counts;
+  assert.strictEqual(String(counts[0]), value(sandbox, 2), 'distribution "empty" == ribbon "empty now"');
+  assert.strictEqual(String(counts[4]), value(sandbox, 3), 'distribution "full" == ribbon "full now"');
+
+  console.log('  distribution ends agree with the ribbon tiles');
+}
+
+async function testLegendKeepsTheSaturationFactOnHover() {
+  // The scale ends are the 95th percentile of |value|, not the data's range:
+  // the real max is 86.2, and at 8am weekday ~24% of stations sit past +/-2.7,
+  // all painted the same saturated colour. The visible key is deliberately
+  // plain (bare numbers, no inequality signs, no explanatory caption), so the
+  // qualifier lives in the tooltip -- available, not clutter. What must never
+  // happen is the fact disappearing entirely.
+  const { dash, sandbox } = await loadDashboard2();
+  dash.renderHour(8);
+
+  assert.strictEqual(sandbox._elements['legend-tick-low'].textContent[0], '-', 'plain negative number, no <=');
+  assert.strictEqual(sandbox._elements['legend-tick-high'].textContent[0], '+', 'plain positive number, no >=');
+  assert.ok(!/\u2264|\u2265/.test(
+    sandbox._elements['legend-tick-low'].textContent + sandbox._elements['legend-tick-high'].textContent
+  ), 'no inequality signs on the key');
+
+  const tip = sandbox._elements['legend-card'].title;
+  assert.ok(/95th percentile/.test(tip), 'tooltip says what the ends actually are');
+  assert.ok(/saturates/.test(tip), 'and that colour saturates past them');
+
+  console.log('  legend key is plain; the saturation fact survives on hover');
+}
+
+async function testLegendCaptionIsNotOverwrittenByRenderHour() {
+  // renderHour() used to write #legend-caption immediately AFTER calling
+  // renderLegendScale(), so the computed note was clobbered on every render
+  // and never appeared on screen. Ordering bug, invisible to any test that
+  // only called renderLegendScale() directly.
+  const { dash, sandbox } = await loadDashboard2();
+  dash.renderHour(8);
+  assert.strictEqual(
+    sandbox._elements['legend-caption'].textContent,
+    'Click a station for its daily flow',
+    'historical caption comes from the single owner, not from a competing write in renderHour()'
+  );
+
+  dash.setMode('live');
+  assert.strictEqual(
+    sandbox._elements['legend-caption'].textContent,
+    'Click a station for its live status',
+    'live mode gets its own caption from the same single owner'
+  );
+
+  console.log('  legend caption has one owner, and it survives renderHour');
+}
+
+async function testHistoricalSharesUseTheCoverageDenominator() {
+  // Percentages belong on the two STATION-count tiles and nowhere else: tiles
+  // 1 and 4 count bikes, which have no station total to divide by.
+  // The denominator is stations with a curve for THIS period, not all of them
+  // -- period coverage varies per station, so a fixed total would overstate it.
+  const { dash, sandbox } = await loadDashboard2();
+  dash.renderHour(8);
+
+  // All 3 fixture stations have all-period data: 1 needs bikes, 2 need docks.
+  assert.ok(label(sandbox, 2).includes('33.3%'), '1 of 3 stations needs bikes');
+  assert.ok(label(sandbox, 3).includes('66.7%'), '2 of 3 stations need docks');
+  assert.ok(!/%/.test(label(sandbox, 1)), 'no share on the bikes-out-of-place tile');
+  assert.ok(!/%/.test(label(sandbox, 4)), 'no share on the bikes-to-move tile');
+
+  assert.strictEqual(dash.computeSliceTotals().withData, 3, 'denominator is the covered set');
+
+  console.log('  historical shares use the coverage denominator, bikes tiles stay counts');
+}
+
 (async () => {
   await testHistoricalTilesTrackTheHourSlider();
   await testHistoricalTilesTrackDayType();
-  await testLiveModeSwapsAllThreeTiles();
+  await testHistoricalSharesUseTheCoverageDenominator();
+  await testLiveModeSwapsEveryTile();
+  await testDistributionBinsEveryStationTheMapDraws();
+  await testDistributionSwitchesQuantityWithMode();
+  await testDistributionStatesWhatItExcluded();
+  await testDistributionEndsAgreeWithTheRibbonTiles();
+  await testLegendKeepsTheSaturationFactOnHover();
+  await testLegendCaptionIsNotOverwrittenByRenderHour();
   await testAdjacencyRuleActuallyBites();
   await testOfflineStationsLeaveBothSides();
   await testMissingReliabilityDegradesGracefully();
-  await testHistoricalRateTileIsLabelledAsAWindow();
+  await testHistoricalRateIsLabelledAsAWindow();
   testTheOldReadoutIsGoneFromTheMarkup();
   await testRibbonTilesAreNotHardcodedInMarkup();
   console.log('dashboard2 ribbon test passed (Session 50: mode-aware, slice-aware metric ribbon).');

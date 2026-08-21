@@ -8,7 +8,17 @@
 <style>
   html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow-x: clip; }
   body { display: flex; flex-direction: column; }
-  .hidden { display: none; }
+  /* !important is load-bearing here, not laziness (Session 51). `.hidden` is
+     specificity (0,0,1,0); several elements it is applied to carry their own
+     `display` at ID specificity (0,1,0,0) -- #timebar, #map-controls-bar,
+     #historical-controls, #status-detail-toggle -- so the plain rule lost
+     every one of those contests and silently failed to hide them. #timebar
+     had been visible in Live mode, where there is no hour concept at all,
+     since it gained `display:flex` in task 07.
+     A utility whose entire job is hiding must outrank layout rules; the
+     alternative is a per-id `.hidden` companion rule that has to be
+     remembered every time an element gains a display property. */
+  .hidden { display: none !important; }
 
   /* Version-2-laptop layout: a full-width top bar (title + historical/live
      mode toggle), then a map-left/controls-right split -- the map stays
@@ -35,11 +45,11 @@
      than the viewport (the tile text is tabular numerals, which do not
      wrap on their own). */
   #topbar {
-    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 20px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px;
     padding: 14px 20px; border-bottom: 1px solid #d8d7d3; background: #fcfcfb; flex-shrink: 0;
   }
   #title { min-width: 0; }
-  #title-heading { display: flex; align-items: center; gap: 10px; }
+  #title-heading { display: flex; align-items: center; gap: 8px; }
   #title-logo { flex-shrink: 0; color: #2a78d6; }
   /* Two lines with a real size hierarchy -- "NYC Citi Bike" is context
      (which city, which system); "Rebalancing Explorer" is the actual
@@ -60,11 +70,12 @@
      attribute anyway, so darkening them cost nothing and kept this a
      single find-and-replace instead of a partial one). */
   #title-text { display: flex; flex-direction: column; }
-  #title-line1 { font-size: 15px; font-weight: 600; color: #52514e; letter-spacing: -0.005em; }
-  #title-line2 { font-size: 22px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; color: #0b0b0b; }
+  #title-line1 { font-size: 11px; font-weight: 600; color: #52514e; letter-spacing: -0.005em; }
+  #title-line2 { font-size: 16px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; color: #0b0b0b; }
   #title .subtitle { color: #52514e; font-size: 12px; margin-top: 4px; }
   #title-meta { color: #666057; } /* real station count + coverage/weather-scenario caveats -- the only subtitle content now; the old "Net flow at HH:MM, weekday (period)" phrase was dropped as pure duplication of the Map controls panel's own hour/day/period controls */
-  #mode-toggle { width: 280px; justify-self: end; }
+  /* Session 53: back in the masthead as its own column, right of the ribbon. */
+  #mode-toggle { justify-self: end; flex-shrink: 0; }
 
   /* The metric ribbon (Session 50, v2 layout Option A). Deliberately flatter
      than the boxed .readout grid it replaced: in the rail that block needed
@@ -75,29 +86,31 @@
 
      The hero tile (first child) carries the larger number -- the locked
      metric set names one hero per mode, and it is always tile 1. */
-  .ribbon { display: flex; align-items: stretch; gap: 0; min-width: 0; }
+  /* Session 53: the four separated cards (designs "top metrics 1/2/D") sit
+     in the masthead row itself, between the title and the mode toggle,
+     rather than on a strip of their own. Card treatment is kept -- the
+     brief was separated tiles, not chips -- but the padding and type are
+     compact, because four cards now share a row with two other things
+     instead of owning the full width. */
+  .ribbon { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; min-width: 0; }
   .ribbon__tile {
-    padding: 0 18px; min-width: 0; flex: 0 1 auto;
-    border-left: 1px solid #e6e5e1;
+    min-width: 0; padding: 7px 10px;
+    background: #fff; border: 1px solid #e6e5e1; border-radius: 8px;
   }
-  .ribbon__tile:first-child { padding-left: 0; border-left: none; }
+  #ribbon-tile-1 { border-color: #d8d7d3; background: #fbfaf7; }
   .ribbon__value {
-    display: block; font-size: 19px; font-weight: 800; color: #0b0b0b;
+    display: block; font-size: 17px; font-weight: 800; color: #0b0b0b;
     font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.15;
-    white-space: nowrap;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  #ribbon-tile-1 .ribbon__value { font-size: 24px; } /* hero */
+  #ribbon-tile-1 .ribbon__value { font-size: 20px; }
+  /* Two lines allowed, then clamped: "bikes to move into deficit stations"
+     does not fit one line at this width, and truncating it to "bikes to
+     move into..." would lose the part that says WHERE they move. */
   .ribbon__label {
-    display: block; margin-top: 3px; font-size: 11px; color: #666057; line-height: 1.3;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; margin-top: 2px; font-size: 10px; color: #666057; line-height: 1.3;
   }
-  /* The window stamp on the historical-rate tile -- a real qualifier, not
-     decoration, so it stays visible rather than being folded into a title
-     attribute nobody hovers. Kept at #666057 rather than a lighter gray:
-     this file's task-11 pass established that as the lightest text color
-     clearing WCAG AA 4.5:1 against every background here, and a window
-     stamp is load-bearing copy, not decoration. De-emphasised by weight
-     instead of by contrast. */
   .ribbon__label .ribbon__window { color: #666057; font-weight: 400; }
 
   /* position:relative -- this, not #map-col, is the positioning ancestor
@@ -139,7 +152,30 @@
      control already sits at bottom-right. Both are absolute against the
      same #body-row ancestor, so this really is the same vertical level,
      not just a visually-close approximation. */
-  #map-corner-stack { position: absolute; left: 16px; bottom: 16px; z-index: 500; display: flex; flex-direction: column-reverse; gap: 12px; width: 300px; max-width: calc(100% - 32px); }
+  /* Session 52: whole-map distribution card (design "distribution A"). */
+  .distribution { border: 1px solid #d8d7d3; border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; background: #fff; }
+  .distribution__head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 11px; color: #666057; margin-bottom: 8px; }
+  .distribution__head span:first-child { font-weight: 700; color: #0b0b0b; letter-spacing: 0.02em; text-transform: uppercase; }
+  /* flex, with each segment's flex-grow set to its own count -- the widths
+     ARE the proportions, computed from the data rather than authored. */
+  .distribution__bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: #f0efec; }
+  .distribution__bar > span { min-width: 2px; }
+  .distribution__key { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 11px; color: #52514e; font-variant-numeric: tabular-nums; }
+  .distribution__key i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: baseline; }
+  .distribution__rate { margin-top: 10px; padding-top: 10px; border-top: 1px solid #e6e5e1; font-size: 11px; color: #52514e; }
+  .distribution__rate b { font-variant-numeric: tabular-nums; color: #0b0b0b; }
+  .distribution__note { margin-top: 8px; font-size: 10px; color: #666057; line-height: 1.4; }
+
+  /* Session 52: the stack no longer forces one width on both children.
+     The legend is a colour key -- a gradient and two end labels, nothing
+     more -- so it narrows to 232px and gives that width back to #timebar,
+     which has four controls to fit. The station detail card keeps its
+     original 300px: it holds a 24-hour sparkline and real prose, and
+     shrinking it to legend width would have squeezed the panel to pay for
+     a change that was only ever about the legend. */
+  #map-corner-stack { position: absolute; left: 16px; bottom: 16px; z-index: 500; display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 12px; max-width: calc(100% - 32px); }
+  #legend-card { width: 232px; max-width: 100%; }
+  #detail-card { width: 300px; max-width: 100%; }
   #legend-card, #detail-card { background: #fff; border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15); padding: 14px; box-sizing: border-box; font-size: 12px; }
   /* Design critique task 10: numeric anchors so the legend states real
      units instead of leaving "how big is a deficit" to guesswork -- the
@@ -192,7 +228,12 @@
   #status-detail { margin-top: 6px; font-size: 11px; line-height: 1.4; }
 
   #historical-controls { display: flex; flex-direction: column; gap: 10px; }
-  #controls-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  /* Session 53: nowrap -- the day toggle and the period dropdown belong on
+     one line. They were allowed to wrap onto two when this row lived in a
+     280px floating card; in the 720px timebar there is room, and wrapping
+     just made the dock taller for no reason. min-width:0 on the select lets
+     it shrink instead of forcing the wrap it used to cause. */
+  #controls-row { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
   #controls-row #period-select { flex: 1 1 170px; max-width: 100%; min-width: 0; }
 
   #side-content { flex: 1; overflow-y: auto; padding: 16px; box-sizing: border-box; }
@@ -304,15 +345,37 @@
      two read as the same kind of surface anchored to the same left edge,
      not two unrelated floating panels that happen to share an
      x-coordinate. */
+  /* Session 51: the timebar is now the single time-slice dock -- day type,
+     period, hour, playback and the scale, stacked in rows. It was a
+     one-row flex strip when it only held the scrubber; it is a column now,
+     and slightly wider to fit the period dropdown without crushing it. */
   #timebar {
     position: absolute; bottom: 16px; z-index: 500;
-    display: flex; align-items: center; gap: 14px;
-    padding: 10px 14px; background: #fff;
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 12px 14px; background: #fff;
     border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15);
     box-sizing: border-box;
-    width: 420px; max-width: calc(100% - 32px);
+    width: 720px; max-width: calc(100% - 32px);
   }
+  #timebar-scrub { display: flex; align-items: center; gap: 14px; }
   #timebar input[type="range"] { flex: 1; box-sizing: border-box; accent-color: #0b0b0b; min-width: 0; min-height: 24px; }
+
+  /* The tick row lines up with the track, not the whole card: the play
+     button and hour label sit outside the track, so the ticks are inset by
+     their widths (26px button + 14px gap on the left, label + gap on the
+     right) rather than spanning the full padding box. space-between then
+     puts 00:00 and 23:00 at the track's real ends. */
+  #timebar-ticks {
+    display: flex; justify-content: space-between;
+    margin-left: 40px; margin-right: calc(6.5ch + 14px);
+    font-size: 10px; font-variant-numeric: tabular-nums; color: #666057;
+  }
+  /* States plainly what the historical curve is, since the seasonal-naive
+     model predicts with exactly this climatology -- so the curve on screen
+     IS the naive predictor, and its own out-of-sample error is a fair thing
+     to print on it. Wording avoids "Model:", which would imply the number
+     shown is a model output rather than an observation. */
+  #timebar-model-note { font-size: 10px; color: #666057; line-height: 1.35; }
   #hour-label { font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; color: #0b0b0b; white-space: nowrap; flex-shrink: 0; min-width: 6.5ch; text-align: right; }
   .hour-play-btn { flex-shrink: 0; width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
   .hour-play-btn:hover { border-color: #0b0b0b; color: #0b0b0b; }
@@ -583,7 +646,7 @@
            own logo/brand mark. This is an independent portfolio project,
            not an official product (see the footer disclosure); using
            their real branding here would misleadingly suggest otherwise. -->
-      <svg id="title-logo" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg id="title-logo" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="6" cy="17" r="3.5"/>
         <circle cx="18" cy="17" r="3.5"/>
         <path d="M6 17l4-8 6 8h2M10 9h3l3 8"/>
@@ -596,23 +659,6 @@
     <div class="subtitle hidden" id="title-subtitle-line"><span id="title-meta"></span></div>
   </div>
 
-  <!-- Session 50, v2 layout Option A: the metric ribbon. Three tiles, and
-       the SAME three shells in both modes -- renderRibbon() rewrites every
-       value, label and title on each pass, rather than the file carrying
-       two sets of markup with one hidden. That is deliberate on two counts.
-       It keeps mode-switching from being a show/hide problem at all, and it
-       obeys this project's standing rule that a control's visible state
-       must be set in JS, never implied by markup: there is no default state
-       here to get wrong, because nothing is ever hidden.
-
-       Empty on purpose -- every tile is filled by renderRibbon() before
-       first paint. A tile that showed a hardcoded number here would be a
-       number nobody computed, which is exactly what this ribbon replaced.
-
-       aria-live is off, not polite: these recompute on every drag of the
-       hour slider, and announcing three tiles per frame would make the
-       slider unusable with a screen reader. The values are reachable on
-       demand as ordinary text. -->
   <div class="ribbon" id="ribbon" role="group" aria-label="Key metrics" aria-live="off">
     <div class="ribbon__tile" id="ribbon-tile-1">
       <b class="ribbon__value" id="ribbon-value-1"></b>
@@ -626,18 +672,20 @@
       <b class="ribbon__value" id="ribbon-value-3"></b>
       <span class="ribbon__label" id="ribbon-label-3"></span>
     </div>
+    <div class="ribbon__tile" id="ribbon-tile-4">
+      <b class="ribbon__value" id="ribbon-value-4"></b>
+      <span class="ribbon__label" id="ribbon-label-4"></span>
+    </div>
   </div>
-  <!-- Design critique task 07: was plain .segmented (solid black active
-       state) -- the loudest object in the masthead for a two-state,
-       once-per-session switch. Now .light, the same subtle track/white-
-       pill treatment already used for Individual/Grouped and Weekday/
-       Weekend (see .segmented.light below) -- reusing an existing,
-       already-correct pattern rather than inventing a new one. -->
-  <div id="mode-toggle" class="segmented light">
-    <button id="mode-historical" class="segmented-btn active"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Historical flow</button>
-    <button id="mode-live" class="segmented-btn" title="Live dock status via GBFS (General Bikeshare Feed Specification)"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.5 5.5a9 9 0 0 0 0 13"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>Live docks</button>
-  </div>
+
+    <div id="mode-toggle" class="segmented light">
+      <button id="mode-historical" class="segmented-btn active"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Historical Flow</button>
+      <button id="mode-live" class="segmented-btn" title="Live dock status via GBFS (General Bikeshare Feed Specification)"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.5 5.5a9 9 0 0 0 0 13"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>Live Docks</button>
+    </div>
+
 </header>
+
+
 
 <main id="body-row">
 
@@ -675,15 +723,22 @@
          Nothing replaces either control -- no hidden control, no map-corner
          button. The "Show route" button that also lived here is gone too
          (Session 49); see the removal note in the script. -->
-    <div id="historical-controls" tabindex="-1">
-      <div id="controls-row">
-        <div id="day-toggle" class="segmented light compact">
-          <button id="day-weekday" class="segmented-btn active">Weekday</button>
-          <button id="day-weekend" class="segmented-btn">Weekend</button>
-        </div>
-        <select id="period-select"></select>
-      </div>
-    </div>
+    <!-- Session 51: #historical-controls (Weekday/Weekend + the period
+         dropdown) moved OUT of this floating card and into #timebar, so
+         every control that selects a time slice lives on the time slider
+         itself instead of being split across two panels that happen to
+         float over the same map.
+
+         Session 52: the mode toggle moved IN, from the masthead -- design
+         "D" puts it here, over the map, and the masthead needed its width
+         back for the four-card ribbon. That also un-empties this card: it
+         was live-mode-only for one session and had to be hidden in
+         historical mode to avoid floating as a blank rectangle. It now
+         always has content, so it is always shown.
+
+         Labels are title case ("Historical Flow", "Live Docks") -- these
+         name two modes of the tool, so they read as proper names of things
+         rather than as sentences. -->
 
     <div id="live-as-of" class="hidden">
       <div id="live-as-of-timestamp"></div>
@@ -700,11 +755,47 @@
        by setMode() exactly like #historical-controls above, since the
        hour concept doesn't apply in Live mode. -->
   <div id="timebar">
-    <button id="hour-play-btn" class="hour-play-btn" type="button" aria-label="Play through the day" title="Play through the day">
-      <svg id="hour-play-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4l14 8-14 8z"/></svg>
-    </button>
-    <input type="range" id="hour-slider" min="0" max="23" step="1" value="8" aria-label="Hour of day" aria-valuetext="8:00 AM">
-    <output id="hour-label" for="hour-slider">8:00 AM</output>
+    <!-- Row 1: which slice. Weekday/Weekend keep their full words rather
+         than the WD/WE abbreviations the design mockups used -- there is
+         room for them here, and "WD" is only legible to someone who
+         already knows what it stands for. The period dropdown is
+         deliberately the SAME 18-option control as before (all-period + 4
+         seasons + 13 months, built from flows.json's own granularity
+         block): the mockups all reduced it to two chips (Jul/Jan), which
+         would silently drop nine months and every season. -->
+    <div id="historical-controls" tabindex="-1">
+      <div id="controls-row">
+        <div id="day-toggle" class="segmented light compact">
+          <button id="day-weekday" class="segmented-btn active">Weekday</button>
+          <button id="day-weekend" class="segmented-btn">Weekend</button>
+        </div>
+        <select id="period-select" aria-label="Season or month"></select>
+      </div>
+    </div>
+
+    <!-- Row 2: which hour, plus playback. The play button animates the
+         hour through a full day -- unchanged behaviour and unchanged ids,
+         so every existing listener and render path still works. -->
+    <div id="timebar-scrub">
+      <button id="hour-play-btn" class="hour-play-btn" type="button" aria-label="Play through the day" title="Play through the day">
+        <svg id="hour-play-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4l14 8-14 8z"/></svg>
+      </button>
+      <input type="range" id="hour-slider" min="0" max="23" step="1" value="8" aria-label="Hour of day" aria-valuetext="8:00 AM">
+      <output id="hour-label" for="hour-slider">8:00 AM</output>
+    </div>
+
+    <!-- Row 3: tick labels (design "time slider B" -- the shipped track had
+         no scale at all, so 0h and 23h were guesses). aria-hidden because
+         the slider already exposes its value through aria-valuetext; these
+         are a visual scale, not a second announcement. -->
+    <div id="timebar-ticks" aria-hidden="true">
+      <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:00</span>
+    </div>
+
+    <!-- Row 4: what this curve IS. Filled by renderTimebarModelNote() from
+         model_performance.json's real walk-forward aggregate; hidden
+         entirely when that optional file is absent. -->
+    <div id="timebar-model-note" class="hidden"></div>
   </div>
 
   <!-- Legend is the FIRST child (bottom, in flex column-reverse below) --
@@ -754,6 +845,35 @@
            carried are unchanged and still on screen, in the Investigator's
            own equity section, which is where a threshold-driven count
            belongs (it moves with the thresholds, not with the map). -->
+
+      <!-- Session 52: whole-map distribution, per design "distribution A".
+           The ribbon reports the tails (empty / full / double-outage); this
+           shows the shape they are tails OF -- every station on the map
+           placed into one bucket, as a single stacked bar with real counts.
+           Mode-aware, because the quantity being distributed changes: live
+           mode bins dock fill %, historical mode bins net flow. Both bin
+           the same 2,516-station population the map draws.
+
+           Segments are proportional to their counts, so the bar IS the
+           distribution rather than a decorative five-colour strip. Counts
+           are printed next to each swatch because a 1%-wide segment is
+           unreadable on its own. -->
+      <div class="distribution" id="distribution-card">
+        <div class="distribution__head">
+          <span id="distribution-title"></span>
+          <span id="distribution-total"></span>
+        </div>
+        <div class="distribution__bar" id="distribution-bar"></div>
+        <div class="distribution__key" id="distribution-key"></div>
+        <!-- The observed unusable RATE (pipeline/reliability.py). It lives
+             here rather than in the ribbon because it is the one figure in
+             live mode that is NOT a "now" reading -- it is a frequency over a
+             closed historical window. Beside four live counts it would read
+             as current; beside a distribution, with its window stated, it
+             reads as what it is. -->
+        <div class="distribution__rate hidden" id="distribution-rate"></div>
+        <div class="distribution__note" id="distribution-note"></div>
+      </div>
 
       <!-- "Worst now" -- real per-station ranking under whatever filter is
            currently active, doubling as the keyboard/screen-reader-
@@ -1638,9 +1758,14 @@ function computeSliceTotals() {
   let bikesToMove = 0;
   let nNeedBikes = 0;
   let nNeedDocks = 0;
+  // The denominator for tiles 2 and 3: stations that actually have a curve for
+  // this period, not all 2,516. Period coverage varies per station, so a fixed
+  // total would quietly overstate the denominator on sparse months.
+  let withData = 0;
   for (const id in state.stations) {
     const curve = curveForPeriod(state.stations[id], state.period, state.dayType);
     if (curve === null) continue;
+    withData += 1;
     const value = curve[state.currentHour] * weatherMultiplierFor(id);
     outOfPlace += Math.abs(value);
     if (value < 0) {
@@ -1650,7 +1775,7 @@ function computeSliceTotals() {
       nNeedDocks += 1;
     }
   }
-  return { outOfPlace, bikesToMove, nNeedBikes, nNeedDocks };
+  return { outOfPlace, bikesToMove, nNeedBikes, nNeedDocks, withData };
 }
 
 const RIBBON_EM_DASH = '—';
@@ -1663,72 +1788,203 @@ function setRibbonTile(index, value, labelHtml, title) {
   document.getElementById(`ribbon-tile-${index}`).title = title;
 }
 
+// Session 51: the timebar's model note. The historical curve on screen is
+// the seasonal-naive predictor's own input -- that model forecasts an hour
+// by reaching for this climatology -- so printing its measured walk-forward
+// error here says what the curve is worth as a forecast without claiming the
+// displayed number was produced by a model.
+//
+// Reads the real aggregate from model_performance.json. Hidden outright when
+// that optional file is missing, rather than showing a placeholder: an
+// accuracy claim with no measurement behind it is the one thing this note
+// must never be.
+function renderTimebarModelNote() {
+  const note = document.getElementById('timebar-model-note');
+  const aggregate = state.modelPerformance && state.modelPerformance.aggregate;
+  if (!aggregate || typeof aggregate.naive_mean_mae !== 'number') {
+    note.classList.add('hidden');
+    return;
+  }
+  note.textContent =
+    `Observed climatology \u2014 used as a forecast, this curve is off by `
+    + `${aggregate.naive_mean_mae.toFixed(2)} bikes/day (seasonal-naive, walk-forward).`;
+  note.classList.remove('hidden');
+}
+
+// Session 52: the whole-map distribution (design "distribution A").
+//
+// Bins every station the map draws into five buckets and renders them as one
+// proportional stacked bar. The ribbon reports the tails; this is the shape
+// those tails belong to -- "188 empty" means something different when the
+// middle is fat than when it is hollow.
+//
+// Mode-aware because the distributed quantity differs. Live mode bins dock
+// fill %, using the same cut points the live legend already names (0 / 0-25 /
+// 25-75 / 75-99 / 100), so the key and the map agree. Historical mode bins net
+// flow through classOf() -- the SAME function that colours the markers -- so
+// the bar is a literal histogram of what is on screen rather than a second,
+// independently-derived classification that could drift from it.
+// The two END buckets are defined operationally (0 bikes / 0 docks), NOT by
+// fill percentage, so they match the ribbon's "empty now" and "full now"
+// counts exactly. Those disagree if you bin the ends by percentage: capacity
+// is not bikes + docks when some docks are out of service, so a station can
+// have 0 docks free while sitting well under 100% of capacity. Binning by
+// percentage gave "full 26" beside a ribbon tile reading "full now 220" --
+// two different questions wearing the same word.
+//
+// What a rider experiences is the operational one: 0 docks means you cannot
+// return a bike, whatever the capacity arithmetic says. The middle three
+// buckets are fill percentage, which is what fill percentage is good for.
+const DISTRIBUTION_LIVE_LABELS = ['empty', '1-25%', '25-75%', '75-99%', 'full'];
+function liveDistributionBucket(live) {
+  if (live.bikes_available === 0) return 0;   // cannot rent
+  if (live.docks_available === 0) return 4;   // cannot return
+  const pct = (live.bikes_available / live.capacity) * 100;
+  if (pct < 25) return 1;
+  if (pct <= 75) return 2;
+  return 3;
+}
+const DISTRIBUTION_HISTORICAL_LABELS = ['big deficit', 'deficit', 'near balanced', 'surplus', 'big surplus'];
+
+function computeDistribution() {
+  const counts = [0, 0, 0, 0, 0];
+  let total = 0;
+  let excluded = 0;
+
+  for (const id in state.stations) {
+    if (state.mode === 'live') {
+      // Same usable-data rule as every other live figure in this file.
+      if (!hasLiveData(id)) { excluded += 1; continue; }
+      counts[liveDistributionBucket(state.liveStations[id])] += 1;
+      total += 1;
+    } else {
+      const curve = curveForPeriod(state.stations[id], state.period, state.dayType);
+      if (curve === null) { excluded += 1; continue; } // no data for this period, same as the hollow markers
+      const value = curve[state.currentHour] * weatherMultiplierFor(id);
+      counts[classOf(value, state.domainMax)] += 1;
+      total += 1;
+    }
+  }
+  return { counts, total, excluded };
+}
+
+function renderDistribution() {
+  if (!state.stations) return;
+  const { counts, total, excluded } = computeDistribution();
+  const live = state.mode === 'live';
+  const labels = live ? DISTRIBUTION_LIVE_LABELS : DISTRIBUTION_HISTORICAL_LABELS;
+
+  document.getElementById('distribution-title').textContent = live ? 'Dock fill distribution' : 'Net flow distribution';
+  document.getElementById('distribution-total').textContent = `${total.toLocaleString()} stations`;
+
+  document.getElementById('distribution-bar').innerHTML = counts
+    .map((n, i) => `<span style="flex: ${n} 0 0; background: ${RAMP[i]}"></span>`)
+    .join('');
+
+  document.getElementById('distribution-key').innerHTML = counts
+    .map((n, i) => `<span><i style="background: ${RAMP[i]}"></i>${labels[i]} ${n.toLocaleString()}</span>`)
+    .join('');
+
+  // Live only, and only when pipeline/reliability.py has been run.
+  const rate = document.getElementById('distribution-rate');
+  if (live && state.reliability) {
+    const w = state.reliability.window;
+    rate.innerHTML = `<b>${(state.reliability.system.unusable_rate * 100).toFixed(1)}%</b> of station-observations were unusable `
+      + `<span class="ribbon__window">${formatWindowRange(w)}</span>`;
+    rate.title = `${state.reliability.system.n_unusable.toLocaleString()} of ${state.reliability.system.n_observations.toLocaleString()} observations across ${w.n_snapshots} snapshots had 0 bikes or 0 docks. `
+      + `Offline observations excluded. A frequency, not outage hours: the log's median gap is ${w.median_gap_minutes} min, which cannot resolve the contract's 60/120-minute thresholds.`;
+    rate.classList.remove('hidden');
+  } else {
+    rate.classList.add('hidden');
+  }
+
+  // The excluded count is stated, not silently dropped -- a distribution over
+  // an unstated subset is the kind of quiet denominator change this project
+  // keeps finding in its own older figures.
+  const note = document.getElementById('distribution-note');
+  note.textContent = live
+    ? `Live dock fill across stations with usable GBFS data. ${excluded.toLocaleString()} of ${(total + excluded).toLocaleString()} excluded (no live match, capacity 0, or offline).`
+    : `Net flow at ${formatHourLabel(state.currentHour)}, ${state.dayType}, ${periodOptionLabel(state.period)}, binned by the same thresholds that colour the map.`
+      + (excluded ? ` ${excluded.toLocaleString()} stations have no data for this period.` : '');
+}
+
 function renderRibbon() {
   if (!state.stations) return;
 
   if (state.mode === 'live') {
+    // Hero is the double-outage COUNT, not the compliance %. The percentage
+    // is real but it lands between 88% and 97% at every plausible adjacency
+    // radius, so as a headline it always reads "fine" and its dynamic range
+    // is spent on a choice nobody sees. It survives as this tile's caption,
+    // where it is context rather than the claim.
     const standard = computeLiveStandard();
     setRibbonTile(
       1,
-      standard.meetingRate === null ? RIBBON_EM_DASH : `${(standard.meetingRate * 100).toFixed(1)}%`,
-      'meeting availability standard',
-      `${(standard.total - standard.inBreach).toLocaleString()} of ${standard.total.toLocaleString()} stations with usable live data are not in breach. `
-        + `Breach = completely full or empty with another such station within ${ADJACENCY_RADIUS_M} m, following the contract's "adjacent stations also unavailable" carve-out. `
+      standard.inBreach.toLocaleString(),
+      standard.meetingRate === null
+        ? 'stations in double-outage'
+        : `in double-outage <span class="ribbon__window">${(standard.meetingRate * 100).toFixed(1)}% meeting</span>`,
+      `${standard.inBreach.toLocaleString()} of ${standard.total.toLocaleString()} stations with usable live data are completely full or empty AND have another such station within ${ADJACENCY_RADIUS_M} m. `
+        + `This is an INSTANT proxy for the contract's availability rule, following its "adjacent stations also unavailable" carve-out -- no 60-minute window is measured. `
         + `The ${ADJACENCY_RADIUS_M} m radius is this project's operationalisation, not a contract figure.`
     );
 
     const fill = computeFillDistribution();
     setRibbonTile(
       2,
-      fill === null ? RIBBON_EM_DASH : `${fill.median.toFixed(0)}%`,
-      fill === null ? 'no usable live data' : `median fill <span class="ribbon__window">${fill.nEmpty} empty / ${fill.nFull} full</span>`,
-      fill === null
-        ? 'No stations currently report usable live data.'
-        : `Median dock fill across ${fill.total.toLocaleString()} stations with usable live data. ${fill.nEmpty} are completely empty, ${fill.nFull} completely full.`
+      fill === null ? RIBBON_EM_DASH : fill.nEmpty.toLocaleString(),
+      fill === null ? 'no usable live data' : `empty now <span class="ribbon__window">${(100 * fill.nEmpty / fill.total).toFixed(1)}%</span>`,
+      fill === null ? 'No stations currently report usable live data.'
+        : `${fill.nEmpty} of ${fill.total.toLocaleString()} stations have 0 bikes -- a rider cannot start a trip there.`
     );
-
-    // The one tile that is not a "now" reading. It is a rate over a closed
-    // historical window, so the window is stamped on its face -- sitting
-    // beside two live tiles, an unlabelled percentage would read as current.
-    const reliability = state.reliability;
-    if (reliability) {
-      const window = reliability.window;
-      setRibbonTile(
-        3,
-        `${(reliability.system.unusable_rate * 100).toFixed(1)}%`,
-        `observed unusable <span class="ribbon__window">${formatWindowRange(window)}</span>`,
-        `${reliability.system.n_unusable.toLocaleString()} of ${reliability.system.n_observations.toLocaleString()} station-observations had 0 bikes or 0 docks, across ${window.n_snapshots} snapshots. `
-          + `Offline observations excluded. This is a frequency, not outage hours: the log's median gap is ${window.median_gap_minutes} min, which cannot resolve the contract's 60/120-minute breach thresholds.`
-      );
-    } else {
-      // Same optional/non-fatal treatment as every other additive analysis
-      // layer -- reliability.json does not exist until pipeline/reliability.py
-      // has been run once, and the ribbon must still render without it.
-      setRibbonTile(3, RIBBON_EM_DASH, 'observed unusable rate', 'Not available -- run pipeline/reliability.py to generate data/reliability.json.');
-    }
+    setRibbonTile(
+      3,
+      fill === null ? RIBBON_EM_DASH : fill.nFull.toLocaleString(),
+      fill === null ? 'no usable live data' : `full now <span class="ribbon__window">${(100 * fill.nFull / fill.total).toFixed(1)}%</span>`,
+      fill === null ? 'No stations currently report usable live data.'
+        : `${fill.nFull} of ${fill.total.toLocaleString()} stations have 0 docks -- a rider cannot end a trip there.`
+    );
+    setRibbonTile(
+      4,
+      fill === null ? RIBBON_EM_DASH : `${fill.median.toFixed(0)}%`,
+      'median dock fill',
+      fill === null ? 'No stations currently report usable live data.'
+        : `Median fill across ${fill.total.toLocaleString()} stations with usable live data. Median rather than mean: fill % is bounded at both ends and piles up at 0 and 100, so a mean is dragged around by the same extremes tiles 2 and 3 already report.`
+    );
     return;
   }
 
   const totals = computeSliceTotals();
+  const slice = `${formatHourLabel(state.currentHour)}, ${state.dayType}, ${periodOptionLabel(state.period)}`;
   setRibbonTile(
     1,
     Math.round(totals.outOfPlace).toLocaleString(),
     'bikes out of place this hour',
-    `Total absolute net flow across all stations at ${formatHourLabel(state.currentHour)}, ${state.dayType}, ${periodOptionLabel(state.period)} `
-      + `${RIBBON_EM_DASH} the size of the imbalance the system has to absorb in this hour on a typical day.`
+    `Total absolute net flow across all stations at ${slice} -- the size of the imbalance the system absorbs in this hour on a typical day.`
   );
+  // Percentages on tiles 2 and 3 only. Those are station counts against a real
+  // denominator (stations with data for this slice), which is what a share is
+  // for. Tiles 1 and 4 count BIKES -- there is no station total to divide by,
+  // and inventing one would be a ratio dressed as a rate. Same rule the design
+  // mockups follow: "EMPTY NOW 188 / 7.6%", but never a % on a bike count.
+  const share = n => (totals.withData ? ` <span class="ribbon__window">${(100 * n / totals.withData).toFixed(1)}%</span>` : '');
   setRibbonTile(
     2,
-    `${totals.nNeedBikes.toLocaleString()} / ${totals.nNeedDocks.toLocaleString()}`,
-    'stations need bikes / need docks',
-    `${totals.nNeedBikes.toLocaleString()} stations are draining (deficit risk, no bikes) and ${totals.nNeedDocks.toLocaleString()} are filling (surplus risk, no docks) in this hour. `
-      + 'Breadth of the problem, as against tile 1’s volume.'
+    totals.nNeedBikes.toLocaleString(),
+    `stations need bikes${share(totals.nNeedBikes)}`,
+    `${totals.nNeedBikes.toLocaleString()} of ${totals.withData.toLocaleString()} stations with data are draining at ${slice} (deficit risk: heading toward no bikes).`
   );
   setRibbonTile(
     3,
+    totals.nNeedDocks.toLocaleString(),
+    `stations need docks${share(totals.nNeedDocks)}`,
+    `${totals.nNeedDocks.toLocaleString()} of ${totals.withData.toLocaleString()} stations with data are filling at ${slice} (surplus risk: heading toward no open docks).`
+  );
+  setRibbonTile(
+    4,
     Math.round(totals.bikesToMove).toLocaleString(),
     'bikes to move into deficit stations',
-    `Bikes that would have to arrive at draining stations to bring them level in this hour ${RIBBON_EM_DASH} the truck-side half of tile 1. `
+    `Bikes that would have to arrive at draining stations to bring them level in this hour -- the truck-side half of tile 1. `
       + 'Not an optimised plan: no depots, no travel times, no vehicle capacities.'
   );
 }
@@ -1745,6 +2001,7 @@ function formatWindowRange(window) {
 
 function renderReadout() {
   renderRibbon();
+  renderDistribution(); // same hook: the distribution is a function of the same (mode, hour, dayType, period) slice
   renderWorstNow();
 }
 
@@ -2477,12 +2734,14 @@ function renderHour(hour) {
   document.getElementById('legend-label-high').textContent = 'Surplus (no docks)';
   renderLegendScale();
 
+  // Session 53: #legend-caption is written by renderLegendScale() alone now.
+  // It used to be set here too, immediately AFTER that call -- so the
+  // saturation note the legend computes was overwritten by a static string on
+  // every render, and never appeared. One owner, no ordering to get wrong.
   if (state.mode === 'live') {
-    document.getElementById('legend-caption').textContent = 'Click a station for its live status';
     document.getElementById('live-as-of-timestamp').textContent = `Live as of ${formatAsOf(state.liveAsOf)} · via GBFS`;
   } else {
     const label = formatHourLabel(hour);
-    document.getElementById('legend-caption').textContent = 'Click a station for its daily flow';
     document.getElementById('hour-label').textContent = label;
     // Design critique task 11: the slider's own accessible name reads "7"
     // without this -- aria-valuetext overrides the announced value with
@@ -2751,6 +3010,12 @@ function setMode(mode) {
   document.getElementById('historical-controls').classList.toggle('hidden', mode !== 'historical');
   document.getElementById('timebar').classList.toggle('hidden', mode !== 'historical'); // task 07: timebar moved out of historical-controls, so it needs its own explicit toggle now
   document.getElementById('live-as-of').classList.toggle('hidden', mode !== 'live');
+  // Session 53: the mode toggle went back to the masthead, so this card holds
+  // only #live-as-of again and is empty in historical mode -- hidden here so
+  // it does not float as a blank rectangle over the map. Set in JS, not by a
+  // class in the markup, per the standing rule; setMode() runs at init, so
+  // this covers the load state as well as every later switch.
+  document.getElementById('map-controls-bar').classList.toggle('hidden', mode !== 'live');
   renderHour(state.currentHour);
   updateStatusMessage();
 }
@@ -2988,28 +3253,73 @@ function clearStripPreview() {
 // scale). Called from renderHour(), the same hook already keeping every
 // other mode-dependent legend string in sync, so this never drifts out
 // of step with a mode switch the way a separate one-off call could.
+// Session 53: the historical end labels now say <= and >=, and the caption
+// states how many stations are actually past them.
+//
+// They had read "-2.7" / "+2.7" as though those were the data's extremes.
+// They are not. domainMax is the 95th percentile of |value| over the whole
+// pool (every station x 24 hours x both day types x every period, ~1.92M
+// readings), floored at 0.5 -- a SATURATION point, not a range. The real
+// maximum is 86.2, and at 8am weekday roughly a quarter of stations sit past
+// +/-2.7, all rendered the same fully-saturated red or blue. A reviewer
+// reading the old label would conclude the worst station in the city loses
+// 2.7 bikes/day when it loses 26.6.
+//
+// The SCALE is deliberate and unchanged: Sessions 11/12 fixed the domain
+// across hours, day types and periods so colour intensity means the same
+// thing as the slider moves, and rescaling to the true max would crush 95%
+// of the city into near-white. Only the label was lying.
 function renderLegendScale() {
   const title = document.getElementById('legend-title');
   const low = document.getElementById('legend-tick-low');
   const high = document.getElementById('legend-tick-high');
+  const caption = document.getElementById('legend-caption');
+
   if (state.mode === 'live') {
     title.textContent = 'Dock fill';
     low.textContent = '0% full';
     high.textContent = '100% full';
-  } else {
-    title.textContent = 'Net daily flow (bikes/day)';
-    const max = state.domainMax ? state.domainMax.toFixed(1) : '0.0';
-    low.textContent = `-${max}`;
-    high.textContent = `+${max}`;
+    caption.textContent = 'Click a station for its live status';
+    return;
   }
+
+  title.textContent = 'Net daily flow (bikes/day)';
+  const max = state.domainMax ? state.domainMax.toFixed(1) : '0.0';
+  low.textContent = `-${max}`;
+  high.textContent = `+${max}`;
+  caption.textContent = 'Click a station for its daily flow';
+
+  // The saturation fact moved to a tooltip rather than being dropped. These
+  // ends are the 95th percentile of |value|, not the data's range -- the real
+  // maximum is far beyond them and everything past them paints identically --
+  // so the number is still available on hover, just not as visible clutter on
+  // a colour key. Counted at the CURRENT slice, because the whole-pool figure
+  // is 5% by construction and would be a tautology.
+  let beyond = 0;
+  let shown = 0;
+  for (const id in state.stations) {
+    const curve = curveForPeriod(state.stations[id], state.period, state.dayType);
+    if (curve === null) continue;
+    shown += 1;
+    if (Math.abs(curve[state.currentHour] * weatherMultiplierFor(id)) > state.domainMax) beyond += 1;
+  }
+  document.getElementById('legend-card').title = beyond
+    ? `Scale ends are the 95th percentile of |net flow|, not the range: colour saturates at \u00b1${max}, and ${beyond.toLocaleString()} of ${shown.toLocaleString()} stations are past it at this slice. Click one for its real value.`
+    : `Scale ends are the 95th percentile of |net flow| (\u00b1${max}).`;
 }
 
+// Session 52: a CONTINUOUS spectrum, per the "legend" design. This used to
+// emit each RAMP colour as a hard-stop pair (`color 0%, color 20%, ...`),
+// producing five flat bands -- which read as five discrete categories. The
+// underlying scale is not categorical: divergingColor() interpolates, and a
+// station's colour moves smoothly with its value. The banded key therefore
+// described a scale the map does not actually use.
+//
+// One stop per colour, evenly spaced, lets the browser interpolate between
+// them -- the same interpolation the markers get. Marker BUCKETING for the
+// no-data/over-plot cases is unaffected; this function only draws the key.
 function drawLegendGradient(domainMax) {
-  const stops = RAMP.map((color, i) => {
-    const start = (i / RAMP.length) * 100;
-    const end = ((i + 1) / RAMP.length) * 100;
-    return `${color} ${start}%, ${color} ${end}%`;
-  });
+  const stops = RAMP.map((color, i) => `${color} ${(i / (RAMP.length - 1)) * 100}%`);
   document.getElementById('legend-bar').style.background = `linear-gradient(to right, ${stops.join(', ')})`;
 }
 
@@ -3582,6 +3892,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // .open assignment needed -- that's the element's native default).
     state.modelPerformance = modelPerformancePayload;
     renderModelPerformance(state.modelPerformance);
+    renderTimebarModelNote(); // same one-shot treatment: the walk-forward result doesn't change per hour/period/mode
 
     // No render call here: the ribbon's own renderReadout() pass (below,
     // via the same hook every hour/mode change already goes through) reads
@@ -3664,7 +3975,8 @@ if (typeof globalThis !== 'undefined') {
     renderLegendScale, overplotAlphaForZoom, nearestStationWithin, CLICK_TOLERANCE_PX, markerStyleFor,
     renderModelPerformance, formatSignificance, computeEquityCounts, renderEquityCounts, setEquityThreshold,
     renderFleetStats, computeServicedEquityOverlap, setFleetSize,
-    renderRibbon, computeSliceTotals, computeLiveStandard, computeFillDistribution,
+    renderRibbon, computeSliceTotals, computeLiveStandard, computeFillDistribution, renderTimebarModelNote,
+    renderDistribution, computeDistribution,
     isUnusableLive, metresBetween, formatWindowRange, ADJACENCY_RADIUS_M,
     fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
     isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,

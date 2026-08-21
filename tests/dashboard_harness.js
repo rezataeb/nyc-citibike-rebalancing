@@ -109,6 +109,39 @@ const FAKE_LIVE = {
   },
 };
 
+// Raw GBFS shapes, deliberately NOT the flattened live_status.json shape: the
+// crosswalk between them (station_status has GBFS ids, station_information has
+// the "6433.01" short_name flows.json uses) is the part worth testing.
+// Station D exists in status but not information -- the drop path.
+const FAKE_LIVE_FEED = {
+  status: {
+    last_updated: 1787000000, // 2026-08-21T03:33:20Z
+    ttl: 60,
+    data: {
+      stations: [
+        { station_id: 'g-a', num_bikes_available: 5, num_docks_available: 25, is_renting: 1, is_returning: 1 },
+        { station_id: 'g-b', num_bikes_available: 0, num_docks_available: 25, is_renting: 1, is_returning: 1 },
+        { station_id: 'g-c', num_bikes_available: 20, num_docks_available: 0, is_renting: 1, is_returning: 1 },
+        { station_id: 'g-d', num_bikes_available: 3, num_docks_available: 3, is_renting: 1, is_returning: 1 },
+        // 0 bikes AND 0 docks -- possible whenever bikes + docks < capacity
+        // (docks out of service). Un-rentable and un-returnable at once, and
+        // the case that made the ribbon and the distribution disagree.
+        { station_id: 'g-e', num_bikes_available: 0, num_docks_available: 0, is_renting: 1, is_returning: 1 },
+      ],
+    },
+  },
+  information: {
+    data: {
+      stations: [
+        { station_id: 'g-a', short_name: 'A', capacity: 30 },
+        { station_id: 'g-b', short_name: 'B', capacity: 25 },
+        { station_id: 'g-c', short_name: 'C', capacity: 20 },
+        { station_id: 'g-e', short_name: 'E', capacity: 15 },
+      ],
+    },
+  },
+};
+
 // Mirrors data/reliability.json's real shape (pipeline/reliability.py). The
 // rates are deliberately round numbers unlike the real 12.2%, so a test can
 // tell a computed value apart from a hardcoded one at a glance.
@@ -216,6 +249,8 @@ function makeElementStub(id) {
 
 // options:
 //   flows / live / fleetScenarios / reliability -- payload, or null to make that fetch 404
+//   liveFeed -- { status, information } GBFS payloads, or null (default) so the
+//               live feed 404s and the dashboard falls back to `live`
 //   startZoom -- initial map zoom (default 11, the dashboard's own city-wide default)
 function buildSandbox(options = {}) {
   const {
@@ -223,6 +258,7 @@ function buildSandbox(options = {}) {
     live = FAKE_LIVE,
     fleetScenarios = null, // default off: most tests don't need it, and 404ing it exercises graceful degradation
     reliability = null,    // same -- default off, so every existing test keeps exercising the ribbon's missing-file path
+    liveFeed = null,       // default off: the GBFS feed 404s, so tests exercise the snapshot fallback unless they opt in
     startZoom = 11,
   } = options;
 
@@ -348,6 +384,8 @@ function buildSandbox(options = {}) {
       if (url.includes('flows')) return flows ? found(flows) : notFound();
       if (url.includes('live_status')) return live ? found(live) : notFound();
       if (url.includes('fleet_scenarios')) return fleetScenarios ? found(fleetScenarios) : notFound();
+      if (url.includes('station_status')) return liveFeed ? found(liveFeed.status) : notFound();
+      if (url.includes('station_information')) return liveFeed ? found(liveFeed.information) : notFound();
       if (url.includes('reliability')) return reliability ? found(reliability) : notFound();
       // Every other optional file 404s, exercising dashboard2's own
       // graceful-degradation paths on each load.
@@ -415,4 +453,5 @@ module.exports = {
   FAKE_LIVE,
   FAKE_FLEET_SCENARIOS,
   FAKE_RELIABILITY,
+  FAKE_LIVE_FEED,
 };

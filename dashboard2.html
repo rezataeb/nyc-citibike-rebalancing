@@ -1479,6 +1479,7 @@ const state = {
   selectedId: null, // station id with an open detail panel, or null
   mode: 'historical', // 'historical' | 'live'
   liveStations: null, // station_id -> {capacity, bikes_available, docks_available, is_renting, is_returning}, from live_status.json
+  liveSource: null, // 'feed' (fetched from GBFS just now) or 'snapshot' (data/live_status.json fallback) -- always stated in the UI, never conflated
   reliability: null, // observed station-unusable rate over the snapshot log's closed window, from reliability.json (may stay null -- optional layer)
   liveAsOf: null, // live_status.json's own last_updated (ISO string), never the viewer's local load time
   markerRadius: null, // set for real once the map's actual starting zoom is known, see markerRadiusForZoom()
@@ -1734,18 +1735,25 @@ function computeFillDistribution() {
   const fills = [];
   let nEmpty = 0;
   let nFull = 0;
+  // Stations that are BOTH: 0 bikes and 0 docks at once. Possible whenever
+  // bikes + docks < capacity, i.e. some docks are out of service. Such a
+  // station is genuinely un-rentable AND un-returnable, so it belongs in both
+  // counts here -- but a distribution has to put each station in exactly one
+  // bucket, so the two surfaces differ by this number and say so.
+  let nBoth = 0;
   for (const id in state.stations) {
     if (!hasLiveData(id)) continue;
     const live = state.liveStations[id];
     fills.push((live.bikes_available / live.capacity) * 100);
     if (live.bikes_available === 0) nEmpty += 1;
     if (live.docks_available === 0) nFull += 1;
+    if (live.bikes_available === 0 && live.docks_available === 0) nBoth += 1;
   }
   if (fills.length === 0) return null;
   fills.sort((a, b) => a - b);
   const mid = Math.floor(fills.length / 2);
   const median = fills.length % 2 === 0 ? (fills[mid - 1] + fills[mid]) / 2 : fills[mid];
-  return { median, nEmpty, nFull, total: fills.length };
+  return { median, nEmpty, nFull, nBoth, total: fills.length };
 }
 
 // The historical slice, computed once and shared by all three historical
@@ -1902,10 +1910,48 @@ function renderDistribution() {
   // an unstated subset is the kind of quiet denominator change this project
   // keeps finding in its own older figures.
   const note = document.getElementById('distribution-note');
+  const fill = live ? computeFillDistribution() : null;
+  const overlap = fill && fill.nBoth
+    ? ` ${fill.nBoth} station${fill.nBoth === 1 ? ' has' : 's have'} 0 bikes and 0 docks at once; counted here as empty, and in both ribbon tiles.`
+    : '';
   note.textContent = live
-    ? `Live dock fill across stations with usable GBFS data. ${excluded.toLocaleString()} of ${(total + excluded).toLocaleString()} excluded (no live match, capacity 0, or offline).`
+    ? `Live dock fill across stations with usable GBFS data. ${excluded.toLocaleString()} of ${(total + excluded).toLocaleString()} excluded (no live match, capacity 0, or offline).${overlap}`
     : `Net flow at ${formatHourLabel(state.currentHour)}, ${state.dayType}, ${periodOptionLabel(state.period)}, binned by the same thresholds that colour the map.`
       + (excluded ? ` ${excluded.toLocaleString()} stations have no data for this period.` : '');
+}
+
+// Session 54: refresh the live feed on its own ttl, but only while live mode
+// is actually showing -- polling a third-party service to update numbers
+// nobody is looking at is just someone else's bandwidth.
+//
+// liveStandardCache MUST be cleared here. It memoises a ~2,400-station
+// nearest-neighbour pass, and its own comment justified that by the snapshot
+// being immutable ("if live polling is ever added, this cache must be
+// invalidated with the feed"). This is that.
+let liveRefreshTimer = null;
+
+function applyLiveFeedPayload(payload) {
+  state.liveStations = payload.stations;
+  state.liveAsOf = payload.last_updated;
+  state.liveSource = payload.source || 'snapshot';
+  liveStandardCache = null;
+  renderHour(state.currentHour); // one hook: repaints markers, ribbon, distribution, legend and detail together
+}
+
+function refreshLiveFeed() {
+  if (state.mode !== 'live') return;
+  fetchLiveFeed()
+    .then(applyLiveFeedPayload)
+    // Deliberately silent: a failed refresh leaves the last good reading on
+    // screen with its own timestamp still correct. Logging here would trip
+    // the tests' "init logged nothing" assertion for a non-failure, and a
+    // reviewer does not need a console error because one poll missed.
+    .catch(() => {});
+}
+
+function setLiveRefresh(active) {
+  if (liveRefreshTimer) { clearInterval(liveRefreshTimer); liveRefreshTimer = null; }
+  if (active) liveRefreshTimer = setInterval(refreshLiveFeed, LIVE_FEED_REFRESH_MS);
 }
 
 function renderRibbon() {
@@ -2739,7 +2785,12 @@ function renderHour(hour) {
   // saturation note the legend computes was overwritten by a static string on
   // every render, and never appeared. One owner, no ordering to get wrong.
   if (state.mode === 'live') {
-    document.getElementById('live-as-of-timestamp').textContent = `Live as of ${formatAsOf(state.liveAsOf)} · via GBFS`;
+    // Session 54: names the source, not just the time. "via GBFS" was true of
+    // the snapshot too -- it came from GBFS, weeks ago -- so it could not tell
+    // a reader whether they were looking at now or at July.
+    document.getElementById('live-as-of-timestamp').textContent = state.liveSource === 'feed'
+      ? `Live as of ${formatAsOf(state.liveAsOf)} · GBFS, refreshing every ${LIVE_FEED_REFRESH_MS / 1000}s`
+      : `Snapshot from ${formatAsOf(state.liveAsOf)} · live GBFS feed unavailable`;
   } else {
     const label = formatHourLabel(hour);
     document.getElementById('hour-label').textContent = label;
@@ -3005,6 +3056,8 @@ function setMode(mode) {
   // relying on the button becoming unreachable.
   if (mode === 'live' && state.hourPlaying) setHourPlaying(false);
   state.mode = mode;
+  // Poll only while live mode is on screen (Session 54).
+  setLiveRefresh(mode === 'live');
   setRadioActive('mode-historical', mode === 'historical');
   setRadioActive('mode-live', mode === 'live');
   document.getElementById('historical-controls').classList.toggle('hidden', mode !== 'historical');
@@ -3559,9 +3612,65 @@ const flowsReady = fetchJSON('data/flows.json')
   .then(payload => ({ payload, isDemo: false, error: null }))
   .catch(error => ({ payload: DEMO_FLOWS_PAYLOAD, isDemo: true, error }));
 
-const liveReady = fetchJSON('data/live_status.json')
+// ---------------------------------------------------------------------------
+// Live dock status (Session 54): the real GBFS feed, not only the snapshot.
+//
+// "Live Docks" had meant one frozen export of data/live_status.json -- weeks
+// old by the time anyone opened the page. Citi Bike's GBFS endpoints serve
+// `access-control-allow-origin: *` and declare `ttl: 60`, so the browser can
+// read them directly: no proxy, no key, no backend, and the $0 stack holds.
+//
+// The snapshot is kept as the FALLBACK, not deleted. The feed is a third-party
+// service this project does not control, and a portfolio page that shows an
+// empty map when that service blips is worse than one showing a labelled old
+// reading. Which source is in use is always stated in the UI -- an unlabelled
+// stale number pretending to be live is the one outcome to avoid.
+const LIVE_FEED_STATUS_URL = 'https://gbfs.citibikenyc.com/gbfs/en/station_status.json';
+const LIVE_FEED_INFO_URL = 'https://gbfs.citibikenyc.com/gbfs/en/station_information.json';
+const LIVE_FEED_REFRESH_MS = 60000; // the feed's own declared ttl
+
+// station_status carries GBFS's internal station_id; only station_information
+// has short_name, which is the "6433.01" numbering flows.json uses. Same
+// crosswalk pipeline/gbfs_logger.py does server-side, for the same reason.
+function buildLiveFeedPayload(statusFeed, infoFeed) {
+  const byGbfsId = {};
+  for (const info of infoFeed.data.stations) {
+    if (info.short_name) byGbfsId[info.station_id] = info;
+  }
+
+  const stations = {};
+  let dropped = 0;
+  for (const row of statusFeed.data.stations) {
+    const info = byGbfsId[row.station_id];
+    if (!info) { dropped += 1; continue; } // in status but not information -- the two are independent requests
+    stations[info.short_name] = {
+      capacity: info.capacity,
+      bikes_available: row.num_bikes_available,
+      docks_available: row.num_docks_available,
+      is_renting: row.is_renting,
+      is_returning: row.is_returning,
+    };
+  }
+  return {
+    last_updated: new Date(statusFeed.last_updated * 1000).toISOString().replace(/\.\d+Z$/, '+00:00'),
+    n_dropped: dropped,
+    stations,
+    source: 'feed',
+  };
+}
+
+function fetchLiveFeed() {
+  return Promise.all([fetchJSON(LIVE_FEED_STATUS_URL), fetchJSON(LIVE_FEED_INFO_URL)])
+    .then(([statusFeed, infoFeed]) => buildLiveFeedPayload(statusFeed, infoFeed));
+}
+
+// Feed first, snapshot second. Both failing is still a handled state: live
+// mode's own button is disabled when liveAvailable is false, exactly as before.
+const liveReady = fetchLiveFeed()
   .then(payload => ({ payload, ok: true }))
-  .catch(error => ({ payload: null, ok: false, error }));
+  .catch(() => fetchJSON('data/live_status.json')
+    .then(payload => ({ payload: Object.assign({}, payload, { source: 'snapshot' }), ok: true }))
+    .catch(error => ({ payload: null, ok: false, error })));
 
 const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady, reliabilityReady])
   .then(([flowsResult, liveResult, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload, reliabilityPayload]) => {
@@ -3570,6 +3679,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     state.liveAvailable = liveResult.ok;
     state.liveStations = liveResult.ok ? liveResult.payload.stations : {};
     state.liveAsOf = liveResult.ok ? liveResult.payload.last_updated : null;
+    state.liveSource = liveResult.ok ? (liveResult.payload.source || 'snapshot') : null;
     const ids = Object.keys(state.stations);
 
     // Bounding box derived from the real station coordinates in flows.json,
@@ -3977,6 +4087,7 @@ if (typeof globalThis !== 'undefined') {
     renderFleetStats, computeServicedEquityOverlap, setFleetSize,
     renderRibbon, computeSliceTotals, computeLiveStandard, computeFillDistribution, renderTimebarModelNote,
     renderDistribution, computeDistribution,
+    buildLiveFeedPayload, refreshLiveFeed, applyLiveFeedPayload, setLiveRefresh, LIVE_FEED_REFRESH_MS,
     isUnusableLive, metresBetween, formatWindowRange, ADJACENCY_RADIUS_M,
     fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
     isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,

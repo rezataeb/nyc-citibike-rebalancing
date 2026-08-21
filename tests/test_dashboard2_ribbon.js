@@ -272,8 +272,24 @@ async function testDistributionEndsAgreeWithTheRibbonTiles() {
   dash.setMode('live');
 
   const counts = dash.computeDistribution().counts;
+  const fill = dash.computeFillDistribution();
+
+  // The relationship is exact, but it is NOT plain equality on both ends, and
+  // assuming it was hid a real case: a station with 0 bikes AND 0 docks (which
+  // happens whenever bikes + docks < capacity, i.e. docks out of service) is
+  // un-rentable and un-returnable, so both ribbon tiles count it -- while the
+  // distribution, which must partition, can only put it in one bucket. Against
+  // the live feed that gap was 5 stations: ribbon "full 183", distribution
+  // "full 178". Both correct; the invariant just has a term in it.
   assert.strictEqual(String(counts[0]), value(sandbox, 2), 'distribution "empty" == ribbon "empty now"');
-  assert.strictEqual(String(counts[4]), value(sandbox, 3), 'distribution "full" == ribbon "full now"');
+  assert.strictEqual(
+    String(counts[4] + fill.nBoth), value(sandbox, 3),
+    'distribution "full" + both-zero stations == ribbon "full now"'
+  );
+  assert.strictEqual(
+    counts.reduce((a, b) => a + b, 0), fill.total,
+    'buckets still partition the usable set exactly once'
+  );
 
   console.log('  distribution ends agree with the ribbon tiles');
 }

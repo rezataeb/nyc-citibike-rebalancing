@@ -3,16 +3,27 @@
 **Status:** direction (§0) decided 2026-08-10. **Building has started** — incremental revision
 of `dashboard2.html` in place, not a rewrite. Done so far: Individual/Grouped toggle removed
 (S47), `route.json` retired (S48), then **clustering and the drawn route both cut entirely, plus
-click tolerance and over-plot fade added (S49)**. Metrics + layout still to lock. Handoff banner
-below refreshed 2026-08-19.
+click tolerance and over-plot fade added (S49)**. **Metric set and layout locked 2026-08-21 (see
+banner) — ribbon build starts next.** Handoff banner below refreshed 2026-08-21.
 **Working file:** `dashboard2.html` (the canonical dashboard going forward, not `dashboard.html`).
 **Purpose:** capture every concern and idea from the current design discussion so it can be
 picked up tomorrow without re-deriving it. This is a living scratchpad, not a polished deliverable.
 Also the raw material for an eventual **"metrics rationale" report** — what we chose, why, and how
 each is sourced.
 
-> ### ⭐ FIRST PRIORITY WHEN YOU'RE BACK  *(handoff refreshed 2026-08-19)*
-> **Lock the metric set AND pick the layout — then start building.** That's the whole task.
+> ### ⭐ FIRST PRIORITY WHEN YOU'RE BACK  *(handoff refreshed 2026-08-21, after Session 50)*
+> **The ribbon is BUILT (Session 50). Next: the other two thirds of Option A** — dock the
+> Investigator, and turn Worst-stations into the pull-up drawer. One per session.
+>
+> Option A is three moves and only the first is done. The metric ribbon now occupies the masthead;
+> the Investigator and the Worst lists are still in the right rail exactly as they were, so the
+> "Investigator is below the fold" problem (§1 item 2) is **not yet fixed** — that was always the
+> docking step, not the ribbon step.
+>
+> ⚠️ **One spec change happened during the build, and it is not a deferral — read §4B.** Live tile 3
+> could not be built as locked (`Outage hrs / $ (24h)`); the snapshot log's cadence cannot support
+> it. It shipped as an observed *rate* instead. This also un-blocked the equity-disparity metric
+> (#6), which §4B had listed as depending on the tile that failed.
 >
 > **Do NOT re-open §0.** The "portfolio vs. ops-oversight tool" fork is **closed** (decided
 > 2026-08-10 → *portfolio piece, but FOCUSED*). Any older handoff note pointing at §0 as the
@@ -22,9 +33,14 @@ each is sourced.
 > - ✅ §4B metric shortlist drafted, counts re-verified against committed data
 > - ✅ §6 two layout options wireframed, with a stated lean
 >
-> **The two decisions that actually gate the first line of code:**
-> 1. Final metric set — from §4B, 3–4 tiles, mode-aware (§7 items 2–6)
-> 2. Layout — Option A vs Option B (§6); current lean is **A**
+> **The two decisions that gated the first line of code — both locked, both now built into
+> `dashboard2.html` (Session 50):**
+> 1. ✅ **Final metric set — §4B provisional set, as-is** (3 tiles/mode, mode-aware). Live mode:
+>    `% Meeting Standard` (hero) · `Fill distribution` · `Outage hrs / $ (24h)`. Historical mode:
+>    `Net flow imbalance` (hero) · `Need bikes / need docks` · `Bikes to move`. Equity disparity
+>    (#6), MAE (#5), and rides-avoided (#7) stay drawer-only, not headline tiles.
+> 2. ✅ **Layout — Option A** (§6): ribbon + permanently docked Investigator + pull-up Worst
+>    drawer over the map. Confirms the stated lean; Option B (tabbed right rail) not taken.
 >
 > ~~3. Show route~~ — **closed in Session 49: the route was CUT, not relocated.** The tour was
 > the one thing on the map that looked like an optimization output without being one (no depots,
@@ -40,9 +56,12 @@ each is sourced.
 > Everything else in §7 is done (Individual/Grouped removal — Session 47) or explicitly deferred
 > (metrics-rationale report).
 >
-> **Read §10 before writing the metric ribbon.** Two things there change how you'd start: the
-> shared test harness now exists (build ribbon tests on it), and the current metric tiles are
-> near-inert in a specific, measured way.
+> ~~**Read §10 before writing the metric ribbon.**~~ — **spent in Session 50.** Both of its
+> findings were acted on: the ribbon's tests are built on the shared harness
+> (`tests/test_dashboard2_ribbon.js`, plus a `reliability` option added to
+> `tests/dashboard_harness.js`), and the inert-tile problem 10B measured is the thing the ribbon
+> fixed. §10 has been corrected in place — it named two test files that no longer exist and a line
+> number that had moved.
 
 ---
 
@@ -224,10 +243,73 @@ Seven metric ideas were raised; these are suggestions to draw from, not a spec. 
   lesson: a live tile is fine, a fixed hardcoded claim is not.)*
 - MAE exact: naive **1.954**, GAM **2.180**, guarded GBM **2.096** (not "2.06").
 
-**Provisional tight top-bar set (to confirm next session — keep it 3–4, mode-aware, avoid clutter):**
-- *Live docks mode:* `% Meeting Standard` (hero) · `Fill distribution` · `Outage hrs / $ (24h)`
+**✅ LOCKED 2026-08-21 — top-bar set, as-is (3 tiles/mode, mode-aware). BUILT in Session 50,
+with one forced change to live tile 3:**
+- *Live docks mode:* `% Meeting Standard` (hero) · `Fill distribution` · ~~`Outage hrs / $ (24h)`~~
+  → **`Observed unusable rate`** (see below — the locked version was not buildable)
 - *Historical mode:* `Net flow imbalance` (hero) · `Need bikes / need docks` · `Bikes to move`
 - *Drawer / dedicated:* MAE (#5), Equity disparity (#6), Rides-avoided (#7, illustrative)
+
+### ⚠️ Metric #2 could not be built as specced — the snapshot log's cadence forbids it
+
+Measured against the real artifact (`data/gbfs_log/snapshots.csv`) on 2026-08-21:
+
+    190 snapshots over 12 days, ending 2026-07-26 (25 days before the build session)
+    gap median 85 min · mean 98 min · max 236 min · only 3 of 189 gaps <= 10 min
+
+`gbfs_logger.py`'s own docstring promised an `empty_minutes.py` to convert the log into empty/full
+*minutes*, assuming the 10-minute cron it describes. **The log was never collected at that
+cadence.** The contract's thresholds are 60 min (peak) / 120 min (off-peak), so outage hours — and
+therefore any `$50/hr` penalty figure — would be an inference at roughly the same resolution as the
+thing being measured: a station seen empty at 14:00 and again at 15:15 may have been refilled at
+14:05. Separately the log ends 25 days before the build, so the `(24h)` window contained no data.
+
+**What shipped instead — the observation-weighted unusable rate.** Share of station-observations
+with 0 bikes or 0 docks; offline observations excluded from both numerator and denominator per the
+fixed QC rule. Each row is an independent point-in-time read, needing no duration resolution.
+
+| | |
+|---|---|
+| System-wide | **12.2%** (54,860 of 448,687 online observations) |
+| Per-station | median 9.5% · p90 26.8% · max 76.8% (2,385 stations at ≥20 obs) |
+| Source | `pipeline/reliability.py` → `data/reliability.json` |
+
+A first attempt at the replacement was **wrong and worth recording**: "stations unusable in ≥1
+snapshot" **saturates at 90.8%** (2,237 of 2,463). Over 12 days nearly every station fails at some
+point, so that tile would have read ~91% forever and distinguished nothing. Checking it before
+building it was the whole saving.
+
+**This un-blocks #6.** The shortlist table lists Equity *disparity* as "Depends on #2" — i.e.
+blocked behind the tile that could not be built. It is not: the Comptroller's own finding ("Bronx
+riders are **89% more likely** to hit an unusable station") is a **ratio of observation-weighted
+rates**, not a duration. `reliability.json` ships per-station rates, so #6 now needs only the equity
+join it already has. **#6 is the best-supported remaining metric in the shortlist**, and it no
+longer waits on a recollect.
+
+**The `$ /hr` tile is deferred, not cancelled.** It stays fully specced here, and becomes buildable
+the moment the GBFS collector reruns at 10-minute cadence for long enough — a pipeline task, not a
+dashboard one.
+
+### `% Meeting Standard` needed a number the contract does not give
+
+The SLA's carve-out ("only if adjacent stations also unavailable") is stated in words; "adjacent"
+is never defined in metres. `ADJACENCY_RADIUS_M = 500` in `dashboard2.html` is **ours**, chosen to
+sit between this project's existing 300 m and 800 m equity distances, and labeled as ours in the
+tile's own tooltip. Live result at the current snapshot: **89.9%** meeting.
+
+### Reconciling the live counts against the verified figures above
+
+The numbers verified above record 145 empty / 225 full of 2,419. The shipped ribbon reads **87
+empty / 220 full of 2,317**, and both are right — `hasLiveData()` (the file's pre-existing
+predicate, not a new one) requires a flows.json match *and* capacity > 0 *and*
+`is_renting && is_returning`:
+
+    2,419  capacity > 0                -> 145 empty, 276 full   (the basis used above)
+    2,365  + online only               ->  91 empty, 224 full
+    2,317  + present in flows.json     ->  87 empty, 220 full   (the ribbon's basis)
+
+The 92 live stations with no flows.json entry and the 54 offline-and-empty stations are the whole
+difference. Not a regression — the stricter denominator is the fixed QC rule.
 
 ---
 
@@ -307,27 +389,33 @@ comes and goes instead of permanently occupying the rail.
 Right rail has two tabs; Worst and Investigator are peers, one click apart. Solves "worst covers
 everything" and "investigator buried," but you can't see both at once.
 
-**Lean:** Option A — keeps Investigator permanently visible (its whole point is discoverability);
-the pull-up Worst drawer is the cleanest "come and go." Option B is tidier but hides Investigator
-behind a tab, slightly undercutting the visibility goal.
+**✅ LOCKED 2026-08-21: Option A** — keeps Investigator permanently visible (its whole point is
+discoverability); the pull-up Worst drawer is the cleanest "come and go." Option B was considered
+(tidier, but hides Investigator behind a tab, undercutting the visibility goal) and not taken.
+
+**Build status: 1 of 3 steps done.** Session 50 built the ribbon only. The Investigator and the
+Worst lists are still in the right rail exactly as before, so **§1 item 2 ("Investigator isn't
+obvious") is still open** — that was always the docking step, not the ribbon step. Don't read the
+ribbon landing as Option A being finished.
 
 ---
 
-## 7. Open decisions checklist (FIRST PRIORITY next session = metrics + design)
+## 7. Open decisions checklist (metrics + layout now decided; the ribbon is built)
 
 - [x] ~~THE FORK: portfolio vs ops-pivot~~ → **DECIDED: portfolio but focused** (§0)
-- [ ] **Lock the final metric set** — from the §4B shortlist; keep top bar tight (3–4, mode-aware)
-- [ ] Confirm the hero metric — `% Meeting Standard` (live) / `Net flow imbalance` (historical)?
-- [ ] SLA metrics (#1/#2): use the real sourced numbers (§4A); decide "% target" wording (derived)
-- [ ] Equity: adopt the **disparity** metric (#6, outage-rate gap) as the equity story?
-- [ ] Metric philosophy: adopt the mode-aware + slice-aware swap? (§4)
+- [x] ~~Lock the final metric set~~ → **DONE 2026-08-21: §4B provisional set, as-is** (3 tiles/mode), and **BUILT (Session 50)** — with live tile 3 forced to change under measurement, see §4B
+- [x] ~~Confirm the hero metric~~ → **`% Meeting Standard` (live) / `Net flow imbalance` (historical)**, confirmed by the lock above
+- [x] ~~SLA metrics (#1/#2)~~ → **RESOLVED (Session 50), but not as planned.** #1 shipped at **89.9%**, with its 500 m adjacency radius labeled as ours, not the contract's. #2 was **not buildable at all** from the log's ~hourly cadence — replaced by the observed unusable rate (**12.2%**). The `$ /hr` framing is deferred, not cancelled. See §4B.
+- [ ] Equity: the disparity metric (#6) stays **drawer-only**, not a headline tile, per the "as-is" lock — but it is **no longer blocked**: §4B had it depending on #2, and Session 50's per-station rates in `reliability.json` supply what it actually needs. Best-supported metric left unbuilt.
+- [x] ~~Metric philosophy: adopt the mode-aware + slice-aware swap?~~ → yes, baked into the locked set (§4)
 - [x] ~~Individual/Grouped: remove the manual toggle?~~ → **DONE (Session 47).** Toggle and the
       `viewModeUserForced` override field both deleted; view mode is zoom-only. Also produced
-      dashboard2's first JS test coverage (`tests/test_dashboard2_view_mode.js`) — see §10.
+      dashboard2's first JS test coverage — that file was later merged into
+      `tests/test_dashboard2_map_interaction.js` (Session 49); see §10A's correction.
 - [x] ~~Show route: fold into Investigator, or keep separate?~~ → **RESOLVED (Session 48).**
       `route.json` retired; the historical route is now fleet scenario 1, one source, one layer.
       The button's physical placement is still open but is now cosmetic — see §5.
-- [ ] Layout: Option A vs Option B (§6)
+- [x] ~~Layout: Option A vs Option B~~ → **DONE 2026-08-21: Option A locked** (§6). **Step 1 of 3 built (Session 50: the ribbon).** Remaining: dock the Investigator; make Worst a pull-up drawer.
 - [ ] (later) Write the **metrics-rationale report**: what we chose, why, sources (§4A) — for the portfolio
 
 ---
@@ -394,8 +482,20 @@ ribbon work should be planned, so they're recorded here rather than only in PROG
 `dashboard2.html`. All 14 of its blocks pass and always would have — none of them load the
 canonical file. Session 47 added the first dashboard2 test (`tests/test_dashboard2_view_mode.js`,
 zoom-driven view mode only), and Session 48 added a second
-(`tests/test_dashboard2_route_source.js`), so coverage is no longer zero — but it is
+(`tests/test_dashboard2_route_source.js`), so coverage was no longer zero — but it was
 still narrow, and nothing yet covers the metric bar.
+
+> ⚠️ **Correction (2026-08-21): both filenames above are stale.** Session 49 deleted both and
+> replaced them with the single `tests/test_dashboard2_map_interaction.js` — its own header
+> documents the merge, and `git log --all` confirms neither `test_dashboard2_view_mode.js` nor
+> `test_dashboard2_route_source.js` exists under those names in any commit (they were replaced
+> before ever being committed separately). The point stands — coverage is still narrow, nothing
+> covers the metric bar yet — only the filenames were wrong.
+>
+> **Update (Session 50): the metric bar is now covered.** `tests/test_dashboard2_ribbon.js`
+> (9 blocks) is built on the shared harness, which gained a `reliability` option and a
+> `FAKE_RELIABILITY` fixture for it. Current dashboard2 coverage is that file plus
+> `tests/test_dashboard2_map_interaction.js`.
 
 **✅ The harness now exists (Session 48).** `tests/dashboard_harness.js` holds the shared sandbox:
 it can boot dashboard2's full inline script (fake `flows.json` / `live_status.json` /
@@ -416,8 +516,9 @@ Two harness gotchas worth not rediscovering:
 
 ### 10B. The metric bar is worse than §4 assumed — 3 of 4 tiles ignore the hour slider
 
-§4 says the tiles are "static." Traced through `renderReadout()` (`dashboard2.html:1626`), the
-precise position is sharper:
+§4 says the tiles are "static." Traced through `renderReadout()` (`dashboard2.html:1431` — shifted
+from the originally-cited `:1626` by Session 49's cuts; reverify against the file, don't trust
+either line number blindly), the precise position is sharper:
 
 | Tile | What it actually computes | Moves with the hour slider? |
 |---|---|---|
@@ -429,6 +530,14 @@ precise position is sharper:
 So dragging the hour slider — the dashboard's primary control — changes nothing in the metric bar
 except the caption describing where you dragged it. That's a stronger version of §1's "one per
 data source, not one per decision," and it's the single highest-value thing the ribbon fixes.
+
+✅ **FIXED in Session 50.** All three ribbon tiles recompute from the live (mode, hour, dayType,
+period) slice. `readout-filter` was **deleted rather than relocated**: it existed only because
+nothing else moved, and a caption restating the slider position is the same duplication this
+masthead already dropped once (see `#title-meta`'s note on the removed "Net flow at HH:MM" line).
+Its misleading "current map filter" wording went with it, resolving this section's own rename note
+below. The regression is now pinned by test — `test_dashboard2_ribbon.js` asserts the values
+*change* across hours and day types, not merely that they render.
 
 **Two corrections to earlier notes:**
 - §4B worried the equity-threshold machinery might not exist. It does —

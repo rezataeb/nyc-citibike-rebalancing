@@ -28,8 +28,14 @@
      once-per-session switch as if it were the masthead's subject. Two
      columns now: title left (its own natural width), mode toggle right
      (justify-self:end below), no dead space left over. */
+  /* Session 50: three columns now -- title, metric ribbon, mode toggle.
+     The ribbon takes the 1fr so it absorbs all slack; title and toggle keep
+     their natural widths, same as before. min-width:0 on the ribbon column
+     is what lets its tiles shrink instead of forcing the masthead wider
+     than the viewport (the tile text is tabular numerals, which do not
+     wrap on their own). */
   #topbar {
-    display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 20px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 20px;
     padding: 14px 20px; border-bottom: 1px solid #d8d7d3; background: #fcfcfb; flex-shrink: 0;
   }
   #title { min-width: 0; }
@@ -59,6 +65,40 @@
   #title .subtitle { color: #52514e; font-size: 12px; margin-top: 4px; }
   #title-meta { color: #666057; } /* real station count + coverage/weather-scenario caveats -- the only subtitle content now; the old "Net flow at HH:MM, weekday (period)" phrase was dropped as pure duplication of the Map controls panel's own hour/day/period controls */
   #mode-toggle { width: 280px; justify-self: end; }
+
+  /* The metric ribbon (Session 50, v2 layout Option A). Deliberately flatter
+     than the boxed .readout grid it replaced: in the rail that block needed
+     borders to separate itself from the accordions around it, but in the
+     masthead it is the only content between the title and the toggle, so
+     hairline dividers are enough and a second bordered card would fight the
+     masthead's own bottom border.
+
+     The hero tile (first child) carries the larger number -- the locked
+     metric set names one hero per mode, and it is always tile 1. */
+  .ribbon { display: flex; align-items: stretch; gap: 0; min-width: 0; }
+  .ribbon__tile {
+    padding: 0 18px; min-width: 0; flex: 0 1 auto;
+    border-left: 1px solid #e6e5e1;
+  }
+  .ribbon__tile:first-child { padding-left: 0; border-left: none; }
+  .ribbon__value {
+    display: block; font-size: 19px; font-weight: 800; color: #0b0b0b;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.15;
+    white-space: nowrap;
+  }
+  #ribbon-tile-1 .ribbon__value { font-size: 24px; } /* hero */
+  .ribbon__label {
+    display: block; margin-top: 3px; font-size: 11px; color: #666057; line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* The window stamp on the historical-rate tile -- a real qualifier, not
+     decoration, so it stays visible rather than being folded into a title
+     attribute nobody hovers. Kept at #666057 rather than a lighter gray:
+     this file's task-11 pass established that as the lightest text color
+     clearing WCAG AA 4.5:1 against every background here, and a window
+     stamp is load-bearing copy, not decoration. De-emphasised by weight
+     instead of by contrast. */
+  .ribbon__label .ribbon__window { color: #666057; font-weight: 400; }
 
   /* position:relative -- this, not #map-col, is the positioning ancestor
      for #map-controls-bar/#map-corner-stack now (see the HTML comment
@@ -189,10 +229,8 @@
      critique's own separate palette, which was written without ever
      seeing this file -- matching what's already here, not introducing a
      second visual language. */
-  .readout { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #d8d7d3; border: 1px solid #d8d7d3; border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
-  .readout > div { background: #fff; padding: 12px 14px; }
-  .readout b { display: block; font-size: 22px; font-weight: 800; color: #0b0b0b; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.1; }
-  .readout span { display: block; margin-top: 4px; font-size: 11px; color: #52514e; line-height: 1.35; }
+  /* Session 50: the .readout rules that sat here are gone with the markup
+     they styled -- the rail readout became the masthead #ribbon above. */
 
   .worst { border: 1px solid #d8d7d3; border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
   .worst__title { padding: 10px 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #666057; border-bottom: 1px solid #d8d7d3; }
@@ -454,6 +492,20 @@
     #mode-toggle { width: auto; align-self: flex-end; padding: 2px; }
     #mode-toggle .segmented-btn { font-size: 12px; padding: 6px 8px; }
 
+    /* Session 50: three metric tiles will not fit beside the title and the
+       toggle at this width, so the masthead becomes two rows -- title and
+       toggle on row 1 (their original arrangement), ribbon spanning row 2.
+       The tiles keep their dividers and stay on one line; they are short
+       enough side by side once they have the full width to themselves. */
+    #topbar { grid-template-columns: auto minmax(0, 1fr); } /* back to the original two-column split; #mode-toggle's justify-self:end still lands it right */
+    #ribbon {
+      grid-column: 1 / -1; grid-row: 2;
+      padding-top: 10px; border-top: 1px solid #e6e5e1;
+    }
+    .ribbon__tile { padding: 0 12px; }
+    .ribbon__value { font-size: 17px; }
+    #ribbon-tile-1 .ribbon__value { font-size: 20px; }
+
     #body-row { flex-direction: column; overflow-y: auto; }
     /* Sticky, not fixed-in-flow: the map keeps its own document-flow
        height (so #map-controls-bar/#timebar/#map-corner-stack below it
@@ -542,6 +594,38 @@
       </div>
     </div>
     <div class="subtitle hidden" id="title-subtitle-line"><span id="title-meta"></span></div>
+  </div>
+
+  <!-- Session 50, v2 layout Option A: the metric ribbon. Three tiles, and
+       the SAME three shells in both modes -- renderRibbon() rewrites every
+       value, label and title on each pass, rather than the file carrying
+       two sets of markup with one hidden. That is deliberate on two counts.
+       It keeps mode-switching from being a show/hide problem at all, and it
+       obeys this project's standing rule that a control's visible state
+       must be set in JS, never implied by markup: there is no default state
+       here to get wrong, because nothing is ever hidden.
+
+       Empty on purpose -- every tile is filled by renderRibbon() before
+       first paint. A tile that showed a hardcoded number here would be a
+       number nobody computed, which is exactly what this ribbon replaced.
+
+       aria-live is off, not polite: these recompute on every drag of the
+       hour slider, and announcing three tiles per frame would make the
+       slider unusable with a screen reader. The values are reachable on
+       demand as ordinary text. -->
+  <div class="ribbon" id="ribbon" role="group" aria-label="Key metrics" aria-live="off">
+    <div class="ribbon__tile" id="ribbon-tile-1">
+      <b class="ribbon__value" id="ribbon-value-1"></b>
+      <span class="ribbon__label" id="ribbon-label-1"></span>
+    </div>
+    <div class="ribbon__tile" id="ribbon-tile-2">
+      <b class="ribbon__value" id="ribbon-value-2"></b>
+      <span class="ribbon__label" id="ribbon-label-2"></span>
+    </div>
+    <div class="ribbon__tile" id="ribbon-tile-3">
+      <b class="ribbon__value" id="ribbon-value-3"></b>
+      <span class="ribbon__label" id="ribbon-label-3"></span>
+    </div>
   </div>
   <!-- Design critique task 07: was plain .segmented (solid black active
        state) -- the loudest object in the masthead for a two-state,
@@ -661,23 +745,15 @@
 
     <div id="side-content">
 
-      <!-- Design critique task 03: the rail used to open with everything
-           valuable (equity counts, the fleet baseline) present but at zero
-           visible pixels -- two collapsed accordions and a disclaimer. This
-           permanent readout states real numbers immediately, no click
-           required. Three of the four tiles are genuinely live (recomputed
-           on every relevant change, see renderReadout() below); the fleet
-           baseline is real but intentionally NOT relabeled as live -- it's
-           fleet_scenarios.json's own fixed AM-window (6-9am) precomputation,
-           independent of the map's own hour/period selector, and claiming
-           otherwise would be exactly the kind of invented-precision this
-           project's CLAUDE.md rules out. -->
-      <div class="readout" id="readout">
-        <div><b id="readout-deficit"></b><span>stations, AM (6-9am) deficit baseline</span></div>
-        <div><b id="readout-equity"></b><span>of <span id="readout-equity-total"></span> within NYCHA/school threshold</span></div>
-        <div><b id="readout-subway-gap"></b><span>beyond the subway-gap threshold</span></div>
-        <div><b id="readout-filter"></b><span>current map filter</span></div>
-      </div>
+      <!-- Session 50: the four-tile readout that used to sit here moved to
+           the masthead as #ribbon (see <header id="topbar">). It was never
+           really a rail component -- it was the dashboard's headline
+           numbers, parked in the rail because that is where there was room.
+           Option A of the v2 layout gives them the full-width top strip
+           they were always acting like. The equity/subway-gap counts they
+           carried are unchanged and still on screen, in the Investigator's
+           own equity section, which is where a threshold-driven count
+           belongs (it moves with the thresholds, not with the map). -->
 
       <!-- "Worst now" -- real per-station ranking under whatever filter is
            currently active, doubling as the keyboard/screen-reader-
@@ -1283,6 +1359,7 @@ const state = {
   selectedId: null, // station id with an open detail panel, or null
   mode: 'historical', // 'historical' | 'live'
   liveStations: null, // station_id -> {capacity, bikes_available, docks_available, is_renting, is_returning}, from live_status.json
+  reliability: null, // observed station-unusable rate over the snapshot log's closed window, from reliability.json (may stay null -- optional layer)
   liveAsOf: null, // live_status.json's own last_updated (ISO string), never the viewer's local load time
   markerRadius: null, // set for real once the map's actual starting zoom is known, see markerRadiusForZoom()
   stationLayer: null, // the single L.layerGroup holding every station marker -- always on the map (Session 49: no more individual/cluster swap)
@@ -1423,28 +1500,251 @@ function renderEquityCounts() {
     `Beyond subway-gap threshold: ${counts.subwayGapCount.toLocaleString()} of ${total} stations`;
 }
 
-// Design critique task 03: a permanent readout at the top of the rail,
-// recomputed on every filter/hour/threshold change -- not a static
-// snapshot. Three of the four tiles are genuinely live; the fleet
-// baseline is real but intentionally not claimed as live (see the
-// markup's own comment on #readout for why).
+// ---------------------------------------------------------------------------
+// The metric ribbon (Session 50). Replaces the four-tile rail readout.
+//
+// What was wrong with the readout, measured rather than recalled: three of its
+// four tiles ignored the hour slider entirely. #readout-deficit was a fixed
+// 6-9am baseline out of fleet_scenarios.json; #readout-equity and
+// #readout-subway-gap answered to the equity thresholds only. The fourth,
+// #readout-filter, was not a metric at all -- it printed the slice you had
+// selected. So dragging this dashboard's primary control changed nothing in
+// its headline numbers except the caption describing where you had dragged it.
+//
+// Every tile below recomputes from the live (mode, hour, dayType, period)
+// slice. #readout-filter is gone rather than relocated: it existed only
+// because nothing else moved, and now that all three tiles do, a caption
+// restating the slider position is the duplication this masthead already
+// dropped once (see #title-meta's own note on the removed "Net flow at HH:MM"
+// line). Its misleading "current map filter" wording -- which read like the
+// equity filter this project has a standing rule against ever building -- goes
+// with it.
+// ---------------------------------------------------------------------------
+
+// Both extremes are failures, and they are different failures: 0 bikes means a
+// rider cannot start a trip, 0 docks means a rider cannot end one. Kept as one
+// predicate because the SLA treats "completely full or empty" as a single
+// condition.
+function isUnusableLive(live) {
+  return live.bikes_available === 0 || live.docks_available === 0;
+}
+
+// Adjacency radius for the SLA's "only if adjacent stations also unavailable"
+// clause. THIS NUMBER IS OURS, NOT THE CONTRACT'S: the Comptroller's summary
+// states the carve-out in words and never defines "adjacent" in metres. 500 m
+// is roughly a five-minute walk and sits between this project's two existing
+// equity distances (300 m NYCHA/school, 800 m subway gap), so it is at least
+// consistent with the rest of the file -- but it is an operationalisation, and
+// the tile says so on its face rather than implying a contract figure.
+const ADJACENCY_RADIUS_M = 500;
+
+// Great-circle distance. The equity join computes its distances in the
+// pipeline; this is the only place the dashboard needs station-to-station
+// distance itself, so it is a local helper rather than a shared utility.
+function metresBetween(aLat, aLng, bLat, bLng) {
+  const R = 6371000;
+  const toRad = Math.PI / 180;
+  const dLat = (bLat - aLat) * toRad;
+  const dLng = (bLng - aLng) * toRad;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(aLat * toRad) * Math.cos(bLat * toRad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// Memoised, and it has to be: the naive form is ~2,400^2 = 5.8M distance
+// computations. It is computed once because live_status.json is a single
+// frozen snapshot -- there is no live polling in this dashboard, so neither
+// the station positions nor their availability can change after load. If live
+// polling is ever added, this cache must be invalidated with the feed.
+let liveStandardCache = null;
+
+// "% meeting standard": the share of stations with usable live data that are
+// NOT in breach, where breach = this station unusable AND at least one station
+// within ADJACENCY_RADIUS_M also unusable. Stations without usable live data
+// (no crosswalk match, capacity 0, or offline) are excluded from BOTH sides --
+// the same QC rule the rest of this project applies to failure denominators.
+function computeLiveStandard() {
+  if (liveStandardCache) return liveStandardCache;
+
+  const usable = [];
+  for (const id in state.stations) {
+    if (!hasLiveData(id)) continue;
+    const station = state.stations[id];
+    usable.push({
+      lat: station.lat,
+      lng: station.lng,
+      unusable: isUnusableLive(state.liveStations[id]),
+    });
+  }
+
+  // Only unusable stations can put another station in breach, and they are a
+  // small minority (~15% of the fleet at any moment), so the inner loop runs
+  // over those alone rather than over all ~2,400. That is what keeps this a
+  // few hundred thousand distance checks instead of millions.
+  const unusable = usable.filter(entry => entry.unusable);
+
+  let inBreach = 0;
+  for (const station of unusable) {
+    for (const other of unusable) {
+      if (other === station) continue;
+      if (metresBetween(station.lat, station.lng, other.lat, other.lng) <= ADJACENCY_RADIUS_M) {
+        inBreach += 1;
+        break;
+      }
+    }
+  }
+
+  liveStandardCache = {
+    total: usable.length,
+    nUnusable: unusable.length,
+    inBreach,
+    // Guarded: a live feed that resolved to zero usable stations would
+    // otherwise print NaN% as though it were a measurement.
+    meetingRate: usable.length > 0 ? (usable.length - inBreach) / usable.length : null,
+  };
+  return liveStandardCache;
+}
+
+// Median fill and the two extreme counts, over the same usable-station set.
+// Median rather than mean: fill % is bounded at both ends and piles up at 0
+// and 100, so the mean is dragged around by exactly the stations the hero tile
+// is already reporting separately.
+function computeFillDistribution() {
+  const fills = [];
+  let nEmpty = 0;
+  let nFull = 0;
+  for (const id in state.stations) {
+    if (!hasLiveData(id)) continue;
+    const live = state.liveStations[id];
+    fills.push((live.bikes_available / live.capacity) * 100);
+    if (live.bikes_available === 0) nEmpty += 1;
+    if (live.docks_available === 0) nFull += 1;
+  }
+  if (fills.length === 0) return null;
+  fills.sort((a, b) => a - b);
+  const mid = Math.floor(fills.length / 2);
+  const median = fills.length % 2 === 0 ? (fills[mid - 1] + fills[mid]) / 2 : fills[mid];
+  return { median, nEmpty, nFull, total: fills.length };
+}
+
+// The historical slice, computed once and shared by all three historical
+// tiles -- they are three views of one traversal, not three traversals.
+// `value` is net bikes gained/lost at that station in that hour on a typical
+// day (flows.py normalises by distinct dates per bucket), so the sums below
+// are bikes, not trips.
+function computeSliceTotals() {
+  let outOfPlace = 0;
+  let bikesToMove = 0;
+  let nNeedBikes = 0;
+  let nNeedDocks = 0;
+  for (const id in state.stations) {
+    const curve = curveForPeriod(state.stations[id], state.period, state.dayType);
+    if (curve === null) continue;
+    const value = curve[state.currentHour] * weatherMultiplierFor(id);
+    outOfPlace += Math.abs(value);
+    if (value < 0) {
+      nNeedBikes += 1;
+      bikesToMove += -value;
+    } else if (value > 0) {
+      nNeedDocks += 1;
+    }
+  }
+  return { outOfPlace, bikesToMove, nNeedBikes, nNeedDocks };
+}
+
+const RIBBON_EM_DASH = '—';
+
+function setRibbonTile(index, value, labelHtml, title) {
+  document.getElementById(`ribbon-value-${index}`).textContent = value;
+  document.getElementById(`ribbon-label-${index}`).innerHTML = labelHtml;
+  // The full sentence lives in the tooltip; the visible label has one line to
+  // work with. Set on the tile, not the label, so the whole target is hoverable.
+  document.getElementById(`ribbon-tile-${index}`).title = title;
+}
+
+function renderRibbon() {
+  if (!state.stations) return;
+
+  if (state.mode === 'live') {
+    const standard = computeLiveStandard();
+    setRibbonTile(
+      1,
+      standard.meetingRate === null ? RIBBON_EM_DASH : `${(standard.meetingRate * 100).toFixed(1)}%`,
+      'meeting availability standard',
+      `${(standard.total - standard.inBreach).toLocaleString()} of ${standard.total.toLocaleString()} stations with usable live data are not in breach. `
+        + `Breach = completely full or empty with another such station within ${ADJACENCY_RADIUS_M} m, following the contract's "adjacent stations also unavailable" carve-out. `
+        + `The ${ADJACENCY_RADIUS_M} m radius is this project's operationalisation, not a contract figure.`
+    );
+
+    const fill = computeFillDistribution();
+    setRibbonTile(
+      2,
+      fill === null ? RIBBON_EM_DASH : `${fill.median.toFixed(0)}%`,
+      fill === null ? 'no usable live data' : `median fill <span class="ribbon__window">${fill.nEmpty} empty / ${fill.nFull} full</span>`,
+      fill === null
+        ? 'No stations currently report usable live data.'
+        : `Median dock fill across ${fill.total.toLocaleString()} stations with usable live data. ${fill.nEmpty} are completely empty, ${fill.nFull} completely full.`
+    );
+
+    // The one tile that is not a "now" reading. It is a rate over a closed
+    // historical window, so the window is stamped on its face -- sitting
+    // beside two live tiles, an unlabelled percentage would read as current.
+    const reliability = state.reliability;
+    if (reliability) {
+      const window = reliability.window;
+      setRibbonTile(
+        3,
+        `${(reliability.system.unusable_rate * 100).toFixed(1)}%`,
+        `observed unusable <span class="ribbon__window">${formatWindowRange(window)}</span>`,
+        `${reliability.system.n_unusable.toLocaleString()} of ${reliability.system.n_observations.toLocaleString()} station-observations had 0 bikes or 0 docks, across ${window.n_snapshots} snapshots. `
+          + `Offline observations excluded. This is a frequency, not outage hours: the log's median gap is ${window.median_gap_minutes} min, which cannot resolve the contract's 60/120-minute breach thresholds.`
+      );
+    } else {
+      // Same optional/non-fatal treatment as every other additive analysis
+      // layer -- reliability.json does not exist until pipeline/reliability.py
+      // has been run once, and the ribbon must still render without it.
+      setRibbonTile(3, RIBBON_EM_DASH, 'observed unusable rate', 'Not available -- run pipeline/reliability.py to generate data/reliability.json.');
+    }
+    return;
+  }
+
+  const totals = computeSliceTotals();
+  setRibbonTile(
+    1,
+    Math.round(totals.outOfPlace).toLocaleString(),
+    'bikes out of place this hour',
+    `Total absolute net flow across all stations at ${formatHourLabel(state.currentHour)}, ${state.dayType}, ${periodOptionLabel(state.period)} `
+      + `${RIBBON_EM_DASH} the size of the imbalance the system has to absorb in this hour on a typical day.`
+  );
+  setRibbonTile(
+    2,
+    `${totals.nNeedBikes.toLocaleString()} / ${totals.nNeedDocks.toLocaleString()}`,
+    'stations need bikes / need docks',
+    `${totals.nNeedBikes.toLocaleString()} stations are draining (deficit risk, no bikes) and ${totals.nNeedDocks.toLocaleString()} are filling (surplus risk, no docks) in this hour. `
+      + 'Breadth of the problem, as against tile 1’s volume.'
+  );
+  setRibbonTile(
+    3,
+    Math.round(totals.bikesToMove).toLocaleString(),
+    'bikes to move into deficit stations',
+    `Bikes that would have to arrive at draining stations to bring them level in this hour ${RIBBON_EM_DASH} the truck-side half of tile 1. `
+      + 'Not an optimised plan: no depots, no travel times, no vehicle capacities.'
+  );
+}
+
+// "Jul 13–Jul 26" from the reliability window's ISO bounds. Deliberately
+// string-sliced rather than run through Date/toLocaleDateString, for the same
+// reason formatAsOf() is: a locale- or timezone-dependent label would not be
+// deterministic to test.
+const RIBBON_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatWindowRange(window) {
+  const label = iso => `${RIBBON_MONTHS[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}`;
+  return `${label(window.start)}–${label(window.end)}`;
+}
+
 function renderReadout() {
-  if (state.fleetScenarios) {
-    const baseline = state.fleetScenarios.scenarios['1'];
-    document.getElementById('readout-deficit').textContent = baseline.n_deficit_flagged.toLocaleString();
-  }
-
-  if (state.stations) {
-    const counts = computeEquityCounts(state.stations, state.investigatorState.equityThresholds);
-    document.getElementById('readout-equity').textContent = counts.nychaOrSchoolCount.toLocaleString();
-    document.getElementById('readout-equity-total').textContent = counts.total.toLocaleString();
-    document.getElementById('readout-subway-gap').textContent = counts.subwayGapCount.toLocaleString();
-  }
-
-  document.getElementById('readout-filter').textContent = state.mode === 'live'
-    ? 'Live docks'
-    : `${formatHourLabel(state.currentHour)}, ${state.dayType}, ${periodOptionLabel(state.period)}`;
-
+  renderRibbon();
   renderWorstNow();
 }
 
@@ -1560,7 +1860,11 @@ function setEquityThreshold(key, value) {
   // guarded, since the fleet simulator may not have loaded at all.
   if (state.fleetScenarios) renderFleetStats(state.investigatorState.fleetSize);
   renderDiffBar();
-  renderReadout(); // the readout's equity tile depends on these same thresholds
+  // Session 50: this used to call renderReadout(), because the old rail
+  // readout carried two threshold-driven equity tiles. The ribbon that
+  // replaced it does not -- those counts now live only in renderEquityCounts()
+  // above, which this function already calls. Dropping the call also drops a
+  // full 2,516-station recompute from every tick of an equity slider drag.
 }
 
 // Real intersection between what the fleet simulator actually routes and
@@ -2926,6 +3230,14 @@ const scenarioPresetsReady = fetchJSON('data/scenario_presets.json').catch(() =>
 // layer above. Won't exist until that script has been run at least once.
 const modelPerformanceReady = fetchJSON('data/model_performance.json').catch(() => null);
 
+// reliability.json (pipeline/reliability.py, Session 50) -- the observed
+// station-unusable RATE over the GBFS snapshot log's closed window, feeding
+// the live ribbon's third tile. Same optional/non-fatal treatment as every
+// other analysis layer above: won't exist until that script has been run
+// once, and without it the tile shows an em dash rather than the ribbon
+// failing to render.
+const reliabilityReady = fetchJSON('data/reliability.json').catch(() => null);
+
 // flows.json and live_status.json now fail INDEPENDENTLY -- a live-feed
 // hiccup must not take down real historical data, and a historical-data
 // problem must not be masked by fabricating live counts under real
@@ -2941,8 +3253,8 @@ const liveReady = fetchJSON('data/live_status.json')
   .then(payload => ({ payload, ok: true }))
   .catch(error => ({ payload: null, ok: false, error }));
 
-const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady])
-  .then(([flowsResult, liveResult, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload]) => {
+const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady, reliabilityReady])
+  .then(([flowsResult, liveResult, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload, reliabilityPayload]) => {
     state.stations = flowsResult.payload.stations;
     state.equityJoinMeta = flowsResult.payload.equity_join || null;
     state.liveAvailable = liveResult.ok;
@@ -3271,6 +3583,11 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     state.modelPerformance = modelPerformancePayload;
     renderModelPerformance(state.modelPerformance);
 
+    // No render call here: the ribbon's own renderReadout() pass (below,
+    // via the same hook every hour/mode change already goes through) reads
+    // state.reliability directly, so there is one render path, not two.
+    state.reliability = reliabilityPayload;
+
     renderEquityCounts(); // populate the three count lines at the default 300m/800m thresholds before any slider interaction
 
     // Same rAF-coalescing pattern as the hour slider above -- 2,347
@@ -3347,6 +3664,8 @@ if (typeof globalThis !== 'undefined') {
     renderLegendScale, overplotAlphaForZoom, nearestStationWithin, CLICK_TOLERANCE_PX, markerStyleFor,
     renderModelPerformance, formatSignificance, computeEquityCounts, renderEquityCounts, setEquityThreshold,
     renderFleetStats, computeServicedEquityOverlap, setFleetSize,
+    renderRibbon, computeSliceTotals, computeLiveStandard, computeFillDistribution,
+    isUnusableLive, metresBetween, formatWindowRange, ADJACENCY_RADIUS_M,
     fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
     isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,
     defaultInvestigatorState, investigatorStateDiffersFromDefault, renderDiffBar, renderScenarioRow, applyInvestigatorState,

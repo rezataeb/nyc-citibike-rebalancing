@@ -109,6 +109,38 @@ const FAKE_LIVE = {
   },
 };
 
+// Mirrors data/reliability.json's real shape (pipeline/reliability.py). The
+// rates are deliberately round numbers unlike the real 12.2%, so a test can
+// tell a computed value apart from a hardcoded one at a glance.
+const FAKE_RELIABILITY = {
+  window: {
+    start: '2026-07-13T18:22:42+00:00',
+    end: '2026-07-26T15:07:26+00:00',
+    days: 12,
+    n_snapshots: 190,
+    median_gap_minutes: 85.3,
+    max_gap_minutes: 236.0,
+  },
+  system: {
+    unusable_rate: 0.25,
+    n_observations: 4000,
+    n_unusable: 1000,
+    n_empty: 600,
+    n_full: 400,
+    n_offline_excluded: 111,
+  },
+  per_station_summary: {
+    n_stations: 3, n_rankable: 3, min_observations: 20,
+    median_rate: 0.2, max_rate: 0.4,
+  },
+  stations: {
+    A: { unusable_rate: 0.4, n_observations: 100, n_unusable: 40 },
+    B: { unusable_rate: 0.2, n_observations: 100, n_unusable: 20 },
+    C: { unusable_rate: 0.1, n_observations: 100, n_unusable: 10 },
+  },
+  caveat: 'Test fixture caveat.',
+};
+
 // Mirrors data/fleet_scenarios.json's real shape. Since Session 49 removed
 // the drawn route, only the per-scenario COUNTS are read by the dashboard
 // (renderFleetStats); the per-stop trucks[] array is kept because the real
@@ -183,13 +215,14 @@ function makeElementStub(id) {
 }
 
 // options:
-//   flows / live / fleetScenarios -- payload, or null to make that fetch 404
+//   flows / live / fleetScenarios / reliability -- payload, or null to make that fetch 404
 //   startZoom -- initial map zoom (default 11, the dashboard's own city-wide default)
 function buildSandbox(options = {}) {
   const {
     flows = FAKE_FLOWS,
     live = FAKE_LIVE,
     fleetScenarios = null, // default off: most tests don't need it, and 404ing it exercises graceful degradation
+    reliability = null,    // same -- default off, so every existing test keeps exercising the ribbon's missing-file path
     startZoom = 11,
   } = options;
 
@@ -315,6 +348,7 @@ function buildSandbox(options = {}) {
       if (url.includes('flows')) return flows ? found(flows) : notFound();
       if (url.includes('live_status')) return live ? found(live) : notFound();
       if (url.includes('fleet_scenarios')) return fleetScenarios ? found(fleetScenarios) : notFound();
+      if (url.includes('reliability')) return reliability ? found(reliability) : notFound();
       // Every other optional file 404s, exercising dashboard2's own
       // graceful-degradation paths on each load.
       return notFound();
@@ -380,4 +414,5 @@ module.exports = {
   FAKE_FLOWS,
   FAKE_LIVE,
   FAKE_FLEET_SCENARIOS,
+  FAKE_RELIABILITY,
 };

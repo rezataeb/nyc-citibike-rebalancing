@@ -80,13 +80,10 @@ async function testLiveModeSwapsEveryTile() {
   // All four tiles must change. All three fake stations have usable live data. A is empty (0 bikes), B is
   // full (0 docks), C is neither -- but A and B are ~5 km apart, far beyond
   // the 500 m adjacency radius, so NEITHER is in breach.
-  assert.strictEqual(value(sandbox, 1), '0', 'no unusable station has an unusable neighbour within 500 m');
-  assert.ok(label(sandbox, 1).includes('100.0% meeting'), 'the compliance % survives as the hero caption');
-
+  assert.strictEqual(value(sandbox, 1), '100.0%', 'system compliance: nothing is in double-outage');
   assert.strictEqual(value(sandbox, 2), '1', 'one station empty');
   assert.strictEqual(value(sandbox, 3), '1', 'one station full');
-  // Median fill across A (0/30 = 0%), B (25/25 = 100%), C (10/20 = 50%) is 50%.
-  assert.strictEqual(value(sandbox, 4), '50%', 'median fill');
+  assert.strictEqual(value(sandbox, 4), '0', 'no unusable station has an unusable neighbour within 500 m');
 
   console.log('  live mode swaps every tile');
 }
@@ -108,8 +105,8 @@ async function testAdjacencyRuleActuallyBites() {
   assert.strictEqual(standard.total, 3, 'three stations have usable live data');
   assert.strictEqual(standard.nUnusable, 2, 'A empty and B full are both unusable');
   assert.strictEqual(standard.inBreach, 2, 'adjacent unusable pair puts both in breach');
-  assert.strictEqual(value(sandbox, 1), '2', 'hero reports the double-outage count');
-  assert.ok(label(sandbox, 1).includes('33.3% meeting'), 'and the compliance % as caption');
+  assert.strictEqual(value(sandbox, 4), '2', 'double-outage tile reports the count');
+  assert.strictEqual(value(sandbox, 1), '33.3%', 'and compliance falls to one of three');
 
   console.log('  adjacency rule changes the result -- it is not decorative');
 }
@@ -147,8 +144,8 @@ async function testMissingReliabilityDegradesGracefully() {
   );
   // Every ribbon tile is unaffected: one missing optional file must not take
   // the rest of the dashboard down with it.
-  assert.strictEqual(value(sandbox, 1), '0', 'ribbon still renders without reliability.json');
-  assert.strictEqual(value(sandbox, 4), '50%', 'and so does the last tile');
+  assert.strictEqual(value(sandbox, 1), '100.0%', 'ribbon still renders without reliability.json');
+  assert.strictEqual(value(sandbox, 4), '0', 'and so does the last tile');
 
   console.log('  missing reliability.json hides one line, nothing else');
 }
@@ -359,11 +356,157 @@ async function testHistoricalSharesUseTheCoverageDenominator() {
   console.log('  historical shares use the coverage denominator, bikes tiles stay counts');
 }
 
+async function testStatusLivesInADotNotInColouredNumerals() {
+  // The session rule: colour identifies status in a mark beside the text,
+  // never in the colour of the text itself. A coloured numeral is invisible
+  // to anyone who cannot separate the hues, and it makes a measurement look
+  // like a status word.
+  const { dash, sandbox } = await loadDashboard2();
+  dash.setMode('live');
+
+  const dot = i => sandbox._elements[`ribbon-dot-${i}`];
+  for (const i of [1, 2, 3, 4]) {
+    assert.ok(dot(i).classList.contains('shown'), `tile ${i} shows a status dot in live mode`);
+  }
+  // Red for "cannot rent", blue for "cannot return" -- the same two colours
+  // the map uses, so the strip and the dots on the map agree.
+  assert.strictEqual(dot(2).style.background, 'rgba(227, 73, 72, 1)', 'empty = deficit red');
+  assert.strictEqual(dot(3).style.background, 'rgba(42, 120, 214, 1)', 'full = surplus blue');
+  assert.strictEqual(dot(1).style.background, dot(4).style.background,
+    'compliance and double-outage share a dark dot -- the dot marks status, not identity');
+
+  // The numbers themselves carry no colour at all.
+  for (const i of [1, 2, 3, 4]) {
+    assert.ok(!sandbox._elements[`ribbon-value-${i}`].style.color,
+      `tile ${i}'s numeral must not be coloured`);
+  }
+
+  console.log('  status lives in a dot; numerals stay uncoloured');
+}
+
+async function testHistoricalTilesCarryNoDots() {
+  // The KPI strip is scoped to live mode. Historical tiles are a different
+  // set of quantities and are deliberately left without status dots.
+  const { dash, sandbox } = await loadDashboard2();
+  dash.renderHour(8);
+  for (const i of [1, 2, 3, 4]) {
+    assert.ok(!sandbox._elements[`ribbon-dot-${i}`].classList.contains('shown'),
+      `historical tile ${i} shows no dot`);
+  }
+  console.log('  historical tiles carry no dots (KPI strip is live-only)');
+}
+
+async function testHoverCardIsModeAwareAndNeverInventsOccupancy() {
+  // Live mode has real occupancy from GBFS; historical mode does NOT --
+  // flows.json carries no capacity and no dock counts, only net flow. The card
+  // must report what each mode actually knows rather than dressing a
+  // climatology figure up as a dock reading.
+  const { dash } = await loadDashboard2();
+
+  dash.renderHour(8);
+  const hist = dash.stationHoverHtml('A');
+  assert.ok(hist.includes('Station A'), 'names the station');
+  assert.ok(/bikes\/day/.test(hist), 'historical reports net flow, its real quantity');
+  assert.ok(!/% full|you can take|free to return/.test(hist),
+    'and never claims a fill % or dock count it cannot know');
+
+  dash.setMode('live');
+  const live = dash.stationHoverHtml('A');
+  // FAKE_LIVE station A: 0 bikes, 30 open docks, capacity 30.
+  assert.ok(live.includes('Station A'), 'names the station');
+  assert.ok(live.includes('0% full'), 'fill percentage');
+  assert.ok(live.includes('0 of 30 docks have a bike you can take'), 'the two numbers that PRODUCE the percentage');
+  assert.ok(live.includes('30 docks free to return to'), 'free docks stated separately');
+
+  console.log('  hover card is mode-aware and invents no occupancy');
+}
+
+async function testHoverPercentageIsExplainedByTheNumbersBesideIt() {
+  // The first version read "7 bikes / 5 docks - 58% full - 12 docks total",
+  // inviting the reader to check 7 + 5 = 12. Against the real feed that holds
+  // for only 9.5% of stations -- capacity is nominal, while bikes and open
+  // docks exclude disabled bikes and out-of-service docks. Station B is built
+  // so the two would disagree: 25 bikes, 0 open docks, capacity 25 would sum
+  // correctly, so it is given a deliberately inconsistent reading here.
+  const live = JSON.parse(JSON.stringify(FAKE_LIVE));
+  live.stations.B = { capacity: 40, bikes_available: 10, docks_available: 12, is_renting: 1, is_returning: 1 };
+
+  const { dash } = await loadDashboard2({ live });
+  dash.setMode('live');
+  const html = dash.stationHoverHtml('B');
+
+  // 10 / 40 = 25%. The percentage line names 10 and 40 and nothing else, so
+  // the arithmetic a reader can check is arithmetic that is actually true.
+  assert.ok(html.includes('25% full'), 'percentage');
+  assert.ok(html.includes('10 of 40 docks have a bike you can take'), 'and its own numerator and denominator');
+  // 10 + 12 != 40, so those two must never appear in one line implying a sum.
+  assert.ok(!/10 bikes \/ 12 docks/.test(html), 'no implied bikes + docks = capacity');
+
+  console.log('  hover percentage is explained by the numbers printed beside it');
+}
+
+async function testHoverCardEscapesStationNames() {
+  // Real station names contain ampersands ("W 43 St & 10 Ave"). The card is
+  // HTML now, so an unescaped name would inject markup into the tooltip.
+  const flows = JSON.parse(JSON.stringify(FAKE_FLOWS));
+  flows.stations.A.name = 'W 43 St & 10 Ave <script>';
+  const { dash } = await loadDashboard2({ flows });
+  const html = dash.stationHoverHtml('A');
+
+  assert.ok(html.includes('W 43 St &amp; 10 Ave'), 'ampersand escaped');
+  assert.ok(html.includes('&lt;script&gt;'), 'angle brackets escaped');
+  assert.ok(!/<script>/.test(html), 'no raw markup from station data');
+
+  console.log('  hover card escapes station names');
+}
+
+async function testHoverCardDegradesForStationsWithoutData() {
+  const live = JSON.parse(JSON.stringify(FAKE_LIVE));
+  delete live.stations.C;
+  const { dash } = await loadDashboard2({ live });
+  dash.setMode('live');
+
+  const html = dash.stationHoverHtml('C');
+  assert.ok(/No live data/.test(html), 'says there is no reading rather than computing one');
+  assert.ok(!/NaN|undefined/.test(html), 'and never leaks NaN/undefined into the UI');
+
+  console.log('  hover card degrades cleanly where there is no reading');
+}
+
+
+async function testHoverSaysRENTABLEBikesNotJustBikes() {
+  // "N of M docks hold a bike" was false, not merely loose. Station A here has
+  // 4 rentable bikes in a 12-dock station -- but seven more docks hold BROKEN
+  // bikes (the real Shore Rd & 4 Ave shape). Eleven of twelve docks hold a
+  // bike; only four hold one anyone can rent, and num_bikes_available counts
+  // the latter. The label has to say which.
+  const live = JSON.parse(JSON.stringify(FAKE_LIVE));
+  live.stations.A = { capacity: 12, bikes_available: 4, docks_available: 1, is_renting: 1, is_returning: 1 };
+
+  const { dash } = await loadDashboard2({ live });
+  dash.setMode('live');
+  const html = dash.stationHoverHtml('A');
+
+  assert.ok(html.includes('4 of 12 docks have a bike you can take'), 'says rentable, not merely present');
+  assert.ok(!/docks hold a bike/.test(html), 'the false phrasing must not come back');
+  assert.ok(html.includes('33% full'), '4/12 -- the denominator is capacity, stated as such');
+  assert.ok(html.includes('1 dock free to return to'), 'singular for one, and free means empty AND working');
+
+  console.log('  hover says rentable bikes, not merely bikes present');
+}
+
 (async () => {
   await testHistoricalTilesTrackTheHourSlider();
   await testHistoricalTilesTrackDayType();
   await testHistoricalSharesUseTheCoverageDenominator();
   await testLiveModeSwapsEveryTile();
+  await testStatusLivesInADotNotInColouredNumerals();
+  await testHistoricalTilesCarryNoDots();
+  await testHoverCardIsModeAwareAndNeverInventsOccupancy();
+  await testHoverPercentageIsExplainedByTheNumbersBesideIt();
+  await testHoverSaysRENTABLEBikesNotJustBikes();
+  await testHoverCardEscapesStationNames();
+  await testHoverCardDegradesForStationsWithoutData();
   await testDistributionBinsEveryStationTheMapDraws();
   await testDistributionSwitchesQuantityWithMode();
   await testDistributionStatesWhatItExcluded();

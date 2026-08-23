@@ -20,44 +20,53 @@ const { loadDashboard2, readDashboard2 } = require('./dashboard_harness');
 
 const hidden = (sandbox, id) => sandbox._elements[id].classList.contains('hidden');
 
-// This card's visibility has flipped twice as the mode toggle moved in (S52)
-// and back out to the masthead (S53). It holds only #live-as-of again, so it
-// is live-mode-only. The invariant that has held throughout, and is the real
-// subject here: the state is established in JS by setMode(), never by a class
-// sitting in the markup.
-async function testFloatingCardIsLiveModeOnly() {
-  const { dash, sandbox } = await loadDashboard2();
-  assert.ok(hidden(sandbox, 'map-controls-bar'), 'empty in historical mode -- hidden on load');
-
-  dash.setMode('live');
-  assert.ok(!hidden(sandbox, 'map-controls-bar'), 'carries the live "as of" stamp');
-  dash.setMode('historical');
-  assert.ok(hidden(sandbox, 'map-controls-bar'), 'hidden again on the way back');
+// Session 60: #map-controls-bar is gone. It had been emptied by attrition --
+// day toggle, period dropdown, view-mode toggle and Show-route button all
+// removed or relocated across Sessions 49/51/52/55 -- until its only content
+// was the "Live as of" stamp, which now lives in #timebar with historical
+// mode's controls. The dock itself is always visible; only its contents swap.
+function testTheEmptiedMapCardIsGoneEntirely() {
+  const html = readDashboard2();
+  assert.ok(!html.includes('<div id="map-controls-bar">'), 'the container is gone from the markup');
+  assert.ok(!/^\s*#map-controls-bar \{/m.test(html), 'and its CSS rules went with it');
 }
 
-async function testTimebarIsHistoricalOnly() {
+async function testDockIsAlwaysVisibleAndSwapsContents() {
   const { dash, sandbox } = await loadDashboard2();
-  assert.ok(!hidden(sandbox, 'timebar'), '#timebar is the historical-mode control dock');
+
+  // Historical: hour controls shown, live stamp hidden.
+  assert.ok(!hidden(sandbox, 'timebar'), 'the dock is visible on load');
+  assert.ok(!hidden(sandbox, 'historical-controls'), 'slice controls shown');
+  assert.ok(!hidden(sandbox, 'timebar-scrub'), 'scrubber shown');
+  assert.ok(hidden(sandbox, 'live-as-of'), 'live stamp hidden');
+
   dash.setMode('live');
-  assert.ok(hidden(sandbox, 'timebar'), 'no hour concept in live mode');
+  // Live: the dock stays, its contents invert. It must NOT disappear -- that
+  // is what used to send the live stamp to a separate card in another corner.
+  assert.ok(!hidden(sandbox, 'timebar'), 'the dock is still visible in live mode');
+  assert.ok(hidden(sandbox, 'historical-controls'), 'slice controls hidden -- no hour concept in live');
+  assert.ok(hidden(sandbox, 'timebar-scrub'), 'scrubber hidden');
+  assert.ok(hidden(sandbox, 'timebar-ticks'), 'tick scale hidden');
+  assert.ok(!hidden(sandbox, 'live-as-of'), 'live stamp shown');
+
   dash.setMode('historical');
-  assert.ok(!hidden(sandbox, 'timebar'), 'switching back restores the dock');
+  assert.ok(!hidden(sandbox, 'timebar-scrub'), 'and back again');
+  assert.ok(hidden(sandbox, 'live-as-of'), 'live stamp hidden again');
 }
 
-// The toggle moved out of the masthead into the map card (design "D"), and its
-// labels are title case. Both are asserted against raw HTML: containment and
-// literal text are markup facts the DOM stub cannot speak to.
-// Session 53: title, the four metric cards and the mode toggle share ONE
-// masthead row. Labels stay title case wherever the toggle lives.
-function testMastheadHoldsTitleRibbonAndToggleInOneRow() {
+// Session 58/59 order: identity, then mode, then the numbers that mode
+// produces. The four cards carry different metrics per mode, so the toggle has
+// to be readable before them -- and it sits under the title, inside the title
+// block, rather than off in the masthead's far corner.
+function testMastheadHoldsTitleToggleAndRibbonInReadingOrder() {
   const html = readDashboard2();
   const header = html.slice(html.indexOf('<header id="topbar">'), html.indexOf('</header>'));
 
-  for (const id of ['title', 'ribbon', 'mode-toggle']) {
+  for (const id of ['title', 'mode-toggle', 'ribbon']) {
     assert.ok(header.includes(`id="${id}"`), `#${id} belongs in the masthead row`);
   }
-  assert.ok(header.indexOf('id="ribbon"') > header.indexOf('id="title"'), 'ribbon sits after the title');
-  assert.ok(header.indexOf('id="mode-toggle"') > header.indexOf('id="ribbon"'), 'toggle sits after the ribbon');
+  assert.ok(header.indexOf('id="mode-toggle"') > header.indexOf('id="title"'), 'toggle sits after the title');
+  assert.ok(header.indexOf('id="ribbon"') > header.indexOf('id="mode-toggle"'), 'ribbon sits after the toggle');
   assert.ok(!html.includes('id="ribbon-strip"'), 'the separate full-width strip is gone');
 
   assert.ok(/>Historical Flow</.test(html), 'title case: "Historical Flow"');
@@ -71,18 +80,14 @@ async function testSliceControlsLiveInsideTheTimebar() {
   const html = readDashboard2();
   const timebar = html.slice(html.indexOf('<div id="timebar">'), html.indexOf('<!-- Legend is the FIRST child'));
 
-  for (const id of ['historical-controls', 'day-toggle', 'period-select', 'hour-play-btn', 'hour-slider']) {
+  for (const id of ['historical-controls', 'day-toggle', 'period-select', 'hour-play-btn', 'hour-slider', 'live-as-of']) {
     assert.ok(timebar.includes(`id="${id}"`), `#${id} should now live inside #timebar`);
   }
   // Sliced to the card's own span rather than matched with a lazy regex from
   // its opening tag: #map-controls-bar precedes #timebar in the document, so
   // [\s\S]*? would run straight past the card and match the control's NEW
   // home, passing whether or not the move happened.
-  const card = html.slice(html.indexOf('<div id="map-controls-bar">'), html.indexOf('<div id="timebar">'));
-  for (const id of ['period-select', 'day-toggle', 'historical-controls']) {
-    assert.ok(!card.includes(`id="${id}"`), `#${id} should have left the floating map-controls card`);
-  }
-  assert.ok(card.includes('id="live-as-of"'), 'the card still carries the live "as of" stamp');
+  assert.ok(timebar.includes('id="live-as-of"'), 'the live stamp shares the dock now');
 }
 
 function testDayTypeButtonsUseWholeWords() {
@@ -100,7 +105,12 @@ async function testPeriodDropdownKeepsEveryPeriodTheDataHas() {
   // wearing a styling change's clothes.
   const { sandbox } = await loadDashboard2();
   const select = sandbox._elements['period-select'];
-  const values = select._children.map(opt => opt.value); // harness stub records appends in _children
+  // Options live inside <optgroup>s since Session 58, so this walks one level
+  // deeper. Flattening here rather than asserting the grouping itself: the
+  // point of the test is that no period was DROPPED to tidy the list, which
+  // is a claim about the full set regardless of how it is grouped.
+  const values = select._children.flatMap(child => (child._children.length ? child._children : [child]))
+    .map(opt => opt.value);
 
   assert.ok(values.includes('all'), 'all-period average is offered');
   for (const season of ['winter', 'spring', 'summer', 'fall']) {
@@ -112,18 +122,21 @@ async function testPeriodDropdownKeepsEveryPeriodTheDataHas() {
   assert.ok(values.includes('month:2026-05'), 'every declared month is offered, not a two-chip subset');
 }
 
-async function testModelNoteReportsRealMeasuredError() {
+async function testClimatologyNoteReportsRealMeasuredError() {
   const { dash, sandbox } = await loadDashboard2();
 
+  // Session 57 moved this out of the timebar and into the Model Performance
+  // disclosure -- it is a statement about model accuracy, so it belongs with
+  // the other accuracy numbers rather than as small print under a control.
   // No model_performance.json (the harness 404s it): the note must be hidden
   // rather than showing an accuracy claim with no measurement behind it.
-  assert.ok(hidden(sandbox, 'timebar-model-note'), 'no measurement -> no note');
+  assert.ok(hidden(sandbox, 'model-climatology-note'), 'no measurement -> no note');
 
   dash.getState().modelPerformance = { aggregate: { naive_mean_mae: 1.9538937401113634 } };
-  dash.renderTimebarModelNote();
+  dash.renderClimatologyNote();
 
-  const note = sandbox._elements['timebar-model-note'];
-  assert.ok(!hidden(sandbox, 'timebar-model-note'), 'note appears once there is a real figure');
+  const note = sandbox._elements['model-climatology-note'];
+  assert.ok(!hidden(sandbox, 'model-climatology-note'), 'note appears once there is a real figure');
   assert.ok(note.textContent.includes('1.95'), 'prints the measured walk-forward MAE');
   assert.ok(note.textContent.includes('bikes/day'), 'states the unit the curve is actually in');
   assert.ok(
@@ -140,6 +153,8 @@ async function testTickScaleSpansTheRealSliderRange() {
   }
   // The slider is 0..23 inclusive. A scale ending at 24:00 would misrepresent it.
   assert.ok(!ticks.includes('24:00'), 'scale ends at 23:00, matching the slider max');
+  const timebar = html.slice(html.indexOf('<div id="timebar">'), html.indexOf('<!-- Legend is the FIRST child'));
+  assert.ok(!timebar.includes('model-climatology-note'), 'the climatology note has left the timebar');
   assert.ok(/id="hour-slider"[^>]*max="23"/.test(html), 'slider max is still 23');
 }
 
@@ -166,15 +181,54 @@ function testHiddenUtilityOutranksIdLevelDisplayRules() {
   );
 }
 
+async function testPeriodOptionsAreGroupedWithoutLosingAny() {
+  // Grouping is labelling, not filtering. The count of real periods offered
+  // must equal what flows.json's granularity block declares, plus 'all'.
+  const { sandbox } = await loadDashboard2();
+  const select = sandbox._elements['period-select'];
+
+  const groups = select._children.filter(child => child._children.length);
+  assert.deepStrictEqual(groups.map(g => g.label), ['Seasons', 'Months'], 'two labelled groups');
+
+  const flat = select._children.flatMap(c => (c._children.length ? c._children : [c]));
+  // FAKE_FLOWS declares 1 season and 2 months, plus the all-period option.
+  assert.strictEqual(flat.length, 1 + 1 + 2, 'every declared period is still offered');
+  assert.strictEqual(flat[0].value, 'all', 'all-period stays first and ungrouped');
+  assert.strictEqual(flat[0].textContent, 'All months (average)', 'renamed from "All-period average"');
+
+  console.log('  period options are grouped, and none were dropped');
+}
+
+async function testLegendMidTickMatchesTheScaleItSitsOn() {
+  // The middle tick was the literal string "0" hardcoded in markup and never
+  // touched by renderLegendScale(), so live mode read "0% full / 0 / 100% full"
+  // -- a bare zero between two percentages, meaning nothing. It is also the
+  // exact shape of bug the standing JS-defaults rule exists to prevent.
+  const { dash, sandbox } = await loadDashboard2();
+  dash.renderHour(8);
+  assert.strictEqual(sandbox._elements['legend-tick-mid'].textContent, '0',
+    'net flow midpoint is a real zero: as many bikes arriving as leaving');
+
+  dash.setMode('live');
+  assert.strictEqual(sandbox._elements['legend-tick-mid'].textContent, '50%',
+    'a fill scale running 0%..100% has its midpoint at 50%, not at 0');
+
+  const html = readDashboard2();
+  assert.ok(/id="legend-tick-mid"><\/span>/.test(html),
+    'and the markup ships it empty -- the value is set in JS, never implied');
+}
+
 (async () => {
-  await testFloatingCardIsLiveModeOnly();
-  await testTimebarIsHistoricalOnly();
-  testMastheadHoldsTitleRibbonAndToggleInOneRow();
+  testTheEmptiedMapCardIsGoneEntirely();
+  await testDockIsAlwaysVisibleAndSwapsContents();
+  testMastheadHoldsTitleToggleAndRibbonInReadingOrder();
   await testSliceControlsLiveInsideTheTimebar();
   testDayTypeButtonsUseWholeWords();
   await testPeriodDropdownKeepsEveryPeriodTheDataHas();
-  await testModelNoteReportsRealMeasuredError();
+  await testPeriodOptionsAreGroupedWithoutLosingAny();
+  await testClimatologyNoteReportsRealMeasuredError();
   await testTickScaleSpansTheRealSliderRange();
   testHiddenUtilityOutranksIdLevelDisplayRules();
+  await testLegendMidTickMatchesTheScaleItSitsOn();
   console.log('dashboard2 timebar test passed (Session 51: consolidated time-slice dock).');
 })();

@@ -45,8 +45,8 @@
      than the viewport (the tile text is tabular numerals, which do not
      wrap on their own). */
   #topbar {
-    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px;
-    padding: 14px 20px; border-bottom: 1px solid #d8d7d3; background: #fcfcfb; flex-shrink: 0;
+    display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 16px;
+    padding: 18px 20px; border-bottom: 1px solid #d8d7d3; background: #fcfcfb; flex-shrink: 0;
   }
   #title { min-width: 0; }
   #title-heading { display: flex; align-items: center; gap: 8px; }
@@ -70,12 +70,20 @@
      attribute anyway, so darkening them cost nothing and kept this a
      single find-and-replace instead of a partial one). */
   #title-text { display: flex; flex-direction: column; }
-  #title-line1 { font-size: 11px; font-weight: 600; color: #52514e; letter-spacing: -0.005em; }
-  #title-line2 { font-size: 16px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; color: #0b0b0b; }
-  #title .subtitle { color: #52514e; font-size: 12px; margin-top: 4px; }
-  #title-meta { color: #666057; } /* real station count + coverage/weather-scenario caveats -- the only subtitle content now; the old "Net flow at HH:MM, weekday (period)" phrase was dropped as pure duplication of the Map controls panel's own hour/day/period controls */
-  /* Session 53: back in the masthead as its own column, right of the ribbon. */
-  #mode-toggle { justify-self: end; flex-shrink: 0; }
+  #title-line1 { font-size: 12px; font-weight: 600; color: #52514e; letter-spacing: -0.005em; }
+  #title-line2 { font-size: 20px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; color: #0b0b0b; }
+  /* Session 58/59: the toggle sits UNDER the title, inside the title block,
+     left of the metric cards. Those four cards are entirely dependent on it --
+     the same four slots carry different metrics in each mode -- so reading
+     four numbers and only then discovering which mode produced them had the
+     dependency backwards. Identity, then mode, then the numbers.
+     Session 59: the active segment is solid black rather than the white pill
+     .segmented.light gives everything else. This is the highest-consequence
+     control on the page and it was the quietest thing in the masthead; it
+     also gets the mode switch out of the warm-beige family that now means
+     "Scenario Planner" everywhere else in this file. */
+  #mode-toggle { flex-shrink: 0; margin-top: 8px; width: fit-content; }
+  #mode-toggle .segmented-btn.active { background: #0b0b0b; color: #fff; box-shadow: none; }
 
   /* The metric ribbon (Session 50, v2 layout Option A). Deliberately flatter
      than the boxed .readout grid it replaced: in the rail that block needed
@@ -94,22 +102,46 @@
      instead of owning the full width. */
   .ribbon { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; min-width: 0; }
   .ribbon__tile {
-    min-width: 0; padding: 7px 10px;
+    min-width: 0; padding: 11px 13px;
     background: #fff; border: 1px solid #e6e5e1; border-radius: 8px;
   }
   #ribbon-tile-1 { border-color: #d8d7d3; background: #fbfaf7; }
   .ribbon__value {
-    display: block; font-size: 17px; font-weight: 800; color: #0b0b0b;
+    display: block; font-size: 19px; font-weight: 800; color: #0b0b0b;
     font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.15;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  #ribbon-tile-1 .ribbon__value { font-size: 20px; }
+  #ribbon-tile-1 .ribbon__value { font-size: 22px; }
   /* Two lines allowed, then clamped: "bikes to move into deficit stations"
      does not fit one line at this width, and truncating it to "bikes to
      move into..." would lose the part that says WHERE they move. */
+  /* Session 57: status lives in a dot beside the number, never in the colour
+     of the number itself. A coloured numeral is unreadable to anyone who
+     cannot separate the hues, and it makes the figure itself look like a
+     status word rather than a measurement. Hidden (not merely uncoloured)
+     when a tile has no status to report, so an empty grey dot never reads as
+     a fourth state. */
+  /* visibility, not display (Session 59): display:none removed the dot's box
+     entirely, so historical tiles -- which carry no dots -- were ~12px shorter
+     than live ones, and the masthead (and the map below it) resized on every
+     mode switch. visibility:hidden keeps the space reserved and still paints
+     nothing, so an absent dot never reads as a grey fourth state. */
+  .ribbon__dot {
+    display: block; visibility: hidden;
+    width: 7px; height: 7px; border-radius: 50%; margin-bottom: 5px;
+  }
+  .ribbon__dot.shown { visibility: visible; }
+  /* Session 59: min-height pins the label box to two lines whether or not the
+     text needs both. Live labels ("empty now 3.7%") are short and historical
+     ones ("bikes to move into deficit stations") are not, so without this the
+     ribbon -- and therefore the masthead, and therefore the map below it --
+     changed height every time you switched modes. Reserving the space is
+     cheaper than making the two label sets the same length, and it holds at
+     any viewport width rather than only at the one width someone checked. */
   .ribbon__label {
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     overflow: hidden; margin-top: 2px; font-size: 10px; color: #666057; line-height: 1.3;
+    min-height: 2.6em;
   }
   .ribbon__label .ribbon__window { color: #666057; font-weight: 400; }
 
@@ -133,7 +165,6 @@
      scroll is a safety net (max-height), not the expected case. Mobile
      override (bottom of this stylesheet) switches this to a normal
      static block instead of a float. */
-  #map-controls-bar { position: absolute; top: 16px; left: 16px; z-index: 500; width: 280px; max-width: calc(100% - 32px); max-height: calc(100% - 32px); overflow-y: auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15); padding: 12px 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }
 
   /* Legend and Station detail are now two INDEPENDENT floating cards, not
      a tab pair sharing one container -- Legend is permanent (always on
@@ -190,7 +221,13 @@
   #legend-ticks span:nth-child(3) { text-align: right; }
 
   #legend-card .bar { width: 100%; height: 12px; border-radius: 6px; margin: 0 0 6px; box-sizing: border-box; }
-  #legend-card .labels { display: flex; justify-content: space-between; font-size: 11px; color: #52514e; flex-wrap: wrap; gap: 4px 12px; }
+  /* Session 57: was flex/space-between while #legend-ticks above is a
+     3-column grid, so the words never sat under the numbers they label. Same
+     grid, same columns, empty middle cell -- they line up by construction now
+     instead of by coincidence of text width. */
+  #legend-card .labels { display: grid; grid-template-columns: repeat(3, 1fr); font-size: 11px; color: #52514e; gap: 4px 8px; }
+  #legend-card .labels span:nth-child(2) { text-align: center; }
+  #legend-card .labels span:nth-child(3) { text-align: right; }
   #legend-caption { margin-top: 8px; font-size: 11px; color: #666057; }
 
   #detail-card { position: relative; max-height: 320px; overflow-y: auto; }
@@ -210,7 +247,7 @@
   #detail-card .meta { color: #52514e; margin-bottom: 3px; line-height: 1.4; }
 
   /* Right-hand panel: fixed width, its own internal scroll -- the map
-     column never scrolls, so a tall Investigator accordion stack can't
+     column never scrolls, so a tall Scenario Planner accordion stack can't
      push the map out of frame. */
   #side-col { width: 460px; min-width: 380px; height: 100%; box-sizing: border-box; background: #fff; border-left: 1px solid #d8d7d3; display: flex; flex-direction: column; overflow: hidden; overflow-wrap: anywhere; }
   /* Task 06 (design critique): flex/grid children default to min-width:auto,
@@ -238,31 +275,31 @@
 
   #side-content { flex: 1; overflow-y: auto; padding: 16px; box-sizing: border-box; }
 
-  /* Investigator mode and Model performance are each a simple, plain-text
+  /* Scenario Planner and Model performance are each a simple, plain-text
      collapsed-by-default disclosure -- not tabs, not bordered cards --
      same "zero extra height budget in the common case" rule the inner
      equity/fleet/weather/presets accordions follow one level deeper.
-     Investigator gets top billing (first in the DOM, no visual
+     Scenario Planner gets top billing (first in the DOM, no visual
      de-emphasis); Model performance is intentionally smaller/quieter,
      sitting right before the footer, since it's a static reference table
      rather than something you work within. */
-  #investigator-panel, #model-eval { margin-bottom: 16px; }
+  #scenario-planner-panel, #model-eval { margin-bottom: 16px; }
   /* Design critique task 09: these are native <summary> elements now, not
      buttons -- list-style/marker rules strip the native disclosure
      triangle (Chrome/Safari need the ::-webkit-details-marker rule too,
      display:none on ::marker alone isn't enough in WebKit) so the custom
      ::after chevron below is the only arrow shown, same look as before. */
-  #investigator-toggle, #model-eval-toggle { width: 100%; display: flex; flex-wrap: wrap; align-items: center; font: inherit; font-weight: 600; font-size: 13px; color: #52514e; cursor: pointer; list-style: none; }
-  #investigator-toggle::-webkit-details-marker, #model-eval-toggle::-webkit-details-marker { display: none; }
-  #investigator-toggle::after, #model-eval-toggle::after { order: 2; content: '\25B8'; color: #666057; font-size: 11px; transition: transform 0.15s ease; flex-shrink: 0; margin-left: auto; }
-  #investigator-panel[open] > #investigator-toggle::after, #model-eval[open] > #model-eval-toggle::after { transform: rotate(90deg); }
-  #investigator-toggle:hover, #model-eval-toggle:hover { color: #0b0b0b; }
+  #scenario-planner-toggle, #model-eval-toggle { width: 100%; display: flex; flex-wrap: wrap; align-items: center; font: inherit; font-weight: 600; font-size: 13px; color: #52514e; cursor: pointer; list-style: none; }
+  #scenario-planner-toggle::-webkit-details-marker, #model-eval-toggle::-webkit-details-marker { display: none; }
+  #scenario-planner-toggle::after, #model-eval-toggle::after { order: 2; content: '\25B8'; color: #666057; font-size: 11px; transition: transform 0.15s ease; flex-shrink: 0; margin-left: auto; }
+  #scenario-planner-panel[open] > #scenario-planner-toggle::after, #model-eval[open] > #model-eval-toggle::after { transform: rotate(90deg); }
+  #scenario-planner-toggle:hover, #model-eval-toggle:hover { color: #0b0b0b; }
   #model-eval-toggle { font-size: 11px; color: #666057; }
   #model-eval-toggle:hover { color: #52514e; }
   .accordion-head-row { order: 1; display: flex; align-items: center; min-width: 0; }
-  .investigator-badge { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #c9832b; margin-left: 4px; vertical-align: top; }
-  #investigator-teaser { order: 3; margin-top: 4px; font-size: 11px; color: #666057; line-height: 1.4; flex-basis: 100%; }
-  #tab-panel-investigator, #tab-panel-model { margin-top: 12px; }
+  .scenario-planner-badge { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #c9832b; margin-left: 4px; vertical-align: top; }
+  #scenario-planner-teaser { order: 3; margin-top: 4px; font-size: 11px; color: #666057; line-height: 1.4; flex-basis: 100%; }
+  #tab-panel-scenario-planner, #tab-panel-model { margin-top: 12px; }
 
   /* Design critique task 03 -- permanent readout + "worst now" list.
      Colors/radii/borders reuse this file's own existing tokens
@@ -355,7 +392,7 @@
     padding: 12px 14px; background: #fff;
     border-radius: 10px; box-shadow: 0 2px 10px rgba(11,11,11,0.15);
     box-sizing: border-box;
-    width: 720px; max-width: calc(100% - 32px);
+    width: fit-content; max-width: calc(100% - 32px);
   }
   #timebar-scrub { display: flex; align-items: center; gap: 14px; }
   #timebar input[type="range"] { flex: 1; box-sizing: border-box; accent-color: #0b0b0b; min-width: 0; min-height: 24px; }
@@ -375,8 +412,13 @@
      IS the naive predictor, and its own out-of-sample error is a fair thing
      to print on it. Wording avoids "Model:", which would imply the number
      shown is a model output rather than an observation. */
-  #timebar-model-note { font-size: 10px; color: #666057; line-height: 1.35; }
+  #model-climatology-note { font-size: 11.5px; color: #4a4744; line-height: 1.5; margin-bottom: 6px; }
   #hour-label { font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 700; color: #0b0b0b; white-space: nowrap; flex-shrink: 0; min-width: 6.5ch; text-align: right; }
+  /* Session 62: the hover card. Name on its own line, readings beneath it. */
+  .leaflet-tooltip .tip-name { display: block; font-size: 12px; font-weight: 700; color: #0b0b0b; margin-bottom: 2px; }
+  .leaflet-tooltip .tip-line { display: block; font-size: 11px; color: #52514e; line-height: 1.35; }
+  .leaflet-tooltip { padding: 7px 9px; border-radius: 8px; }
+
   .hour-play-btn { flex-shrink: 0; width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
   .hour-play-btn:hover { border-color: #0b0b0b; color: #0b0b0b; }
   .hour-play-btn.active { background: #0b0b0b; border-color: #0b0b0b; color: #fff; }
@@ -410,10 +452,10 @@
   #tab-panel-model tbody td:last-child { color: #191817; font-weight: 700; }
   #model-eval-caption { margin-bottom: 4px; color: #4a4744; line-height: 1.5; font-size: 12.5px; font-style: normal; }
 
-  .investigator-slider { margin-bottom: 12px; }
-  .investigator-slider label { display: block; font-size: 12px; color: #52514e; margin-bottom: 6px; }
-  .investigator-slider input[type="range"] { width: 100%; box-sizing: border-box; accent-color: #c9832b; }
-  #investigator-counts { margin-top: 6px; color: #52514e; line-height: 1.7; font-size: 12px; }
+  .scenario-planner-slider { margin-bottom: 12px; }
+  .scenario-planner-slider label { display: block; font-size: 12px; color: #52514e; margin-bottom: 6px; }
+  .scenario-planner-slider input[type="range"] { width: 100%; box-sizing: border-box; accent-color: #c9832b; }
+  #scenario-planner-counts { margin-top: 6px; color: #52514e; line-height: 1.7; font-size: 12px; }
   .equity-count-primary { font-weight: 700; color: #0b0b0b; font-size: 13px; margin-bottom: 4px; }
   .equity-count-breakdown { padding-left: 12px; color: #666057; font-size: 11px; line-height: 1.6; }
   .equity-count-separate { margin-top: 8px; padding-top: 8px; border-top: 1px solid #f3f2f0; }
@@ -437,9 +479,9 @@
   /* Real map wiring already existed here (fleet size drives the actual
      route, weather already recolors real markers) but nothing told the
      user that -- this cue makes an invisible connection felt, the
-     cheapest of the Investigator Mode improvements suggested alongside
+     cheapest of the Scenario Planner improvements suggested alongside
      the design critique. Accent color reuses the existing
-     .investigator-badge orange, tying it visually to "Investigator mode"
+     .scenario-planner-badge orange, tying it visually to "Scenario Planner"
      itself rather than reading as another muted caption. */
   .map-tie-in-cue { margin: 8px 0; padding: 6px 10px; border-left: 2px solid #c9832b; background: #fdf6e8; color: #7a5b1e; font-size: 11px; line-height: 1.4; border-radius: 0 4px 4px 0; }
   #weather-preset-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 12px; }
@@ -448,12 +490,39 @@
   /* Equity thresholds / Fleet simulator / Weather scenario / Save-load-reset
      are now four independently collapsible accordions (matching the
      mockup) instead of one always-shown block -- each tracked in
-     state.investigatorAccordions and toggled by setAccordionExpanded().
+     the sub-panels' own native <details> open state (no JS state backs them).
      Fleet's and Weather's OUTER accordion (not its inner content) is what
      graceful degradation hides when fleet_scenarios.json/elasticities.json
      never loaded -- the same two-level "container visibility vs. content
-     expand-state" split #investigator-diff-bar and #model-eval used to
+     expand-state" split #scenario-planner-diff-bar and #model-eval used to
      keep separate concerns separate. */
+  /* Session 55: the Scenario Planner shell. A left accent stripe marks it as
+     the sandbox zone -- the only place in this dashboard where a number is a
+     projection rather than a direct read of real data. The colour is the
+     existing #c9832b already used by the planner badge and .map-tie-in-cue,
+     not a new one, so "amber means scenario" stays consistent. */
+  #scenario-planner-panel {
+    border-left: 3px solid #c9832b;
+    border-radius: 0 10px 10px 0;
+    background: #fffdf9;
+  }
+  #scenario-planner-subtitle {
+    order: 4; flex-basis: 100%; margin-top: 6px;
+    font-size: 11px; color: #666057; line-height: 1.4; font-weight: 400;
+    padding-left: 9px; border-left: 2px solid #e0c9a0;
+  }
+  /* Flat sections, separated by a rule rather than a box each: four nested
+     bordered cards inside an already-bordered panel read as clutter, and
+     these are parts of one sandbox, not four independent things. */
+  .planner-section { padding: 14px 0 0; border-top: 1px solid #ece9e3; }
+  .planner-section:first-of-type { border-top: none; padding-top: 4px; }
+  .planner-section-title {
+    margin: 0 0 8px; font-size: 12px; font-weight: 700; color: #0b0b0b;
+    letter-spacing: 0.02em; text-transform: uppercase;
+    display: flex; align-items: center;
+  }
+  .planner-section-body { font-size: 12px; }
+
   .accordion { border: 1px solid #d8d7d3; border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
   .accordion-toggle { width: 100%; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; font: inherit; font-size: 13px; font-weight: 700; padding: 13px 14px; background: #fff; color: #0b0b0b; cursor: pointer; text-align: left; list-style: none; }
   .accordion-toggle::-webkit-details-marker { display: none; }
@@ -469,10 +538,10 @@
      already-displayed numbers (never a mockup-decorative formula -- see
      renderScenarioRow()'s own comment for the exact per-metric domain
      each bar/tick is drawn against). Visibility rule carries over 1:1
-     from the old design: shown whenever the Investigator tab is active,
+     from the old design: shown whenever the Scenario Planner tab is active,
      or whenever the scenario is non-default even on another tab, so
      navigating away never loses the cue that a scenario is still applied. */
-  #investigator-diff-bar { border: 1.5px solid #0b0b0b; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  #scenario-planner-diff-bar { border: 1.5px solid #0b0b0b; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
   .scenario-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   .scenario-card-head-actions { display: flex; gap: 6px; }
   .scenario-card-title { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #52514e; }
@@ -538,7 +607,7 @@
        the separate, deeper problem the critique found at ~430px: on the
        original stacked layout, the masthead ran ~112px tall, then a
        fixed-height map, then ~560px more of controls before you reached
-       anything interactive, and Investigator Mode -- this dashboard's own
+       anything interactive, and Scenario Planner -- this dashboard's own
        differentiator -- landed ~830px down, still collapsed. Real width
        here is capped at what headless Chrome can reliably measure in this
        environment (~500px+, see this file's own testing notes elsewhere)
@@ -546,7 +615,6 @@
        itself (flex-wrap/min-width:0 safety nets already in place from
        task 06), not screenshot-confirmed. */
     #topbar { padding: 10px 14px; gap: 10px; }
-    #title-subtitle-line { display: none; } /* the eyebrow line's own JS toggle logic is untouched -- this just costs it its vertical space specifically on narrow screens, regardless of whether it has real content to show */
     /* Reuses the exact padding/font values .segmented.compact already
        defines elsewhere in this file (Individual/Grouped, Weekday/
        Weekend) -- same compact look, without adding "compact" to
@@ -567,7 +635,7 @@
     }
     .ribbon__tile { padding: 0 12px; }
     .ribbon__value { font-size: 17px; }
-    #ribbon-tile-1 .ribbon__value { font-size: 20px; }
+    #ribbon-tile-1 .ribbon__value { font-size: 22px; }
 
     #body-row { flex-direction: column; overflow-y: auto; }
     /* Sticky, not fixed-in-flow: the map keeps its own document-flow
@@ -585,20 +653,19 @@
     #side-col { width: 100%; min-width: 0; height: auto; border-left: none; border-top: 1px solid #d8d7d3; overflow: visible; }
     #side-content {
       overflow-y: visible; /* the whole page scrolls together now -- no separate nested scroll region needed */
-      display: flex; flex-direction: column; /* only so the order: below can promote Investigator -- no other layout change intended here */
+      display: flex; flex-direction: column; /* kept: children rely on non-collapsing margins here, see Session 55 note below */
     }
-    /* "Don't bury the differentiator" -- Investigator Mode moves ahead of
-       the readout/worst-now list specifically on mobile, where vertical
-       space is scarce enough that reaching it used to mean scrolling past
-       everything else first. Desktop's reading order (readout, then
-       worst-now, then Investigator) is untouched -- order only applies
-       inside this media query. */
-    #investigator-panel { order: -1; }
+    /* Session 55: `#scenario-planner-panel { order: -1 }` lived here -- a
+       mobile-only promotion answering "don't bury the differentiator" while
+       the panel sat last in the DOM on every viewport. The panel now sits
+       above the worst-station lists in the DOM itself, so the override is
+       not just redundant: leaving it would push the panel above the
+       distribution card on narrow screens only, an ordering no one asked
+       for and that desktop would not match.
+       flex-direction is kept rather than reverted to block flow -- the
+       children's 16px bottom margins collapse under block flow and do not
+       under flex, so removing it would silently retighten this whole rail. */
 
-    #map-controls-bar {
-      position: static; width: auto; max-width: none; max-height: none; overflow-y: visible;
-      border-radius: 0; box-shadow: none; border-bottom: 1px solid #d8d7d3;
-    }
     /* Same floating-to-static fix as map-controls-bar/map-corner-stack
        above, applied to #timebar (task 07) -- it moved out of
        map-controls-bar on desktop specifically to get real width, but a
@@ -646,7 +713,7 @@
            own logo/brand mark. This is an independent portfolio project,
            not an official product (see the footer disclosure); using
            their real branding here would misleadingly suggest otherwise. -->
-      <svg id="title-logo" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg id="title-logo" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <circle cx="6" cy="17" r="3.5"/>
         <circle cx="18" cy="17" r="3.5"/>
         <path d="M6 17l4-8 6 8h2M10 9h3l3 8"/>
@@ -656,32 +723,32 @@
         <div id="title-line2">Rebalancing Explorer</div>
       </div>
     </div>
-    <div class="subtitle hidden" id="title-subtitle-line"><span id="title-meta"></span></div>
+  <div id="mode-toggle" class="segmented">
+      <button id="mode-historical" class="segmented-btn active"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Historical Flow</button>
+      <button id="mode-live" class="segmented-btn" title="Live dock status via GBFS (General Bikeshare Feed Specification)"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.5 5.5a9 9 0 0 0 0 13"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>Live Docks</button>
+    </div>
   </div>
+
 
   <div class="ribbon" id="ribbon" role="group" aria-label="Key metrics" aria-live="off">
     <div class="ribbon__tile" id="ribbon-tile-1">
-      <b class="ribbon__value" id="ribbon-value-1"></b>
+      <i class="ribbon__dot" id="ribbon-dot-1" aria-hidden="true"></i><b class="ribbon__value" id="ribbon-value-1"></b>
       <span class="ribbon__label" id="ribbon-label-1"></span>
     </div>
     <div class="ribbon__tile" id="ribbon-tile-2">
-      <b class="ribbon__value" id="ribbon-value-2"></b>
+      <i class="ribbon__dot" id="ribbon-dot-2" aria-hidden="true"></i><b class="ribbon__value" id="ribbon-value-2"></b>
       <span class="ribbon__label" id="ribbon-label-2"></span>
     </div>
     <div class="ribbon__tile" id="ribbon-tile-3">
-      <b class="ribbon__value" id="ribbon-value-3"></b>
+      <i class="ribbon__dot" id="ribbon-dot-3" aria-hidden="true"></i><b class="ribbon__value" id="ribbon-value-3"></b>
       <span class="ribbon__label" id="ribbon-label-3"></span>
     </div>
     <div class="ribbon__tile" id="ribbon-tile-4">
-      <b class="ribbon__value" id="ribbon-value-4"></b>
+      <i class="ribbon__dot" id="ribbon-dot-4" aria-hidden="true"></i><b class="ribbon__value" id="ribbon-value-4"></b>
       <span class="ribbon__label" id="ribbon-label-4"></span>
     </div>
   </div>
 
-    <div id="mode-toggle" class="segmented light">
-      <button id="mode-historical" class="segmented-btn active"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Historical Flow</button>
-      <button id="mode-live" class="segmented-btn" title="Live dock status via GBFS (General Bikeshare Feed Specification)"><svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/><path d="M8.5 8.5a5 5 0 0 0 0 7"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M5.5 5.5a9 9 0 0 0 0 13"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>Live Docks</button>
-    </div>
 
 </header>
 
@@ -715,36 +782,13 @@
        the map init below) to make room, rather than the other way around
        -- zoom buttons carry much less positional expectation than the
        controls a reviewer actually reads. -->
-  <div id="map-controls-bar">
-    <!-- Session 47 removed the Individual/Grouped toggle from here (it only
-         restated what zooming had already decided). Session 49 then removed
-         grouped view itself: there is no clustering any more, every station
-         is one dot at every zoom, so there is no view mode left to toggle.
-         Nothing replaces either control -- no hidden control, no map-corner
-         button. The "Show route" button that also lived here is gone too
-         (Session 49); see the removal note in the script. -->
-    <!-- Session 51: #historical-controls (Weekday/Weekend + the period
-         dropdown) moved OUT of this floating card and into #timebar, so
-         every control that selects a time slice lives on the time slider
-         itself instead of being split across two panels that happen to
-         float over the same map.
-
-         Session 52: the mode toggle moved IN, from the masthead -- design
-         "D" puts it here, over the map, and the masthead needed its width
-         back for the four-card ribbon. That also un-empties this card: it
-         was live-mode-only for one session and had to be hidden in
-         historical mode to avoid floating as a blank rectangle. It now
-         always has content, so it is always shown.
-
-         Labels are title case ("Historical Flow", "Live Docks") -- these
-         name two modes of the tool, so they read as proper names of things
-         rather than as sentences. -->
-
-    <div id="live-as-of" class="hidden">
-      <div id="live-as-of-timestamp"></div>
-      <div id="live-coverage-note" class="hidden"></div>
-    </div>
-  </div>
+  <!-- Session 60: #map-controls-bar is gone. It once held the day toggle, the
+       period dropdown, the Individual/Grouped toggle and the Show-route
+       button; Sessions 49/51/52/55 removed or relocated every one of them,
+       leaving a floating white card over upper Manhattan whose only content
+       was a one-line "Live as of" stamp. That stamp moved into #timebar --
+       see the note there -- and this container went with it, along with the
+       show/hide rule in setMode() that had flip-flopped three times. -->
 
   <!-- Design critique task 07: the hour scrubber gets real pixels now --
        a full-width dock along the bottom of the map instead of a cramped
@@ -792,10 +836,18 @@
       <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:00</span>
     </div>
 
-    <!-- Row 4: what this curve IS. Filled by renderTimebarModelNote() from
-         model_performance.json's real walk-forward aggregate; hidden
-         entirely when that optional file is absent. -->
-    <div id="timebar-model-note" class="hidden"></div>
+    <!-- Session 60: live mode's context line, in the same dock as historical
+         mode's. Both answer one question -- WHICH MOMENT AM I LOOKING AT? --
+         one as a chosen hour of a typical day, the other as a real timestamp.
+         Same question, same place, the way the ribbon's four shells already
+         swap content rather than moving. setMode() shows exactly one of the
+         two sets; the dock itself is always visible. -->
+    <div id="live-as-of" class="hidden">
+      <div id="live-as-of-timestamp"></div>
+      <div id="live-coverage-note" class="hidden"></div>
+    </div>
+
+
   </div>
 
   <!-- Legend is the FIRST child (bottom, in flex column-reverse below) --
@@ -803,10 +855,10 @@
        only while a station is selected -- see setDetailVisible(). -->
   <div id="map-corner-stack">
     <div id="legend-card">
-      <div id="legend-title">Net daily flow</div>
+      <div id="legend-title">Net Daily Flow (bikes/day)</div>
       <div class="bar" id="legend-bar"></div>
-      <div id="legend-ticks"><span id="legend-tick-low"></span><span id="legend-tick-mid">0</span><span id="legend-tick-high"></span></div>
-      <div class="labels"><span id="legend-label-low">Deficit (no bikes)</span><span id="legend-label-high">Surplus (no docks)</span></div>
+      <div id="legend-ticks"><span id="legend-tick-low"></span><span id="legend-tick-mid"></span><span id="legend-tick-high"></span></div>
+      <div class="labels"><span id="legend-label-low"></span><span id="legend-label-mid"></span><span id="legend-label-high"></span></div>
       <div id="legend-caption">Click a station for its daily flow</div>
     </div>
 
@@ -842,7 +894,7 @@
            numbers, parked in the rail because that is where there was room.
            Option A of the v2 layout gives them the full-width top strip
            they were always acting like. The equity/subway-gap counts they
-           carried are unchanged and still on screen, in the Investigator's
+           carried are unchanged and still on screen, in the Scenario Planner's
            own equity section, which is where a threshold-driven count
            belongs (it moves with the thresholds, not with the map). -->
 
@@ -875,38 +927,19 @@
         <div class="distribution__note" id="distribution-note"></div>
       </div>
 
-      <!-- "Worst now" -- real per-station ranking under whatever filter is
-           currently active, doubling as the keyboard/screen-reader-
-           reachable equivalent of the map's 2,516 SVG circles (task 11):
-           there is otherwise no keyboard path to any single station. Click
-           behavior reuses selectStation() unchanged, the exact same path a
-           real marker click already goes through -- not a second, parallel
-           selection mechanism. Hidden entirely in live mode (no historical
-           curve to rank by; see renderReadout()). -->
-      <!-- User-reported gap, not from the critique: this used to be one
-           combined "Worst Now" list ranked by |value| across BOTH deficit
-           and surplus stations -- a full-dock station isn't "worst" in
-           the same sense as an empty one, so a shared ranking obscured
-           which problem a given station actually has. Split into two
-           independently-ranked top-8 lists instead; each is now
-           internally comparable (same sign, same real problem). -->
-      <div class="worst" id="worst-deficit-wrap">
-        <div class="worst__title">Most bikes needed</div>
-        <ul id="worst-deficit-list"></ul>
-      </div>
-      <div class="worst" id="worst-surplus-wrap">
-        <div class="worst__title">Most docks needed</div>
-        <ul id="worst-surplus-list"></ul>
-      </div>
-
-      <!-- Investigator is its own standalone collapsible now, not one
+      <!-- Session 55: the Scenario Planner sits ABOVE the two worst-station
+           lists now. It had been below both, i.e. below the fold on a 900px
+           viewport -- the original "don't bury the differentiator" complaint,
+           only partly solved by the CSS `order` rule that promotes it on
+           narrow screens (which never applied on desktop). -->
+      <!-- Scenario Planner is its own standalone collapsible now, not one
            half of a tab pair -- Model (below) is a static reference
            table, not an interactive "mode" alongside it, so pairing them
            as equal-weight tabs overstated Model's actual role.
 
            Design critique task 09: native <details> here too. The teaser
            (always visible even collapsed -- a first-time visitor has no
-           reason to click a plain "Investigator mode" row otherwise) has
+           reason to click a plain "Scenario Planner" row otherwise) has
            to live INSIDE <summary> now, not as a sibling after it --
            native <details> hides everything except <summary> when
            closed, so a sibling div would have disappeared along with the
@@ -915,13 +948,14 @@
            reveals the scenario card even at baseline) preserved via a
            'toggle' event listener in the script below, not lost in the
            conversion. -->
-      <details id="investigator-panel">
-        <summary id="investigator-toggle">
-          <span class="accordion-head-row"><span>Investigator mode</span><span id="investigator-badge" class="investigator-badge hidden"></span></span>
-          <span id="investigator-teaser">Simulate fleet size, weather, and equity thresholds against real data.</span>
+      <details id="scenario-planner-panel">
+        <summary id="scenario-planner-toggle">
+          <span class="accordion-head-row"><span>Scenario Planner</span><span id="scenario-planner-badge" class="scenario-planner-badge hidden"></span></span>
+          <span id="scenario-planner-teaser">Simulate fleet size, weather, and equity thresholds against real data.</span>
+          <span id="scenario-planner-subtitle">Kept separate from Live Docks and Historical Flow, so those stay a direct read of real data.</span>
         </summary>
-        <div id="tab-panel-investigator">
-        <div id="investigator-diff-bar" class="hidden">
+        <div id="tab-panel-scenario-planner">
+        <div id="scenario-planner-diff-bar" class="hidden">
           <div class="scenario-card-head">
             <span class="scenario-card-title">Scenario vs. baseline</span>
             <div class="scenario-card-head-actions">
@@ -994,26 +1028,45 @@
           <div id="scenario-summary"></div>
         </div>
 
-        <!-- Design critique task 09: native <details>/<summary>, not
-             hand-rolled JS toggles -- free keyboard (Enter/Space) and
-             screen-reader semantics, and a shared `name` gives free
-             mutual exclusion (only one of these four open at a time)
-             with no JS at all, a real browser feature (Baseline 2023+),
-             not a polyfill. -->
-        <details class="accordion" id="equity-accordion" name="investigator-subpanel">
-          <summary class="accordion-toggle" id="equity-accordion-toggle">
-            <span>Equity thresholds</span>
-          </summary>
-          <div class="accordion-content" id="equity-accordion-content">
-            <div class="investigator-slider">
+        <!-- Session 55: these were four <details class="accordion"> sharing a
+             `name`, which made them MUTUALLY EXCLUSIVE -- opening Fleet closed
+             Equity. Fine for unrelated sections; wrong for these four, which
+             are one sandbox: a reviewer who changes fleet size usually wants
+             to see what it did to the equity counts, and could not see both.
+             They are plain sections now, all open together inside the one
+             collapsible panel, whose single <summary> is the only collapse
+             control left.
+
+             Element ids are unchanged on purpose, so the graceful-degradation
+             logic that reveals Fleet and Weather when their optional data
+             files load needed no rewiring -- only the tag changed. Neither section
+             carries a hidden state in markup: the ready handler sets both
+             branches for each (shown when its data file loaded, hidden when
+             it did not), so the markup default was never consulted. -->
+        <section class="planner-section" id="fleet-accordion">
+          <h3 class="planner-section-title">Fleet &amp; routing<span class="accordion-badge" id="fleet-badge"></span></h3>
+          <div class="planner-section-body" id="fleet-sim-wrap">
+            <div class="scenario-planner-slider">
+              <label for="fleet-size-slider">Fleet size: <span id="fleet-size-value">1</span> truck(s)</label>
+              <input type="range" id="fleet-size-slider" min="1" max="10" step="1" value="1">
+            </div>
+            <div id="fleet-stats"></div>
+            <div id="fleet-sim-note">Checked against real data, not assumed: added trucks do not show smoothly diminishing returns at this scale. Every truck hits its own 45-stop shift cap before ever running out of flagged stations, so the binding constraint here is each truck's per-shift stop budget, not overall demand.</div>
+          </div>
+        </section>
+
+        <section class="planner-section" id="equity-accordion">
+          <h3 class="planner-section-title">Equity thresholds</h3>
+          <div class="planner-section-body" id="equity-accordion-content">
+            <div class="scenario-planner-slider">
               <label for="nycha-school-slider">NYCHA / school proximity: <span id="nycha-school-value">300</span> m</label>
               <input type="range" id="nycha-school-slider" min="0" max="3000" step="50" value="300">
             </div>
-            <div class="investigator-slider">
+            <div class="scenario-planner-slider">
               <label for="subway-gap-slider">Subway gap: <span id="subway-gap-value">800</span> m</label>
               <input type="range" id="subway-gap-slider" min="0" max="3000" step="50" value="800">
             </div>
-            <div id="investigator-counts">
+            <div id="scenario-planner-counts">
               <!-- Combined (union) is the primary, most-asked number --
                    promoted to its own bold line. NYCHA/school/overlap are
                    the derived breakdown underneath it, indented and
@@ -1031,58 +1084,64 @@
               <div id="count-subway-gap" class="equity-count-separate"></div>
             </div>
           </div>
-        </details>
+        </section>
 
-        <details class="accordion hidden" id="fleet-accordion" name="investigator-subpanel">
-          <summary class="accordion-toggle" id="fleet-accordion-toggle">
-            <span>Fleet simulator<span class="accordion-badge" id="fleet-badge"></span></span>
-          </summary>
-          <div class="accordion-content" id="fleet-sim-wrap">
-            <div class="investigator-slider">
-              <label for="fleet-size-slider">Fleet size: <span id="fleet-size-value">1</span> truck(s)</label>
-              <input type="range" id="fleet-size-slider" min="1" max="10" step="1" value="1">
-            </div>
-            <div class="map-tie-in-cue">Click "Show route" on the map, then drag this slider &mdash; the real route redraws live.</div>
-            <div id="fleet-stats"></div>
-            <div id="fleet-sim-note">Checked against real data, not assumed: added trucks do not show smoothly diminishing returns at this scale. Every truck hits its own 45-stop shift cap before ever running out of flagged stations, so the binding constraint here is each truck's per-shift stop budget, not overall demand.</div>
-          </div>
-        </details>
-
-        <details class="accordion hidden" id="weather-accordion" name="investigator-subpanel">
-          <summary class="accordion-toggle" id="weather-accordion-toggle">
-            <span>Weather scenario</span>
-          </summary>
-          <div class="accordion-content" id="weather-scenario-wrap">
+        <section class="planner-section" id="weather-accordion">
+          <h3 class="planner-section-title">Weather scenario</h3>
+          <div class="planner-section-body" id="weather-scenario-wrap">
             <select id="weather-preset-select"></select>
             <div class="map-tie-in-cue">Watch the map recolor live as you adjust these &mdash; no separate toggle needed.</div>
-            <div class="investigator-slider">
+            <div class="scenario-planner-slider">
               <label for="weather-temp-slider">Temperature: <span id="weather-temp-value">72</span>&deg;F</label>
               <input type="range" id="weather-temp-slider" min="0" max="90" step="1" value="72">
             </div>
-            <div class="investigator-slider">
+            <div class="scenario-planner-slider">
               <label for="weather-precip-slider">Precipitation: <span id="weather-precip-value">0.0</span> in</label>
               <input type="range" id="weather-precip-slider" min="0" max="1" step="0.05" value="0">
             </div>
             <div id="weather-scenario-status"></div>
             <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model. A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Jul 2025-Jun 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading -- each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
           </div>
-        </details>
+        </section>
 
-        <details class="accordion" id="presets-accordion" name="investigator-subpanel">
-          <summary class="accordion-toggle" id="presets-accordion-toggle">
-            <span>Load a shared scenario</span>
-          </summary>
-          <div class="accordion-content" id="preset-controls">
+        <section class="planner-section" id="presets-accordion">
+          <h3 class="planner-section-title">Load a shared scenario</h3>
+          <div class="planner-section-body" id="preset-controls">
             <input type="text" id="preset-load-input" placeholder="Paste a shared link here">
             <button id="load-preset-btn" class="day-btn">Load preset</button>
           </div>
-        </details>
+        </section>
+
         </div>
       </details>
 
+      <!-- "Worst now" -- real per-station ranking under whatever filter is
+           currently active, doubling as the keyboard/screen-reader-
+           reachable equivalent of the map's 2,516 SVG circles (task 11):
+           there is otherwise no keyboard path to any single station. Click
+           behavior reuses selectStation() unchanged, the exact same path a
+           real marker click already goes through -- not a second, parallel
+           selection mechanism. Hidden entirely in live mode (no historical
+           curve to rank by; see renderReadout()). -->
+      <!-- User-reported gap, not from the critique: this used to be one
+           combined "Worst Now" list ranked by |value| across BOTH deficit
+           and surplus stations -- a full-dock station isn't "worst" in
+           the same sense as an empty one, so a shared ranking obscured
+           which problem a given station actually has. Split into two
+           independently-ranked top-8 lists instead; each is now
+           internally comparable (same sign, same real problem). -->
+      <div class="worst" id="worst-deficit-wrap">
+        <div class="worst__title">Most bikes needed</div>
+        <ul id="worst-deficit-list"></ul>
+      </div>
+      <div class="worst" id="worst-surplus-wrap">
+        <div class="worst__title">Most docks needed</div>
+        <ul id="worst-surplus-list"></ul>
+      </div>
+
       <!-- Model performance: a small, low-emphasis reference disclosure
            near the footer -- real numbers, but static and read-once, so
-           it doesn't need Investigator's level of prominence. Fetched from
+           it doesn't need Scenario Planner's level of prominence. Fetched from
            data/model_performance.json (Session 30's walk-forward run)
            rather than hardcoded here -- hardcoded numbers are exactly what
            went stale after Session 5/7.5, still showing a single Feb+April
@@ -1095,7 +1154,7 @@
            independent of and stacks fine with the element's own native
            open/closed state; a <details> can be display:none via a class
            regardless of its open attribute. No JS at all needed for
-           open/close here (unlike Investigator's), since nothing
+           open/close here (unlike Scenario Planner's), since nothing
            re-renders on toggle -- the table is populated once at load
            regardless of visibility. -->
       <details id="model-eval" class="hidden">
@@ -1107,6 +1166,11 @@
                after. This text already existed and was already real
                (Session 30's actual walk-forward result, not invented for
                this move); only its position changed. -->
+          <!-- Session 57: moved here from under the time slider. It is a
+               statement about model accuracy, so it belongs with the other
+               accuracy numbers rather than as a fourth line of small print on
+               a control. Same id-free rename: #model-climatology-note. -->
+          <div id="model-climatology-note" class="hidden"></div>
           <div id="model-eval-caption"></div>
           <table>
             <thead>
@@ -1194,6 +1258,67 @@ function overplotAlphaForZoom(zoom) {
   if (zoom <= OVERPLOT_FADE_MIN_ZOOM) return OVERPLOT_MIN_ALPHA_SCALE;
   const t = (zoom - OVERPLOT_FADE_MIN_ZOOM) / (OVERPLOT_FADE_MAX_ZOOM - OVERPLOT_FADE_MIN_ZOOM);
   return OVERPLOT_MIN_ALPHA_SCALE + t * (1 - OVERPLOT_MIN_ALPHA_SCALE);
+}
+
+// Session 62: hover card for a station -- name on its own line, the readings
+// under it.
+//
+// Built at hover time, not precomputed onto all 2,516 markers: the slice
+// changes on every tick of the hour slider, so keeping 2,516 strings in sync
+// would be 2,516 builds per drag frame to serve the one marker under the
+// cursor. O(1) per hover instead of O(n) per render.
+//
+// THE NUMBERS HAVE TO ADD UP. The first version read
+// "7 bikes / 5 docks - 58% full - 12 docks total", which invited the reader to
+// check that 7 + 5 = 12. Against the real feed that arithmetic holds for only
+// 9.5% of stations: capacity is a nominal dock count, while bikes and open
+// docks are live counts that exclude disabled bikes and out-of-service docks
+// (median gap 2 docks, and num_bikes_disabled + num_docks_disabled accounts
+// for it exactly 63% of the time). Two different meanings of the word "docks"
+// sat in one line, and the sum was wrong nine times in ten.
+//
+// So the line that carries the percentage now shows ONLY the two numbers that
+// produce it -- bikes and capacity, which is what computeFillDistribution()
+// divides, so the tooltip and the KPI strip cannot disagree -- and free docks
+// are reported separately as their own rider-facing fact, with no implied
+// arithmetic between the two lines.
+//
+// Session 63: "N of M docks hold a bike" was replaced by "have a bike you can
+// take", because the first phrasing was not merely vague, it was false. At
+// Shore Rd & 4 Ave (12 docks: 4 rentable bikes, 7 BROKEN bikes, 1 free dock)
+// eleven of the twelve docks hold a bike; only four hold one anybody can rent.
+// num_bikes_available counts rentable bikes, so the label has to say rentable.
+//
+// Note also which denominator the percentage uses: capacity, not docks in
+// service. A station jammed with broken bikes therefore reads as 33% full
+// while being physically 92% occupied. That is deliberate -- it measures
+// USEFUL fill, which is what a rider and a rebalancing truck both care about
+// -- but it is a choice, not an identity.
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, ch =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+}
+
+function stationHoverHtml(id) {
+  const station = state.stations[id];
+  const name = `<b class="tip-name">${escapeHtml(station.name)}</b>`;
+
+  if (state.mode === 'live') {
+    if (!hasLiveData(id)) return `${name}<span class="tip-line">No live data for this station</span>`;
+    const live = state.liveStations[id];
+    const pctFull = Math.round((live.bikes_available / live.capacity) * 100);
+    return name
+      + `<span class="tip-line">${pctFull}% full \u2014 ${live.bikes_available} of ${live.capacity} docks have a bike you can take</span>`
+      + `<span class="tip-line">${live.docks_available} dock${live.docks_available === 1 ? '' : 's'} free to return to</span>`;
+  }
+
+  const curve = curveForPeriod(station, state.period, state.dayType);
+  if (curve === null) return `${name}<span class="tip-line">No data for this period</span>`;
+  const value = curve[state.currentHour] * weatherMultiplierFor(id);
+  const direction = value < 0 ? 'Losing' : 'Gaining';
+  return name
+    + `<span class="tip-line">${direction} ${Math.abs(value).toFixed(1)} bikes/day at ${escapeHtml(formatHourLabel(state.currentHour))}</span>`
+    + `<span class="tip-line">${escapeHtml(state.dayType)} \u00b7 ${escapeHtml(periodOptionLabel(state.period))}</span>`;
 }
 
 // Hover-only "grow" affordance, deliberately independent of the selection
@@ -1313,6 +1438,42 @@ function allPeriodCurves(station) {
 // swing could render as saturated as a genuine all-period extreme. Same
 // 95th-percentile-of-|value| logic as before, just over a bigger pool;
 // floored at 0.5 to avoid a degenerate 0-width domain.
+// Session 56: the fraction trimmed off each end of each axis when framing the
+// opening view. 0.02 keeps the middle 96% of stations per axis. Deliberately a
+// named constant rather than an inline 0.02 -- it is the single dial between
+// "focused on the service area" and "showing every station on load", and the
+// next person to argue about the framing should be able to find it.
+const VIEW_TRIM_FRACTION = 0.02;
+
+// Cap on the opening zoom. 11.0 frames Yonkers (40.93) just inside the top
+// edge down to ~40.54, below Coney Island -- the whole service area with its
+// context, rather than cropped tight against the outermost stations.
+//
+// Note this is HALF a level out from 11.5, not two: each zoom level doubles
+// the span, so two levels out (9.5) would reach Philadelphia to Connecticut.
+//
+// At this cap the VIEW_TRIM_FRACTION box no longer binds on a 900px-tall
+// viewport -- the cap is the tighter of the two. The trim is kept because it
+// still binds on taller viewports, where the natural fit would otherwise be
+// pulled wide by the handful of outermost stations.
+const VIEW_MAX_ZOOM = 11.0;
+
+// A latLngBounds covering the middle (1 - 2*trim) of stations on each axis.
+// Trimmed per-axis independently, which is what matches how a rectangular
+// viewport actually crops -- not by distance from a centroid.
+//
+// Reuses percentile() (the same helper the colour domain uses) rather than a
+// second interpolation, so "95th percentile" means the same arithmetic
+// everywhere in this file.
+function trimmedViewBounds(stations, ids, trim) {
+  const lats = ids.map(id => stations[id].lat).sort((a, b) => a - b);
+  const lngs = ids.map(id => stations[id].lng).sort((a, b) => a - b);
+  return L.latLngBounds(
+    [percentile(lats, trim), percentile(lngs, trim)],
+    [percentile(lats, 1 - trim), percentile(lngs, 1 - trim)]
+  );
+}
+
 function computeDomainMax(stations) {
   const allAbs = [];
   for (const id in stations) {
@@ -1351,7 +1512,10 @@ function formatPeriodLabel(period) {
 }
 
 function periodOptionLabel(period) {
-  if (period === 'all') return 'All-period average';
+  // "All-period average" named the internal bucket, not the thing a reader
+  // sees. This curve is the average day across every month in the dataset, so
+  // it now says that (Session 58).
+  if (period === 'all') return 'All months (average)';
   const label = formatPeriodLabel(period);
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
@@ -1455,7 +1619,7 @@ function formatAsOf(isoString) {
 // drift out of sync -- returns a fresh object each call, never a shared
 // reference, so resetting can't accidentally alias into whatever the
 // live state object currently is.
-function defaultInvestigatorState() {
+function defaultScenarioState() {
   return {
     equityThresholds: { nycha_school_m: 300, subway_gap_m: 800 }, // CLAUDE.md's fixed defaults
     fleetSize: 1, // Phase 3 -- 1..10 trucks, matches fleet_scenarios.json's own fleet_sizes range
@@ -1489,10 +1653,10 @@ const state = {
   demoMode: false, // true when flows.json failed and state.stations is DEMO_FLOWS_PAYLOAD instead of real data
   liveAvailable: true, // false when live_status.json failed independently -- gates the Live mode tab, not tied to demoMode
   // Investigator Mode's own state namespace, matching the Investigator_Mode_Guideline.md
-  // contract's investigatorState shape -- equityThresholds is Phase 1 (well,
+  // contract's scenarioState shape -- equityThresholds is Phase 1 (well,
   // Phase 2)'s only field; fleetSize/weatherScenario/dockOverrides join it
   // in later phases rather than each getting a separate ad hoc variable.
-  investigatorState: defaultInvestigatorState(),
+  scenarioState: defaultScenarioState(),
   fleetScenarios: null, // raw fleet_scenarios.json payload, or null if it failed/wasn't generated. Since Session 48 this is the ONLY route source -- null here means no route feature at all.
   elasticities: null, // raw elasticities.json payload, or null if missing -- Phase 4's weather-scenario projection needs this
   scenarioPresets: null, // raw scenario_presets.json payload, or null if missing
@@ -1607,7 +1771,7 @@ function computeEquityCounts(stations, thresholds) {
 // event without throttling, same rAF-coalescing rule the hour slider uses,
 // see the slider wiring below.
 function renderEquityCounts() {
-  const counts = computeEquityCounts(state.stations, state.investigatorState.equityThresholds);
+  const counts = computeEquityCounts(state.stations, state.scenarioState.equityThresholds);
   const total = counts.total.toLocaleString();
   document.getElementById('count-nycha').textContent =
     `Within NYCHA threshold: ${counts.nychaCount.toLocaleString()} of ${total} stations`;
@@ -1636,7 +1800,7 @@ function renderEquityCounts() {
 // slice. #readout-filter is gone rather than relocated: it existed only
 // because nothing else moved, and now that all three tiles do, a caption
 // restating the slider position is the duplication this masthead already
-// dropped once (see #title-meta's own note on the removed "Net flow at HH:MM"
+// dropped once (the masthead's removed "Net flow at HH:MM"
 // line). Its misleading "current map filter" wording -- which read like the
 // equity filter this project has a standing rule against ever building -- goes
 // with it.
@@ -1788,15 +1952,21 @@ function computeSliceTotals() {
 
 const RIBBON_EM_DASH = '—';
 
-function setRibbonTile(index, value, labelHtml, title) {
+// dotColor is a CSS colour or null. Null hides the dot outright rather than
+// painting it neutral -- see the .ribbon__dot comment.
+function setRibbonTile(index, value, labelHtml, title, dotColor) {
   document.getElementById(`ribbon-value-${index}`).textContent = value;
   document.getElementById(`ribbon-label-${index}`).innerHTML = labelHtml;
   // The full sentence lives in the tooltip; the visible label has one line to
   // work with. Set on the tile, not the label, so the whole target is hoverable.
   document.getElementById(`ribbon-tile-${index}`).title = title;
+
+  const dot = document.getElementById(`ribbon-dot-${index}`);
+  dot.classList.toggle('shown', Boolean(dotColor));
+  if (dotColor) dot.style.background = dotColor;
 }
 
-// Session 51: the timebar's model note. The historical curve on screen is
+// Session 51: the climatology note (moved out of the timebar in Session 57). The historical curve on screen is
 // the seasonal-naive predictor's own input -- that model forecasts an hour
 // by reaching for this climatology -- so printing its measured walk-forward
 // error here says what the curve is worth as a forecast without claiming the
@@ -1806,8 +1976,8 @@ function setRibbonTile(index, value, labelHtml, title) {
 // that optional file is missing, rather than showing a placeholder: an
 // accuracy claim with no measurement behind it is the one thing this note
 // must never be.
-function renderTimebarModelNote() {
-  const note = document.getElementById('timebar-model-note');
+function renderClimatologyNote() {
+  const note = document.getElementById('model-climatology-note');
   const aggregate = state.modelPerformance && state.modelPerformance.aggregate;
   if (!aggregate || typeof aggregate.naive_mean_mae !== 'number') {
     note.classList.add('hidden');
@@ -1958,44 +2128,53 @@ function renderRibbon() {
   if (!state.stations) return;
 
   if (state.mode === 'live') {
-    // Hero is the double-outage COUNT, not the compliance %. The percentage
-    // is real but it lands between 88% and 97% at every plausible adjacency
-    // radius, so as a headline it always reads "fine" and its dynamic range
-    // is spent on a choice nobody sees. It survives as this tile's caption,
-    // where it is context rather than the claim.
+    // Session 57: the four KPI tiles. Every figure here is read straight from
+    // the live feed (or the labelled snapshot fallback) via the SAME
+    // computations the map and the distribution card use -- computeLiveStandard()
+    // and computeFillDistribution() -- so nothing on this strip is a second,
+    // independently-derived number that could disagree with them.
+    //
+    // Dark dots on compliance and double-outage are deliberately the same
+    // colour: the dot reports STATUS, not identity, and only the empty/full
+    // pair carries a real red/blue meaning that matches the map.
     const standard = computeLiveStandard();
+    const fill = computeFillDistribution();
+    const pct = n => (fill && fill.total ? ` <span class="ribbon__window">${(100 * n / fill.total).toFixed(1)}%</span>` : '');
+
     setRibbonTile(
       1,
-      standard.inBreach.toLocaleString(),
-      standard.meetingRate === null
-        ? 'stations in double-outage'
-        : `in double-outage <span class="ribbon__window">${(standard.meetingRate * 100).toFixed(1)}% meeting</span>`,
-      `${standard.inBreach.toLocaleString()} of ${standard.total.toLocaleString()} stations with usable live data are completely full or empty AND have another such station within ${ADJACENCY_RADIUS_M} m. `
-        + `This is an INSTANT proxy for the contract's availability rule, following its "adjacent stations also unavailable" carve-out -- no 60-minute window is measured. `
-        + `The ${ADJACENCY_RADIUS_M} m radius is this project's operationalisation, not a contract figure.`
+      standard.meetingRate === null ? RIBBON_EM_DASH : `${(standard.meetingRate * 100).toFixed(1)}%`,
+      'system compliance',
+      `100% minus (double-outage stations / stations with usable live data): `
+        + `${(standard.total - standard.inBreach).toLocaleString()} of ${standard.total.toLocaleString()} are not in double-outage. `
+        + `An INSTANT proxy for the contract's availability rule -- no 60-minute window is measured. `
+        + `The ${ADJACENCY_RADIUS_M} m adjacency radius is this project's operationalisation, not a contract figure, and the figure moves several points if it changes.`,
+      '#0b0b0b'
     );
-
-    const fill = computeFillDistribution();
     setRibbonTile(
       2,
       fill === null ? RIBBON_EM_DASH : fill.nEmpty.toLocaleString(),
-      fill === null ? 'no usable live data' : `empty now <span class="ribbon__window">${(100 * fill.nEmpty / fill.total).toFixed(1)}%</span>`,
+      fill === null ? 'empty now' : `empty now${pct(fill.nEmpty)}`,
       fill === null ? 'No stations currently report usable live data.'
-        : `${fill.nEmpty} of ${fill.total.toLocaleString()} stations have 0 bikes -- a rider cannot start a trip there.`
+        : `Stations with 0 bikes available right now: ${fill.nEmpty} of ${fill.total.toLocaleString()} with usable live data. A rider cannot start a trip there.`,
+      rgba(DEFICIT_COLOR, 1)
     );
     setRibbonTile(
       3,
       fill === null ? RIBBON_EM_DASH : fill.nFull.toLocaleString(),
-      fill === null ? 'no usable live data' : `full now <span class="ribbon__window">${(100 * fill.nFull / fill.total).toFixed(1)}%</span>`,
+      fill === null ? 'full now' : `full now${pct(fill.nFull)}`,
       fill === null ? 'No stations currently report usable live data.'
-        : `${fill.nFull} of ${fill.total.toLocaleString()} stations have 0 docks -- a rider cannot end a trip there.`
+        : `Stations with 0 docks available right now: ${fill.nFull} of ${fill.total.toLocaleString()} with usable live data. A rider cannot end a trip there.`,
+      rgba(SURPLUS_COLOR, 1)
     );
     setRibbonTile(
       4,
-      fill === null ? RIBBON_EM_DASH : `${fill.median.toFixed(0)}%`,
-      'median dock fill',
-      fill === null ? 'No stations currently report usable live data.'
-        : `Median fill across ${fill.total.toLocaleString()} stations with usable live data. Median rather than mean: fill % is bounded at both ends and piles up at 0 and 100, so a mean is dragged around by the same extremes tiles 2 and 3 already report.`
+      standard.inBreach.toLocaleString(),
+      'double-outage now',
+      `Stations that are completely empty or full AND have another such station within ${ADJACENCY_RADIUS_M} m, right now: `
+        + `${standard.inBreach.toLocaleString()} of ${standard.total.toLocaleString()}. `
+        + `This follows the contract's "adjacent stations also unavailable" carve-out, measured instantaneously rather than over a 60-minute window.`,
+      '#0b0b0b'
     );
     return;
   }
@@ -2006,7 +2185,8 @@ function renderRibbon() {
     1,
     Math.round(totals.outOfPlace).toLocaleString(),
     'bikes out of place this hour',
-    `Total absolute net flow across all stations at ${slice} -- the size of the imbalance the system absorbs in this hour on a typical day.`
+    `Total absolute net flow across all stations at ${slice} -- the size of the imbalance the system absorbs in this hour on a typical day.`,
+    null // historical mode is outside the KPI strip's scope -- no status dot
   );
   // Percentages on tiles 2 and 3 only. Those are station counts against a real
   // denominator (stations with data for this slice), which is what a share is
@@ -2018,20 +2198,23 @@ function renderRibbon() {
     2,
     totals.nNeedBikes.toLocaleString(),
     `stations need bikes${share(totals.nNeedBikes)}`,
-    `${totals.nNeedBikes.toLocaleString()} of ${totals.withData.toLocaleString()} stations with data are draining at ${slice} (deficit risk: heading toward no bikes).`
+    `${totals.nNeedBikes.toLocaleString()} of ${totals.withData.toLocaleString()} stations with data are draining at ${slice} (deficit risk: heading toward no bikes).`,
+    null
   );
   setRibbonTile(
     3,
     totals.nNeedDocks.toLocaleString(),
     `stations need docks${share(totals.nNeedDocks)}`,
-    `${totals.nNeedDocks.toLocaleString()} of ${totals.withData.toLocaleString()} stations with data are filling at ${slice} (surplus risk: heading toward no open docks).`
+    `${totals.nNeedDocks.toLocaleString()} of ${totals.withData.toLocaleString()} stations with data are filling at ${slice} (surplus risk: heading toward no open docks).`,
+    null
   );
   setRibbonTile(
     4,
     Math.round(totals.bikesToMove).toLocaleString(),
     'bikes to move into deficit stations',
     `Bikes that would have to arrive at draining stations to bring them level in this hour -- the truck-side half of tile 1. `
-      + 'Not an optimised plan: no depots, no travel times, no vehicle capacities.'
+      + 'Not an optimised plan: no depots, no travel times, no vehicle capacities.',
+    null // historical mode is outside the KPI strip's scope -- no status dot
   );
 }
 
@@ -2156,12 +2339,12 @@ function renderWorstNow() {
 }
 
 function setEquityThreshold(key, value) {
-  state.investigatorState.equityThresholds[key] = value;
+  state.scenarioState.equityThresholds[key] = value;
   renderEquityCounts();
   // Fleet stats' equity-overlap line depends on the current thresholds
   // too, so it has to refresh here, not just from setFleetSize() --
   // guarded, since the fleet simulator may not have loaded at all.
-  if (state.fleetScenarios) renderFleetStats(state.investigatorState.fleetSize);
+  if (state.fleetScenarios) renderFleetStats(state.scenarioState.fleetSize);
   renderDiffBar();
   // Session 50: this used to call renderReadout(), because the old rail
   // readout carried two threshold-driven equity tiles. The ribbon that
@@ -2212,7 +2395,7 @@ function renderFleetStats(fleetSize) {
   const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
   const deficitRemaining = scenario.n_deficit_flagged - scenario.n_deficit_serviced;
   const surplusRemaining = scenario.n_surplus_flagged - scenario.n_surplus_serviced;
-  const overlap = computeServicedEquityOverlap(scenario, state.investigatorState.equityThresholds);
+  const overlap = computeServicedEquityOverlap(scenario, state.scenarioState.equityThresholds);
   document.getElementById('fleet-stats').textContent =
     `${deficitRemaining.toLocaleString()} of ${scenario.n_deficit_flagged.toLocaleString()} deficit stations still unserved ` +
     `(${scenario.n_deficit_serviced.toLocaleString()} cleared); ${surplusRemaining.toLocaleString()} of ` +
@@ -2222,7 +2405,7 @@ function renderFleetStats(fleetSize) {
 }
 
 function setFleetSize(fleetSize) {
-  state.investigatorState.fleetSize = fleetSize;
+  state.scenarioState.fleetSize = fleetSize;
   renderFleetStats(fleetSize);
   renderDiffBar();
 }
@@ -2236,7 +2419,7 @@ function setFleetSize(fleetSize) {
 // before any truck runs -- the same "Y" renderFleetStats() already uses
 // as its own "before" number, not a lookup into a nonexistent scenario
 // "0"). EQUITY_BASELINE_THRESHOLDS is intentionally its own constant,
-// not read from state.investigatorState -- the whole point is a FIXED
+// not read from state.scenarioState -- the whole point is a FIXED
 // reference independent of whatever the user's sliders currently show.
 const EQUITY_BASELINE_THRESHOLDS = { nycha_school_m: 300, subway_gap_m: 800 };
 
@@ -2244,13 +2427,13 @@ const EQUITY_BASELINE_THRESHOLDS = { nycha_school_m: 300, subway_gap_m: 800 };
 // -- gates the whole diff bar's visibility (zero height when nothing's
 // been explored yet, same "don't cost vertical space in the common
 // case" rule as every other card in this sidebar). Deliberately compares
-// against defaultInvestigatorState() (each field's OWN default), not
+// against defaultScenarioState() (each field's OWN default), not
 // against the diff-bar's per-section baseline concept above -- fleetSize
 // is always >=1 by construction, so comparing it to "0 trucks" would
 // make this always true even completely untouched.
-function investigatorStateDiffersFromDefault() {
-  const current = state.investigatorState;
-  const def = defaultInvestigatorState();
+function scenarioStateDiffersFromDefault() {
+  const current = state.scenarioState;
+  const def = defaultScenarioState();
   const equityChanged = current.equityThresholds.nycha_school_m !== def.equityThresholds.nycha_school_m
     || current.equityThresholds.subway_gap_m !== def.equityThresholds.subway_gap_m;
   const fleetChanged = current.fleetSize !== def.fleetSize;
@@ -2288,7 +2471,7 @@ function renderScenarioRow(name, { pillText, pillWarn, baselineText, scenarioTex
   document.getElementById(`scenario-scenario-${name}`).textContent = scenarioText;
 }
 
-// Renders the Scenario-vs-baseline card (and the Investigator tab's badge
+// Renders the Scenario-vs-baseline card (and the Scenario Planner tab's badge
 // dot) whenever anything that feeds it changes.
 //
 // Design critique task 04: each bar now plots (scenario - baseline) / a
@@ -2306,17 +2489,17 @@ function renderScenarioRow(name, { pillText, pillWarn, baselineText, scenarioTex
 // Each section still degrades independently if its own data source never
 // loaded, same graceful-degradation rule as every other optional layer.
 function renderDiffBar() {
-  const bar = document.getElementById('investigator-diff-bar');
-  const badge = document.getElementById('investigator-badge');
-  badge.classList.toggle('hidden', !investigatorStateDiffersFromDefault());
+  const bar = document.getElementById('scenario-planner-diff-bar');
+  const badge = document.getElementById('scenario-planner-badge');
+  badge.classList.toggle('hidden', !scenarioStateDiffersFromDefault());
 
-  // Visible whenever the Investigator panel is EXPANDED (even if every
+  // Visible whenever the Scenario Planner panel is EXPANDED (even if every
   // control is still at its own default) OR whenever something differs
   // from baseline even after collapsing it again -- a reviewer who
-  // applies a scenario then collapses Investigator to look at the map
+  // applies a scenario then collapses Scenario Planner to look at the map
   // must not lose the cue that a non-default scenario is still active.
   // Hidden only when BOTH true: collapsed AND everything's at baseline.
-  if (!document.getElementById('investigator-panel').open && !investigatorStateDiffersFromDefault()) {
+  if (!document.getElementById('scenario-planner-panel').open && !scenarioStateDiffersFromDefault()) {
     bar.classList.add('hidden');
     return;
   }
@@ -2331,7 +2514,7 @@ function renderDiffBar() {
 
   const totalStations = Object.keys(state.stations).length;
   const equityBaseline = computeEquityCounts(state.stations, EQUITY_BASELINE_THRESHOLDS);
-  const equityScenario = computeEquityCounts(state.stations, state.investigatorState.equityThresholds);
+  const equityScenario = computeEquityCounts(state.stations, state.scenarioState.equityThresholds);
   const equityDelta = equityScenario.nychaOrSchoolCount - equityBaseline.nychaOrSchoolCount;
   if (equityDelta !== 0) {
     summaryClauses.push(
@@ -2349,7 +2532,7 @@ function renderDiffBar() {
   const fleetRow = document.getElementById('scenario-row-fleet');
   if (state.fleetScenarios) {
     fleetRow.classList.remove('hidden');
-    const fleetSize = state.investigatorState.fleetSize;
+    const fleetSize = state.scenarioState.fleetSize;
     const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
     const flagged = scenario.n_deficit_flagged;
     const remaining = flagged - scenario.n_deficit_serviced;
@@ -2365,13 +2548,13 @@ function renderDiffBar() {
     // exactly the "bar disagrees with the pill" problem the design
     // critique caught, just via a different mechanism than the equity
     // row's.
-    const isDefaultFleetSize = fleetSize === defaultInvestigatorState().fleetSize;
-    const defaultScenario = state.fleetScenarios.scenarios[String(defaultInvestigatorState().fleetSize)];
+    const isDefaultFleetSize = fleetSize === defaultScenarioState().fleetSize;
+    const defaultScenario = state.fleetScenarios.scenarios[String(defaultScenarioState().fleetSize)];
     const defaultRemaining = defaultScenario.n_deficit_flagged - defaultScenario.n_deficit_serviced;
     const fleetDelta = remaining - defaultRemaining; // negative = fewer unserved than baseline = real improvement
 
     if (!isDefaultFleetSize) {
-      const overlap = computeServicedEquityOverlap(scenario, state.investigatorState.equityThresholds);
+      const overlap = computeServicedEquityOverlap(scenario, state.scenarioState.equityThresholds);
       let clause = `${fleetSize} truck${fleetSize === 1 ? '' : 's'} cleared ${cleared.toLocaleString()} of ${flagged.toLocaleString()} flagged deficit stations`;
       if (overlap.totalServiced > 0) {
         clause += `, including ${overlap.equityServiced.toLocaleString()} of ${overlap.totalServiced.toLocaleString()} serviced stations within equity thresholds`;
@@ -2381,7 +2564,7 @@ function renderDiffBar() {
     renderScenarioRow('fleet', {
       pillText: isDefaultFleetSize ? 'No change' : `${fleetDelta > 0 ? '+' : '−'}${Math.abs(fleetDelta).toLocaleString()} unserved`,
       pillWarn: !isDefaultFleetSize,
-      baselineText: `${defaultRemaining.toLocaleString()} baseline (${defaultInvestigatorState().fleetSize} truck)`,
+      baselineText: `${defaultRemaining.toLocaleString()} baseline (${defaultScenarioState().fleetSize} truck)`,
       scenarioText: `${remaining.toLocaleString()} scenario (${fleetSize} truck(s))`,
       deltaPct: flagged ? fleetDelta / flagged : 0,
     });
@@ -2395,7 +2578,7 @@ function renderDiffBar() {
     const label = isBaselineWeatherScenario()
       ? 'ideal (baseline)'
       : (matchingWeatherPreset() ? matchingWeatherPreset().label : 'custom scenario');
-    const scenarioTempF = Math.round(state.investigatorState.weatherScenario.temp_c * 9 / 5 + 32);
+    const scenarioTempF = Math.round(state.scenarioState.weatherScenario.temp_c * 9 / 5 + 32);
     if (!isBaselineWeatherScenario()) {
       summaryClauses.push(`Weather scenario "${label}" is projected onto historical flow using real fitted elasticities (not a live forecast).`);
     }
@@ -2403,7 +2586,7 @@ function renderDiffBar() {
     weatherPill.textContent = isBaselineWeatherScenario() ? 'No change' : label;
     weatherPill.classList.toggle('warn', !isBaselineWeatherScenario());
     weatherPill.classList.toggle('neutral', isBaselineWeatherScenario());
-    const precipIn = mmToInches(state.investigatorState.weatherScenario.precip_mm);
+    const precipIn = mmToInches(state.scenarioState.weatherScenario.precip_mm);
     document.getElementById('scenario-weather-value').textContent = `${scenarioTempF}°F · ${precipIn.toFixed(1)} in`;
   } else {
     weatherRow.classList.add('hidden');
@@ -2414,7 +2597,7 @@ function renderDiffBar() {
     : 'Currently at baseline — no adjustments applied yet.';
 }
 
-// Applies a (possibly partial) investigatorState object -- from a loaded
+// Applies a (possibly partial) scenarioState object -- from a loaded
 // preset or a page-load ?scenario= param -- by delegating to the SAME
 // state-mutation functions manual interaction already uses
 // (setEquityThreshold-equivalent updates/setFleetSize/the weather
@@ -2435,13 +2618,13 @@ function isFiniteNumber(x) {
   return typeof x === 'number' && Number.isFinite(x);
 }
 
-function applyInvestigatorState(loaded) {
+function applyScenarioState(loaded) {
   if (
     loaded && loaded.equityThresholds
     && isFiniteNumber(loaded.equityThresholds.nycha_school_m) && loaded.equityThresholds.nycha_school_m >= 0
     && isFiniteNumber(loaded.equityThresholds.subway_gap_m) && loaded.equityThresholds.subway_gap_m >= 0
   ) {
-    state.investigatorState.equityThresholds = {
+    state.scenarioState.equityThresholds = {
       nycha_school_m: loaded.equityThresholds.nycha_school_m,
       subway_gap_m: loaded.equityThresholds.subway_gap_m,
     };
@@ -2477,7 +2660,7 @@ function applyInvestigatorState(loaded) {
     const knownPresetId = state.scenarioPresets.presets.some(p => p.id === loaded.weatherScenario.presetId)
       ? loaded.weatherScenario.presetId
       : null;
-    state.investigatorState.weatherScenario = {
+    state.scenarioState.weatherScenario = {
       temp_c: loaded.weatherScenario.temp_c,
       precip_mm: loaded.weatherScenario.precip_mm,
       presetId: knownPresetId,
@@ -2498,13 +2681,13 @@ function applyInvestigatorState(loaded) {
 }
 
 function resetToBaseline() {
-  applyInvestigatorState(defaultInvestigatorState());
+  applyScenarioState(defaultScenarioState());
 }
 
 const PRESET_QUERY_PARAM = 'scenario';
 
 function buildShareableUrl() {
-  const encoded = encodeURIComponent(JSON.stringify(state.investigatorState));
+  const encoded = encodeURIComponent(JSON.stringify(state.scenarioState));
   const base = (typeof location !== 'undefined' && location.origin) ? `${location.origin}${location.pathname}` : '';
   return `${base}?${PRESET_QUERY_PARAM}=${encoded}`;
 }
@@ -2640,7 +2823,7 @@ function weatherMultiplierFor(id) {
   );
   if (!referencePreset) return 1;
 
-  const scenario = state.investigatorState.weatherScenario;
+  const scenario = state.scenarioState.weatherScenario;
   const deltaTemp = scenario.temp_c - referencePreset.temp_c;
   const deltaPrecip = scenario.precip_mm - referencePreset.precip_mm;
 
@@ -2669,7 +2852,7 @@ function isBaselineWeatherScenario() {
     p => p.id === state.scenarioPresets.reference_preset_id
   );
   if (!referencePreset) return true;
-  const scenario = state.investigatorState.weatherScenario;
+  const scenario = state.scenarioState.weatherScenario;
   return scenario.temp_c === referencePreset.temp_c && scenario.precip_mm === referencePreset.precip_mm;
 }
 
@@ -2679,13 +2862,19 @@ function isBaselineWeatherScenario() {
 // dropdown selection.
 function matchingWeatherPreset() {
   if (!state.scenarioPresets) return null;
-  const scenario = state.investigatorState.weatherScenario;
+  const scenario = state.scenarioState.weatherScenario;
   return state.scenarioPresets.presets.find(
     p => p.temp_c === scenario.temp_c && p.precip_mm === scenario.precip_mm
   ) || null;
 }
 
-// Short suffix for #title-meta -- lets a collapsed Investigator panel's
+// UNUSED since Session 63. Its only caller was the hero subtitle line, which
+// was removed as a third copy of information the Scenario Planner's own status
+// line, badge and diff bar already carry. Kept rather than deleted -- it is
+// correct, exported, and would be the ready-made helper if a compact
+// "scenario is active" suffix is ever wanted somewhere else.
+//
+// Short suffix formerly for #title-meta -- let a collapsed Scenario Planner's
 // active scenario stay visible somewhere, so recolored markers are never
 // silently unexplained. Historical-mode concept only (weather elasticities
 // were derived from historical flow, not live dock fill %); callers only
@@ -2699,7 +2888,7 @@ function weatherScenarioMetaSuffix() {
 
 // Populates the investigator panel's own status line -- the primary,
 // always-visible-when-expanded explanation of what's currently applied,
-// independent of whether #title-meta's compact suffix is also showing.
+// independent of any compact suffix elsewhere (there is none since Session 63).
 function renderWeatherScenarioStatus() {
   const statusEl = document.getElementById('weather-scenario-status');
   if (isBaselineWeatherScenario()) {
@@ -2776,8 +2965,15 @@ function renderHour(hour) {
   // thing either way (0% full IS a deficit: no bikes to pick up; 100%
   // full IS a surplus: no docks to return to), so a mode switch must not
   // make the legend look like a different, unrelated scale.
-  document.getElementById('legend-label-low').textContent = 'Deficit (no bikes)';
-  document.getElementById('legend-label-high').textContent = 'Surplus (no docks)';
+  // One word per column so each label sits under its own number. The gloss
+  // that used to be inline -- "(no bikes)" / "(no docks)" -- is on the card's
+  // tooltip instead: at 232px each grid cell is ~70px, and the longer strings
+  // wrapped onto two lines, which is how they stopped lining up in the first
+  // place. Same wording in both modes: red/blue mean the same real thing
+  // either way (0% full IS a deficit; 100% full IS a surplus).
+  document.getElementById('legend-label-low').textContent = 'Deficit';
+  document.getElementById('legend-label-mid').textContent = 'Balanced';
+  document.getElementById('legend-label-high').textContent = 'Surplus';
   renderLegendScale();
 
   // Session 53: #legend-caption is written by renderLegendScale() alone now.
@@ -2904,7 +3100,8 @@ function setPeriod(period) {
   updateStatusMessage();
 }
 
-// Writes the station-count/coverage message into #title-meta -- now the
+// Writes live mode's coverage note. Historical coverage moved to the
+// distribution card in Session 63. Formerly wrote #title-meta -- then the
 // ONLY subtitle content (the old "Net flow at HH:MM, weekday (period)"
 // phrase was dropped as pure duplication of the Map controls panel's own
 // hour/day/period controls). Hidden entirely in the common case now (zero
@@ -2933,32 +3130,27 @@ function updateStatusMessage() {
   // "testable/inspectable even while hidden" pattern the diff bar and
   // every other conditional disclosure in this dashboard already
   // follows) -- only the .hidden toggle below is conditional.
-  const meta = document.getElementById('title-meta');
-  const line = document.getElementById('title-subtitle-line');
   const total = ids.length;
 
+  // Session 63: the hero subtitle is gone. It carried two things and BOTH were
+  // already on screen elsewhere:
+  //
+  //   coverage ("N of M stations have data for May 2026") -- the distribution
+  //     card states exactly this set, from the same hasPeriodData/curveForPeriod
+  //     test, in its own note;
+  //   weather ("Rainy day (projected)") -- the Scenario Planner's own status
+  //     line says it in full, its amber badge marks it while collapsed, and
+  //     renderDiffBar() deliberately keeps the diff bar visible whenever a
+  //     scenario differs from baseline even after the panel is collapsed.
+  //
+  // So this was a third copy under the title, in the one place a reader looks
+  // for the tool's name rather than for a caveat.
   if (state.mode === 'live') {
-    // Live coverage lives next to "Live as of ..." in the Map controls
-    // card now, not the hero -- it's Live-mode-specific, so it belongs
-    // beside the other live-only fact rather than the title. The hero
-    // subtitle line itself stays hidden in Live mode unconditionally.
-    line.classList.add('hidden');
     const withData = ids.filter(hasLiveData).length;
     const note = document.getElementById('live-coverage-note');
     note.textContent = `${withData.toLocaleString()} of ${total.toLocaleString()} stations have live data`;
     note.classList.toggle('hidden', withData === total); // every station has live data -- nothing to flag
-    return;
   }
-
-  const weatherSuffix = weatherScenarioMetaSuffix();
-  if (state.period === 'all') {
-    meta.textContent = `${total.toLocaleString()} stations` + weatherSuffix;
-    line.classList.toggle('hidden', !weatherSuffix); // full coverage by construction -- only a weather scenario makes this worth showing
-    return;
-  }
-  const withData = ids.filter(id => hasPeriodData(state.stations[id], state.period)).length;
-  meta.textContent = `${withData.toLocaleString()} of ${total.toLocaleString()} stations have data for ${formatPeriodLabel(state.period)}` + weatherSuffix;
-  line.classList.toggle('hidden', withData === total && !weatherSuffix); // full coverage AND no weather scenario -- nothing to flag
 }
 
 // Switches historical <-> live and re-renders through the same renderHour
@@ -2977,7 +3169,7 @@ function updateStatusMessage() {
 // block -- left/width/transform are cleared so they don't fight the
 // stylesheet there.
 const TIMEBAR_MOBILE_BREAKPOINT_PX = 768; // matches the @media rule above
-const TIMEBAR_MAX_WIDTH_PX = 420; // matches this file's other floating cards' scale (map-controls-bar/legend-card), not the old full-width dock
+const TIMEBAR_MAX_WIDTH_PX = 380; // matches this file's other floating cards' scale (map-controls-bar/legend-card), not the old full-width dock
 function positionTimebar() {
   const timebar = document.getElementById('timebar');
   if (window.innerWidth <= TIMEBAR_MOBILE_BREAKPOINT_PX) {
@@ -2987,7 +3179,10 @@ function positionTimebar() {
     return;
   }
   const mapWidth = document.getElementById('map-col').getBoundingClientRect().width;
-  timebar.style.width = `${Math.min(TIMEBAR_MAX_WIDTH_PX, mapWidth - 32)}px`;
+  // Live mode's dock is one line of text, not three rows of controls, so it
+  // sizes to its content instead of being stretched to slider width. Clearing
+  // the inline width hands it back to the stylesheet's `width: fit-content`.
+  timebar.style.width = state.mode === 'live' ? '' : `${Math.min(TIMEBAR_MAX_WIDTH_PX, mapWidth - 32)}px`;
   timebar.style.left = `${mapWidth / 2}px`;
   timebar.style.transform = 'translateX(-50%)';
 }
@@ -3060,15 +3255,17 @@ function setMode(mode) {
   setLiveRefresh(mode === 'live');
   setRadioActive('mode-historical', mode === 'historical');
   setRadioActive('mode-live', mode === 'live');
-  document.getElementById('historical-controls').classList.toggle('hidden', mode !== 'historical');
-  document.getElementById('timebar').classList.toggle('hidden', mode !== 'historical'); // task 07: timebar moved out of historical-controls, so it needs its own explicit toggle now
-  document.getElementById('live-as-of').classList.toggle('hidden', mode !== 'live');
-  // Session 53: the mode toggle went back to the masthead, so this card holds
-  // only #live-as-of again and is empty in historical mode -- hidden here so
-  // it does not float as a blank rectangle over the map. Set in JS, not by a
-  // class in the markup, per the standing rule; setMode() runs at init, so
-  // this covers the load state as well as every later switch.
-  document.getElementById('map-controls-bar').classList.toggle('hidden', mode !== 'live');
+  // Session 60: #timebar is ALWAYS visible; its contents swap. The hour
+  // controls belong to historical mode, the "Live as of" stamp to live mode,
+  // and exactly one set is shown. Every one of these is set here in JS rather
+  // than implied by markup, per the standing rule -- setMode() runs at init,
+  // so this covers the load state as well as every later switch.
+  const historical = mode === 'historical';
+  document.getElementById('historical-controls').classList.toggle('hidden', !historical);
+  document.getElementById('timebar-scrub').classList.toggle('hidden', !historical);
+  document.getElementById('timebar-ticks').classList.toggle('hidden', !historical);
+  document.getElementById('live-as-of').classList.toggle('hidden', historical);
+  positionTimebar(); // the dock's width depends on which set is showing -- see below
   renderHour(state.currentHour);
   updateStatusMessage();
 }
@@ -3328,15 +3525,23 @@ function renderLegendScale() {
   const high = document.getElementById('legend-tick-high');
   const caption = document.getElementById('legend-caption');
 
+  const mid = document.getElementById('legend-tick-mid');
+
   if (state.mode === 'live') {
-    title.textContent = 'Dock fill';
+    title.textContent = 'Dock Fill';
     low.textContent = '0% full';
+    // Session 61: the middle tick was the literal string "0" hardcoded in the
+    // markup and never touched by this function, so live mode read
+    // "0% full / 0 / 100% full" -- a zero sitting between two percentages,
+    // meaning nothing. The midpoint of a fill scale is 50%.
+    mid.textContent = '50%';
     high.textContent = '100% full';
     caption.textContent = 'Click a station for its live status';
     return;
   }
 
-  title.textContent = 'Net daily flow (bikes/day)';
+  title.textContent = 'Net Daily Flow (bikes/day)';
+  mid.textContent = '0'; // net flow's real midpoint: as many bikes arriving as leaving
   const max = state.domainMax ? state.domainMax.toFixed(1) : '0.0';
   low.textContent = `-${max}`;
   high.textContent = `+${max}`;
@@ -3356,9 +3561,10 @@ function renderLegendScale() {
     shown += 1;
     if (Math.abs(curve[state.currentHour] * weatherMultiplierFor(id)) > state.domainMax) beyond += 1;
   }
-  document.getElementById('legend-card').title = beyond
+  document.getElementById('legend-card').title = 'Deficit = heading toward no bikes. Surplus = heading toward no open docks. '
+    + (beyond
     ? `Scale ends are the 95th percentile of |net flow|, not the range: colour saturates at \u00b1${max}, and ${beyond.toLocaleString()} of ${shown.toLocaleString()} stations are past it at this slice. Click one for its real value.`
-    : `Scale ends are the 95th percentile of |net flow| (\u00b1${max}).`;
+    : `Scale ends are the 95th percentile of |net flow| (\u00b1${max}).`);
 }
 
 // Session 52: a CONTINUOUS spectrum, per the "legend" design. This used to
@@ -3380,7 +3586,19 @@ function drawLegendGradient(domainMax) {
 // default topleft placement -- #map-controls-bar now occupies top-left,
 // and moving the (much lower-stakes, no positional expectation) zoom
 // buttons out of its way is simpler than trying to fit both in one corner.
-const map = L.map('map', { zoomControl: false }).setView([40.73, -73.95], 11); // NYC default, replaced by fitBounds once real station coords load
+// zoomSnap 0.25 (Session 56): Leaflet's default zoomSnap of 1 FLOORS every
+// fitBounds() to a whole zoom level, and that -- not the shape of the bounding
+// box -- was what kept the opening view framed on Yonkers and Long Beach. The
+// full station extent fits at zoom 11.52 and the percentile-trimmed box at
+// 11.84; both floored to 11, so trimming the box changed nothing on screen.
+// Quarter steps let the fit land at 11.75 and actually tighten.
+//
+// zoomDelta stays 1 so the +/- buttons and keyboard still move a whole level
+// at a time -- only the programmatic fit and the wheel get finer resolution.
+// markerRadiusForZoom() and overplotAlphaForZoom() are both continuous in
+// zoom (no array indexing, no integer assumptions), so fractional zoom needs
+// no changes there and in fact interpolates more smoothly than before.
+const map = L.map('map', { zoomControl: false, zoomSnap: 0.25, zoomDelta: 1 }).setView([40.73, -73.95], 11); // NYC default, replaced by fitBounds once real station coords load
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 // Click tolerance (Session 49). Station dots are 2.5-8px, so at city zoom a
@@ -3576,7 +3794,7 @@ function showDemoBanner(reason) {
 // layer: a failed fetch resolves to null rather than rejecting, so it can
 // never trip the top-level .catch(). Generated by
 // pipeline/fleet_simulator.py; won't exist until that script has run once.
-// Without it the Investigator's fleet section simply doesn't appear.
+// Without it the Scenario Planner's fleet section simply doesn't appear.
 const fleetScenariosReady = fetchJSON('data/fleet_scenarios.json').catch(() => null);
 
 // elasticities.json/scenario_presets.json (Investigator Mode Phase 4) --
@@ -3689,15 +3907,28 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
       const latlng = [state.stations[id].lat, state.stations[id].lng];
       bounds = bounds ? bounds.extend(latlng) : L.latLngBounds([latlng, latlng]);
     }
-    map.fitBounds(bounds, { padding: [28, 28] });
+    // Session 56: the OPENING VIEW is fitted to a percentile-trimmed box, not
+    // to the full extent.
+    //
     // A bounding box around NYC's real, diagonal station footprint is
-    // necessarily much bigger than the footprint itself (it has to cover
-    // the empty corners too -- Long Island Sound, NJ inland, the Rockaways
-    // gap), so fitBounds alone still leaves a lot of visible non-station
-    // area. What actually fixes "the map reaches Elizabeth/New Rochelle/
-    // Long Beach" is bounding how far a user can pan/zoom AWAY from the
-    // fitted view, not the initial fit itself (which was already real,
-    // not hardcoded -- see the loop above).
+    // necessarily much bigger than the footprint itself -- it has to cover the
+    // empty corners too (Long Island Sound, NJ inland, the Rockaways gap), so
+    // fitting the full extent opened the map on Yonkers, New Rochelle and Long
+    // Beach. An earlier pass concluded the fix was to bound how far a user can
+    // pan AWAY from the fit rather than change the fit itself; that helped, but
+    // it left the first paint framed on water.
+    //
+    // Trimming the outer 2% of stations per axis shrinks the opening box to
+    // ~80% of its height and ~73% of its width. 198 of 2,516 stations (7.9%)
+    // therefore start off-screen -- which is why only the VIEW is trimmed:
+    // setMaxBounds and setMinZoom below still use the FULL extent, so every
+    // one of those stations stays reachable by panning or zooming out. Nothing
+    // is hidden, only deferred; a map that made stations unreachable to look
+    // tidier would be trading away real data for framing.
+    // maxZoom caps the fit rather than setting it: on a short viewport the
+    // natural fit is already looser than this and must stay that way, so this
+    // only ever pulls the WIDE case back, never pushes a narrow one in.
+    map.fitBounds(trimmedViewBounds(state.stations, ids, VIEW_TRIM_FRACTION), { padding: [28, 28], maxZoom: VIEW_MAX_ZOOM });
     map.setMaxBounds(bounds.pad(0.30));
     map.setMinZoom(map.getBoundsZoom(bounds) - 1);
 
@@ -3715,7 +3946,14 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
         markerStyleFor(id)
       ));
       marker.on('click', () => selectStation(id));
-      marker.on('mouseover', () => marker.setRadius(radiusFor(id) + MARKER_HOVER_RADIUS_DELTA_PX));
+      // Bound empty once; filled on hover (see stationHoverText). sticky so it
+      // tracks the cursor rather than anchoring to the dot -- at city zoom the
+      // dots are 2.5px and an anchored tooltip covers its own station.
+      marker.bindTooltip('', { direction: 'top', offset: [0, -4], sticky: true, opacity: 0.95 });
+      marker.on('mouseover', () => {
+        marker.setRadius(radiusFor(id) + MARKER_HOVER_RADIUS_DELTA_PX);
+        marker.setTooltipContent(stationHoverHtml(id));
+      });
       marker.on('mouseout', () => marker.setRadius(radiusFor(id)));
       state.markers[id] = marker;
     }
@@ -3732,7 +3970,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
 
     // Fleet simulator sub-section: visible only if fleet_scenarios.json
     // loaded. Slider's initial .value/label text set explicitly here from
-    // state.investigatorState.fleetSize, not left to the static HTML's
+    // state.scenarioState.fleetSize, not left to the static HTML's
     // value="1" attribute to already agree with it -- same standing fix as
     // the equity sliders above. renderFleetStats() runs once at load (pure
     // text, safe before any interaction). Since Session 49 removed the
@@ -3742,7 +3980,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
       document.getElementById('fleet-accordion').classList.remove('hidden');
       const fleetSlider = document.getElementById('fleet-size-slider');
       const fleetValueEl = document.getElementById('fleet-size-value');
-      const initialFleetSize = state.investigatorState.fleetSize;
+      const initialFleetSize = state.scenarioState.fleetSize;
       fleetSlider.value = String(initialFleetSize);
       fleetValueEl.textContent = String(initialFleetSize);
       renderFleetStats(initialFleetSize);
@@ -3768,7 +4006,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // elasticities.json and scenario_presets.json loaded -- a projection
     // needs both (elasticities to project with, presets for the reference
     // point and quick-fill values). Preset/slider initial state set
-    // explicitly here from state.investigatorState.weatherScenario, same
+    // explicitly here from state.scenarioState.weatherScenario, same
     // standing fix as every other control above. Every change re-renders
     // through renderHour() (the one existing render path every marker's
     // color already goes through, not a second parallel coloring path),
@@ -3799,7 +4037,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
         presetSelect.appendChild(opt);
       }
 
-      const initialScenario = state.investigatorState.weatherScenario;
+      const initialScenario = state.scenarioState.weatherScenario;
       presetSelect.value = initialScenario.presetId;
       const initialTempF = Math.round(initialScenario.temp_c * 9 / 5 + 32);
       tempSlider.value = String(initialTempF);
@@ -3815,7 +4053,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
           weatherRafScheduled = true;
           requestAnimationFrame(() => {
             renderHour(state.currentHour);
-            updateStatusMessage(); // renderHour() alone doesn't refresh #title-meta's weather-scenario suffix
+            updateStatusMessage(); // keeps live-mode coverage in sync; harmless in historical mode
             renderWeatherScenarioStatus();
             renderDiffBar();
             weatherRafScheduled = false;
@@ -3826,7 +4064,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
       presetSelect.addEventListener('change', event => {
         const preset = state.scenarioPresets.presets.find(p => p.id === event.target.value);
         if (!preset) return;
-        state.investigatorState.weatherScenario = {
+        state.scenarioState.weatherScenario = {
           temp_c: preset.temp_c, precip_mm: preset.precip_mm, presetId: preset.id,
         };
         const tempF = Math.round(preset.temp_c * 9 / 5 + 32);
@@ -3841,14 +4079,14 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
       tempSlider.addEventListener('input', event => {
         const f = Number(event.target.value);
         tempValueEl.textContent = String(f);
-        state.investigatorState.weatherScenario.temp_c = fahrenheitToCelsius(f);
+        state.scenarioState.weatherScenario.temp_c = fahrenheitToCelsius(f);
         scheduleWeatherRerender();
       });
 
       precipSlider.addEventListener('input', event => {
         const inches = Number(event.target.value);
         precipValueEl.textContent = inches.toFixed(1);
-        state.investigatorState.weatherScenario.precip_mm = inchesToMm(inches);
+        state.scenarioState.weatherScenario.precip_mm = inchesToMm(inches);
         scheduleWeatherRerender();
       });
     } else {
@@ -3856,14 +4094,14 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     }
 
     // Investigator Mode Phase 6: save/load/reset, wired regardless of
-    // which of the three data sources loaded -- applyInvestigatorState()
+    // which of the three data sources loaded -- applyScenarioState()
     // itself already guards each section independently.
     document.getElementById('save-preset-btn').addEventListener('click', () => {
       document.getElementById('preset-url-output').value = buildShareableUrl();
     });
     document.getElementById('load-preset-btn').addEventListener('click', () => {
       const loaded = parsePresetInput(document.getElementById('preset-load-input').value);
-      if (loaded) applyInvestigatorState(loaded);
+      if (loaded) applyScenarioState(loaded);
     });
     document.getElementById('reset-baseline-btn').addEventListener('click', resetToBaseline);
 
@@ -3873,23 +4111,42 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // link, not a manual extra click after navigating there.
     if (typeof location !== 'undefined' && location.search) {
       const loadedFromUrl = parsePresetInput(location.search);
-      if (loadedFromUrl) applyInvestigatorState(loadedFromUrl);
+      if (loadedFromUrl) applyScenarioState(loadedFromUrl);
     }
     renderDiffBar(); // initial render either way -- hides itself if nothing loaded from the URL and nothing's been touched yet
 
     // Period options built from flows.json's own granularity block, never a
     // hardcoded season/month list -- 'all' (the existing all-period average)
     // always comes first as the default.
+    // Session 58: grouped with <optgroup> rather than one flat list of 18.
+    // The list itself is unchanged -- all-period, every season, every month,
+    // still built from flows.json's own granularity block and never hardcoded
+    // -- but flat, a reader scrolling past "Fall" into "July 2025" got no
+    // signal that the KIND of thing being chosen had changed. Grouping is
+    // labelling, not filtering: nothing was removed to tidy the list up.
     const periodSelect = document.getElementById('period-select');
-    const periods = ['all'];
-    for (const season of flowsResult.payload.granularity.seasons) periods.push(`season:${season}`);
-    for (const month of flowsResult.payload.granularity.months) periods.push(`month:${month}`);
-    for (const period of periods) {
+    const addOption = (parent, period) => {
       const opt = document.createElement('option');
       opt.value = period;
       opt.textContent = periodOptionLabel(period);
-      periodSelect.appendChild(opt);
-    }
+      parent.appendChild(opt);
+    };
+    const addGroup = (label, periods) => {
+      if (!periods.length) return; // a granularity block with no seasons must not leave an empty group behind
+      const group = document.createElement('optgroup');
+      group.label = label;
+      for (const period of periods) addOption(group, period);
+      periodSelect.appendChild(group);
+    };
+
+    addOption(periodSelect, 'all');
+    addGroup('Seasons', flowsResult.payload.granularity.seasons.map(season => `season:${season}`));
+    // Newest first (Session 63). granularity.months is ascending because that is
+    // how the pipeline emits it; a reader picking a month is far more often
+    // reaching for the most recent one than for the oldest, and scrolling to
+    // the bottom of thirteen entries to find it was backwards. Reversed a COPY
+    // -- granularity is shared state and .reverse() mutates in place.
+    addGroup('Months', flowsResult.payload.granularity.months.slice().reverse().map(month => `month:${month}`));
     periodSelect.value = state.period;
 
     // mode-live is disabled, not hidden -- it is one button in an
@@ -3972,7 +4229,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     document.getElementById('detail-close').addEventListener('click', closeStation);
     document.getElementById('detail-more-toggle').addEventListener('click', () => setDetailMoreInfoExpanded(!state.detailMoreInfoExpanded));
 
-    // Investigator mode: native <details> now (design critique task 09)
+    // Scenario Planner: native <details> now (design critique task 09)
     // -- open/close itself is free (browser-native, no JS), but
     // renderDiffBar() still needs to run on every open/close because the
     // diff bar's own visibility rule depends on whether the panel is open
@@ -3980,9 +4237,9 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // Model's element below, because renderDiffBar() genuinely depends on
     // state.stations, so there's nothing meaningful to render before data
     // loads.
-    const investigatorPanel = document.getElementById('investigator-panel');
-    investigatorPanel.addEventListener('toggle', renderDiffBar);
-    // Design critique: Investigator Mode is the standout feature of this
+    const scenarioPlannerPanel = document.getElementById('scenario-planner-panel');
+    scenarioPlannerPanel.addEventListener('toggle', renderDiffBar);
+    // Design critique: Scenario Planner is the standout feature of this
     // dashboard, and collapsing it by default undersold it -- a first-time
     // viewer's eye should land here, not on a plain accordion row
     // competing with Model performance right below it. Expanded by
@@ -3991,7 +4248,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // renderDiffBar() is called directly rather than relied upon to fire
     // via the 'toggle' listener above, since a programmatic .open
     // assignment firing a native 'toggle' event is not safe to assume.
-    investigatorPanel.open = true;
+    scenarioPlannerPanel.open = true;
     renderDiffBar();
 
     // Model performance: a native <details> (design critique task 09) --
@@ -4002,7 +4259,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // .open assignment needed -- that's the element's native default).
     state.modelPerformance = modelPerformancePayload;
     renderModelPerformance(state.modelPerformance);
-    renderTimebarModelNote(); // same one-shot treatment: the walk-forward result doesn't change per hour/period/mode
+    renderClimatologyNote(); // same one-shot treatment: the walk-forward result doesn't change per hour/period/mode
 
     // No render call here: the ribbon's own renderReadout() pass (below,
     // via the same hook every hour/mode change already goes through) reads
@@ -4017,14 +4274,14 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // The numeric label next to each slider updates immediately regardless
     // (cheap, just a textContent write), only the count recomputation itself
     // is throttled. The slider's initial .value and label text are set
-    // explicitly here from state.investigatorState, not left to the static
+    // explicitly here from state.scenarioState, not left to the static
     // HTML's value="300"/value="800" attributes to already agree with it --
     // same standing-rule fix as Sessions 19/20A/20B/21 (a test stub doesn't
     // read static markup attributes, only JS-driven changes).
     function wireEquitySlider(sliderId, valueId, thresholdKey) {
       const sliderEl = document.getElementById(sliderId);
       const valueEl = document.getElementById(valueId);
-      const initialValue = state.investigatorState.equityThresholds[thresholdKey];
+      const initialValue = state.scenarioState.equityThresholds[thresholdKey];
       sliderEl.value = String(initialValue);
       valueEl.textContent = String(initialValue);
       let pendingValue = null;
@@ -4085,13 +4342,13 @@ if (typeof globalThis !== 'undefined') {
     renderLegendScale, overplotAlphaForZoom, nearestStationWithin, CLICK_TOLERANCE_PX, markerStyleFor,
     renderModelPerformance, formatSignificance, computeEquityCounts, renderEquityCounts, setEquityThreshold,
     renderFleetStats, computeServicedEquityOverlap, setFleetSize,
-    renderRibbon, computeSliceTotals, computeLiveStandard, computeFillDistribution, renderTimebarModelNote,
-    renderDistribution, computeDistribution,
+    renderRibbon, computeSliceTotals, computeLiveStandard, computeFillDistribution, renderClimatologyNote,
+    renderDistribution, computeDistribution, trimmedViewBounds, VIEW_TRIM_FRACTION, stationHoverHtml, escapeHtml,
     buildLiveFeedPayload, refreshLiveFeed, applyLiveFeedPayload, setLiveRefresh, LIVE_FEED_REFRESH_MS,
     isUnusableLive, metresBetween, formatWindowRange, ADJACENCY_RADIUS_M,
     fahrenheitToCelsius, inchesToMm, mmToInches, weatherMultiplierFor,
     isBaselineWeatherScenario, matchingWeatherPreset, weatherScenarioMetaSuffix, renderWeatherScenarioStatus,
-    defaultInvestigatorState, investigatorStateDiffersFromDefault, renderDiffBar, renderScenarioRow, applyInvestigatorState,
+    defaultScenarioState, scenarioStateDiffersFromDefault, renderDiffBar, renderScenarioRow, applyScenarioState,
     resetToBaseline, buildShareableUrl, parsePresetInput,
     getState: () => state,
     ready,

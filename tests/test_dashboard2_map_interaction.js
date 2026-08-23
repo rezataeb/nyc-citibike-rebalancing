@@ -177,7 +177,7 @@ async function main() {
   const layersBefore = map._layers.length;
   const statsBefore = sandbox._elements['fleet-stats'].textContent;
   dash.setFleetSize(7);
-  assert.strictEqual(dash.getState().investigatorState.fleetSize, 7, 'the slider should still drive fleet size');
+  assert.strictEqual(dash.getState().scenarioState.fleetSize, 7, 'the slider should still drive fleet size');
   assert.notStrictEqual(sandbox._elements['fleet-stats'].textContent, statsBefore, 'the counts should update');
   assert.ok(
     sandbox._elements['fleet-stats'].textContent.includes('7'),

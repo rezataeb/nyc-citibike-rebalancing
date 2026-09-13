@@ -84,3 +84,37 @@ comparison across stations, not a change-over-time projection, so it
 doesn't hit the blocker above. It was intentionally not built in this
 pass — noted here so a future session knows it's an option, not
 forgotten.
+
+## Checked: does a public historical capacity-change dataset exist?
+
+Before closing this out, checked whether some THIRD PARTY has already
+solved the missing-history problem -- a long-running public archive of
+Citi Bike's `station_information` feed (which carries the real `capacity`
+field) would supply the before/after comparison this project's own
+2-month log can't.
+
+Found none. The closest comparable project, the **NYC Comptroller's own
+`citi-bike-gbfs` repo** (its reliability methodology is the direct source
+`pipeline/reliability.py`'s docstring already cites), turns out to be the
+same shape of project as this one, not a solution: a GitHub Actions
+template that starts recording GBFS data going forward once you fork and
+run it, with its own published sample data covering roughly one month
+(March 2024). No multi-year archive, no capacity-change history --
+because it has the identical rare-events problem.
+
+Public information about Citi Bike capacity changes exists only at the
+SYSTEM level -- press releases about network-wide expansion ("2016
+expansion added 140 docking stations," "grow to 2,400+ stations by
+[date]") -- which is about NEW stations joining the network, not EXISTING
+stations being resized. Not usable for a per-station capacity-vs-risk
+model.
+
+One real, useful thing the Comptroller's project does differently, worth
+keeping in mind if this project ever does start logging capacity: it
+stores the full raw `station_information` response per poll, not a
+hand-picked subset of fields written into a flattened CSV -- avoiding
+exactly the "we forgot to capture the field we'd eventually need"
+situation this closeout is about.
+
+**Conclusion: no external data source rescues this.** The decision above
+stands on its own -- closed, not waiting on anything external either.

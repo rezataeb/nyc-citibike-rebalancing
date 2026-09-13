@@ -1,17 +1,58 @@
 """Tests for pipeline/gbfs_logger.py."""
 
 import json
+from datetime import date
 
 import pandas as pd
 
 from pipeline.gbfs_logger import (
     append_snapshot,
     build_live_status_payload,
+    current_log_path,
     export_live_status,
     fetch_station_id_crosswalk,
     log_snapshot,
     parse_snapshot,
 )
+
+
+def test_current_log_path_is_one_file_per_utc_day(tmp_path):
+    """Session 71: replaces the single ever-growing snapshots.csv, which hit
+    GitHub's 100MB per-file push limit. today is injected, not read from the
+    real clock, so this is deterministic."""
+    path = current_log_path(log_dir=tmp_path, today=date(2026, 9, 14))
+    assert path == tmp_path / "snapshots_2026-09-14.csv"
+
+
+def test_current_log_path_changes_with_the_day(tmp_path):
+    """Two different days must resolve to two different files -- that's the
+    entire point of rotating."""
+    day1 = current_log_path(log_dir=tmp_path, today=date(2026, 9, 14))
+    day2 = current_log_path(log_dir=tmp_path, today=date(2026, 9, 15))
+    assert day1 != day2
+
+
+def test_log_snapshot_defaults_to_todays_rotated_file(tmp_path, monkeypatch):
+    """Without an explicit log_path, log_snapshot() must write into
+    current_log_path() -- not the old frozen LOG_PATH -- so a real
+    (un-parametrized) run rotates correctly."""
+    status_payload = {
+        "last_updated": 1_700_000_000,
+        "data": {"stations": [{"station_id": "abc-123", "num_bikes_available": 1, "num_docks_available": 1, "is_renting": 1, "is_returning": 1}]},
+    }
+    info_payload = {"data": {"stations": [{"station_id": "abc-123", "short_name": "6433.01"}]}}
+
+    def fake_get(url, timeout):
+        return _fake_response(status_payload if "station_status" in url else info_payload)
+
+    monkeypatch.setattr("pipeline.gbfs_logger.requests.get", fake_get)
+    monkeypatch.setattr("pipeline.gbfs_logger.LOG_DIR", tmp_path)
+    monkeypatch.setattr("pipeline.gbfs_logger.current_log_path", lambda: current_log_path(tmp_path, date(2026, 9, 14)))
+
+    log_snapshot()
+
+    assert (tmp_path / "snapshots_2026-09-14.csv").exists()
+    assert not (tmp_path / "snapshots.csv").exists()
 
 
 def _fake_response(payload):

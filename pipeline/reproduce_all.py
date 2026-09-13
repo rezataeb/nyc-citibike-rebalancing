@@ -27,11 +27,13 @@ the currently-committed version by design, not by bug. Everything else
 (raw trip archives, Open-Meteo's historical weather archive, the fixed
 weather grid) is real historical data and should reproduce identically.
 
-data/gbfs_log/snapshots.csv (the continuously-collected live-density log
-behind Investigator Phase 5) is a separate artifact this script does not
-and cannot reproduce -- it only grows via the GitHub Actions cron
-(.github/workflows/gbfs_snapshot.yml) accumulating real snapshots over
-real elapsed time. It ships as-is in git.
+data/gbfs_log/ (the continuously-collected live-density log behind
+Investigator Phase 5 -- one snapshots_YYYY-MM-DD.csv file per UTC day
+since Session 71, plus the frozen pre-rotation snapshots.csv) is a
+separate artifact this script does not and cannot reproduce -- it only
+grows via the GitHub Actions cron (.github/workflows/gbfs_snapshot.yml)
+accumulating real snapshots over real elapsed time. It ships as-is in
+git.
 """
 
 from __future__ import annotations

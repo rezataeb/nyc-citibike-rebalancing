@@ -52,7 +52,8 @@ import statistics
 from datetime import datetime
 from pathlib import Path
 
-LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "gbfs_log" / "snapshots.csv"
+LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "gbfs_log"
+LOG_PATH = LOG_DIR / "snapshots.csv"  # the frozen pre-Session-71 file -- still read, via LOG_DIR's glob below
 RELIABILITY_PATH = Path(__file__).resolve().parent.parent / "data" / "reliability.json"
 
 # Per-station rates below this many online observations are too thin to rank on
@@ -81,12 +82,28 @@ def _is_unusable(bikes: int, docks: int) -> bool:
     return bikes == 0 or docks == 0
 
 
-def compute_reliability(log_path: Path = LOG_PATH) -> dict:
-    """Read the snapshot log and return the reliability payload.
+def _iter_log_paths(log_path: Path) -> list[Path]:
+    """A single file is read as-is -- every existing test passes one, and
+    that keeps working unchanged. A directory (LOG_DIR, the real default
+    since Session 71) is every snapshots*.csv file inside it, sorted so the
+    frozen pre-rotation snapshots.csv (no date suffix, sorts first) is read
+    before the dated files that continue its history -- not that read
+    ORDER matters for correctness here (every count below is a running
+    total and timestamps go through a global sort of their own), just for
+    a stable, boring iteration order.
+    """
+    if log_path.is_dir():
+        return sorted(log_path.glob("snapshots*.csv"))
+    return [log_path]
 
-    Streams the CSV rather than loading it into a DataFrame -- the file is
-    ~470k rows and every quantity here is a running count, so there is nothing
-    a DataFrame would buy beyond memory.
+
+def compute_reliability(log_path: Path = LOG_DIR) -> dict:
+    """Read the snapshot log (or, as of Session 71, every rotated snapshot
+    log file in a directory) and return the reliability payload.
+
+    Streams each CSV rather than loading it into a DataFrame -- the combined
+    history is millions of rows and every quantity here is a running count,
+    so there is nothing a DataFrame would buy beyond memory.
     """
     timestamps: set[str] = set()
     per_station: dict[str, dict[str, int]] = {}
@@ -96,29 +113,30 @@ def compute_reliability(log_path: Path = LOG_PATH) -> dict:
     n_full = 0
     n_offline = 0
 
-    with log_path.open() as handle:
-        for row in csv.DictReader(handle):
-            timestamps.add(row["timestamp"])
-            station_id = row["station_id"]
+    for path in _iter_log_paths(log_path):
+        with path.open() as handle:
+            for row in csv.DictReader(handle):
+                timestamps.add(row["timestamp"])
+                station_id = row["station_id"]
 
-            if not _is_online(row):
-                n_offline += 1
-                continue
+                if not _is_online(row):
+                    n_offline += 1
+                    continue
 
-            bikes = int(float(row["bikes_available"]))
-            docks = int(float(row["docks_available"]))
+                bikes = int(float(row["bikes_available"]))
+                docks = int(float(row["docks_available"]))
 
-            counts = per_station.setdefault(station_id, {"n_observations": 0, "n_unusable": 0})
-            counts["n_observations"] += 1
-            n_online += 1
+                counts = per_station.setdefault(station_id, {"n_observations": 0, "n_unusable": 0})
+                counts["n_observations"] += 1
+                n_online += 1
 
-            if _is_unusable(bikes, docks):
-                counts["n_unusable"] += 1
-                n_unusable += 1
-                if bikes == 0:
-                    n_empty += 1
-                if docks == 0:
-                    n_full += 1
+                if _is_unusable(bikes, docks):
+                    counts["n_unusable"] += 1
+                    n_unusable += 1
+                    if bikes == 0:
+                        n_empty += 1
+                    if docks == 0:
+                        n_full += 1
 
     moments = sorted(datetime.fromisoformat(value) for value in timestamps)
     gaps = [

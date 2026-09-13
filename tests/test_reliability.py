@@ -136,6 +136,38 @@ def test_rankable_excludes_thin_stations_without_dropping_their_observations(tmp
     assert payload["system"]["n_observations"] == MIN_OBSERVATIONS + 1
 
 
+def test_reads_every_rotated_file_in_a_directory(tmp_path):
+    """Session 71: logging moved to one file per day. Given a DIRECTORY
+    (the real default now, LOG_DIR) rather than a single file, every
+    snapshots*.csv inside it must be read together -- including the frozen
+    pre-rotation snapshots.csv, which keeps that name, no date suffix.
+    """
+    (tmp_path / "snapshots.csv").write_text(
+        "\n".join([HEADER, "A,2026-08-30 12:00:00+00:00,0,30,1,1"]) + "\n"  # the frozen legacy file
+    )
+    (tmp_path / "snapshots_2026-09-14.csv").write_text(
+        "\n".join([HEADER, "A,2026-09-14 08:00:00+00:00,10,10,1,1"]) + "\n"
+    )
+    (tmp_path / "snapshots_2026-09-15.csv").write_text(
+        "\n".join([HEADER, "B,2026-09-15 08:00:00+00:00,0,0,0,0"]) + "\n"  # offline, must still be excluded correctly
+    )
+
+    payload = compute_reliability(tmp_path)
+
+    assert payload["window"]["n_snapshots"] == 3, "all three files' timestamps are in one global window"
+    assert payload["system"]["n_observations"] == 2, "the offline row in the 3rd file is excluded"
+    assert payload["system"]["n_unusable"] == 1
+    assert payload["stations"]["A"]["n_observations"] == 2, "station A's rows are combined across files"
+
+
+def test_single_file_path_still_works_unchanged(tmp_path):
+    """Passing one explicit file (every OTHER test in this module does
+    this) must behave exactly as it did before directories were supported."""
+    log = _write_log(tmp_path, ["A,2026-07-13 18:00:00+00:00,0,30,1,1"])
+    payload = compute_reliability(log)
+    assert payload["system"]["n_observations"] == 1
+
+
 def test_caveat_refuses_the_outage_hours_framing(tmp_path):
     """The payload must carry its own disclaimer -- the dashboard renders it.
 

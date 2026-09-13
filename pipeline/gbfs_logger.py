@@ -4,10 +4,10 @@ Trip archives only record trips that succeeded -- they cannot see a rider
 who found an empty station and left, or one who couldn't dock because every
 slot was full. GBFS's station_status feed reports live bikes/docks counts
 with no auth and no cost; snapshotting it on a schedule (a free GitHub
-Actions cron, e.g. every 10 minutes) turns that invisible failure mode into
-a directly measured one. This module is just the capture step -- turning
-the log into empty/full minutes per station is empty_minutes.py's job,
-once enough snapshots have accumulated.
+Actions cron) turns that invisible failure mode into a directly measured
+one. This module is just the capture step -- turning the log into
+empty/full minutes per station is empty_minutes.py's job, once enough
+snapshots have accumulated.
 
 station_status.json only carries GBFS's own internal station_id (a long
 UUID-like string) and a legacy_id (a plain integer) -- neither matches the
@@ -18,12 +18,26 @@ changes rarely). So each snapshot also fetches station_information to
 resolve GBFS's station_id to short_name, logging short_name as the
 station_id column -- directly joinable to flows.json later with no
 separate crosswalk step.
+
+Session 71: logging moved from one ever-growing snapshots.csv to one file
+per UTC calendar day (snapshots_YYYY-MM-DD.csv, see current_log_path()).
+The single-file version crossed GitHub's 100MB per-file push limit around
+2026-08-30 and every push since had been silently rejected -- the workflow
+still fetched and committed locally each run, but the push failed, so every
+snapshot from that point on was captured and then discarded, never reaching
+origin. At this log's real observed growth rate (~2MB/day across 49 days
+of history before that point), a daily file would take decades to approach
+that limit again. The pre-existing snapshots.csv is left exactly as it
+is -- a frozen historical file, not migrated or rewritten -- and
+reliability.py now reads every snapshots*.csv file in the directory
+together, so that history stays part of the record.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -31,8 +45,23 @@ import requests
 
 STATION_STATUS_URL = "https://gbfs.citibikenyc.com/gbfs/en/station_status.json"
 STATION_INFORMATION_URL = "https://gbfs.citibikenyc.com/gbfs/en/station_information.json"
-LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "gbfs_log" / "snapshots.csv"
+LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "gbfs_log"
+LOG_PATH = LOG_DIR / "snapshots.csv"  # the frozen pre-Session-71 file; new writes never target this name again
 LIVE_STATUS_PATH = Path(__file__).resolve().parent.parent / "data" / "live_status.json"
+
+
+def current_log_path(log_dir: Path = LOG_DIR, today: date | None = None) -> Path:
+    """Where log_snapshot() writes today's rows: one file per UTC calendar day.
+
+    UTC, not NYC local, to match the timestamp column's own timezone (see
+    parse_snapshot) -- this is a storage boundary the pipeline manages, not
+    something a viewer reads, so it doesn't need the dashboard's NYC-display
+    conventions (see dashboard.html's NYC_TIME_ZONE for that separate case).
+    `today` is injectable for deterministic tests, same reasoning as every
+    other date/time seam in this project.
+    """
+    day = today if today is not None else datetime.now(timezone.utc).date()
+    return log_dir / f"snapshots_{day.isoformat()}.csv"
 
 
 @dataclass
@@ -113,18 +142,30 @@ def parse_snapshot(status_payload: dict, crosswalk: dict[str, str]) -> SnapshotR
     return SnapshotResult(rows=pd.DataFrame.from_records(records), n_dropped=n_dropped)
 
 
-def append_snapshot(snapshot: pd.DataFrame, log_path: Path = LOG_PATH) -> None:
-    """Append a snapshot to the CSV log, writing the header only on the first write."""
+def append_snapshot(snapshot: pd.DataFrame, log_path: Path | None = None) -> None:
+    """Append a snapshot to a CSV log, writing the header only on the first write.
+
+    log_path=None resolves to current_log_path() at call time -- kept
+    None-defaulted rather than defaulting to the frozen LOG_PATH, so an
+    un-parametrized call can never silently write into that legacy file.
+    """
+    log_path = log_path or current_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot.to_csv(log_path, mode="a", header=not log_path.exists(), index=False)
 
 
-def log_snapshot(log_path: Path = LOG_PATH) -> SnapshotResult:
-    """Fetch one snapshot of the live GBFS feed and append it to the log."""
+def log_snapshot(log_path: Path | None = None) -> SnapshotResult:
+    """Fetch one snapshot of the live GBFS feed and append it to today's log file.
+
+    log_path overrides the destination (tests always pass one); left as
+    None, it resolves to current_log_path() at CALL time, not at import
+    time, so the date is always "now," never frozen to whenever this
+    module was first imported.
+    """
     status_payload = fetch_station_status()
     crosswalk = fetch_station_id_crosswalk()
     result = parse_snapshot(status_payload, crosswalk)
-    append_snapshot(result.rows, log_path)
+    append_snapshot(result.rows, log_path or current_log_path())
     return result
 
 
@@ -185,7 +226,8 @@ if __name__ == "__main__":
         print(f"as of {payload['last_updated']} -> {LIVE_STATUS_PATH}")
         print(f"{len(payload['stations']):,} stations, dropped {payload['n_dropped']:,} (no station_information match)")
     else:
-        result = log_snapshot()
+        log_path = current_log_path()
+        result = log_snapshot(log_path)
         as_of = result.rows["timestamp"].iloc[0] if len(result.rows) else "n/a"
-        print(f"as of {as_of} -> {LOG_PATH}")
+        print(f"as of {as_of} -> {log_path}")
         print(result.summary())

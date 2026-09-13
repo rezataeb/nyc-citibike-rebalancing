@@ -785,11 +785,17 @@
   #scenario-summary { margin-top: 14px; padding-top: 12px; border-top: 1px solid #f3f2f0; font-size: 12px; line-height: 1.5; color: #52514e; }
 
   .day-btn { font: inherit; font-size: 12px; padding: 7px 12px; border-radius: 16px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
-  /* Session 70: was #preset-controls, inside its own standalone
-     "Load a shared scenario" section -- renamed with the markup move into
-     the Scenario vs. Baseline card, alongside Share. */
-  #preset-load-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0ede7; }
-  #preset-load-row label { display: block; font-size: 11px; color: #666057; margin-bottom: 4px; }
+  /* Session 70: was its own standalone "Load a shared scenario" section;
+     moved inside the Scenario vs. Baseline card, alongside Share.
+     Session 72: moved back OUT to its own always-visible row -- the diff
+     bar it was nested in only shows once something has changed from
+     baseline, which silently made Load unreachable on a fresh visit
+     (see the markup comment where this now sits). Given its own full
+     card border/radius (matching .worst -- Priority Truck Stops, Equity
+     Gap) rather than the inside-a-card top-divider look it had before,
+     since it no longer has a parent card of its own to sit inside. */
+  #preset-load-row { margin-bottom: 16px; padding: 12px 14px; border: 1px solid #d8d7d3; border-radius: 10px; background: #fff; }
+  #preset-load-row label { display: block; font-size: 11px; font-weight: 600; color: #52514e; margin-bottom: 6px; }
   #preset-load-row input[type="text"] { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin: 0 0 8px; }
   #preset-load-row .day-btn { margin-right: 6px; margin-bottom: 6px; }
 
@@ -1378,19 +1384,6 @@
           </div>
           <input type="text" id="preset-url-output" readonly placeholder="Shareable link appears here after Share">
 
-          <!-- Session 70: user-reported Share (this card) and Load (a
-               separate section at the very bottom of the whole panel) read
-               as unrelated, when they're the same save/share/load flow
-               split across two ends of the scroll. Moved here, right under
-               Share's own output -- same card, same "how would I use this
-               scenario elsewhere" mental step. -->
-          <div id="preset-load-row">
-            <label for="preset-load-input">Or load a shared link:</label>
-            <input type="text" id="preset-load-input" placeholder="Paste a shared link here">
-            <button id="load-preset-btn" class="day-btn">Load preset</button>
-            <div id="preset-load-error" class="hidden" role="alert">That link didn&rsquo;t parse as a scenario.</div>
-          </div>
-
           <!-- Design critique task 04: bars now encode the DELTA from
                baseline, zero-centered on a real per-row domain -- not an
                absolute level with a separately-drawn baseline tick, which
@@ -1448,6 +1441,24 @@
                like everywhere else. Only states what actually changed;
                nothing is asserted about categories still at baseline. -->
           <div id="scenario-summary"></div>
+        </div>
+
+        <!-- Session 72: real bug found live -- Load lived inside the diff
+             bar above (Session 70's "Share and Load are the same flow"
+             grouping, a real insight), and the diff bar only shows once
+             something has changed from baseline (Session 71). Together
+             that made Load unreachable on a fresh visit: a reviewer
+             arriving with a shared link -- the one moment Load actually
+             matters -- had NO visible way to use it, since nothing had
+             changed yet. Moved out here as its own always-visible row,
+             directly under where Share sits, so the Session 70 grouping
+             still reads (same visual neighborhood) without depending on
+             the Session 71 condition that broke it. -->
+        <div id="preset-load-row">
+          <label for="preset-load-input">Load a shared scenario:</label>
+          <input type="text" id="preset-load-input" placeholder="Paste a shared link here">
+          <button id="load-preset-btn" class="day-btn">Load preset</button>
+          <div id="preset-load-error" class="hidden" role="alert">That link didn&rsquo;t parse as a scenario.</div>
         </div>
 
         <!-- Session 55: these were four <details class="accordion"> sharing a

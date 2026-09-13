@@ -48,6 +48,22 @@
     display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 16px;
     padding: 18px 20px; border-bottom: 1px solid #d8d7d3; background: #fcfcfb; flex-shrink: 0;
   }
+  /* Session 73: found live -- these two are #topbar's 3rd/4th grid
+     children (after #title, .ribbon) with no explicit placement, so
+     auto-placement drops them into row 1's leftover second column,
+     landing in the SAME column as #title. An "auto" grid TRACK sizes to
+     its widest item's natural content width -- so #ribbon-caption
+     (empty in historical, a full sentence in live) was itself pushing
+     that whole column, and therefore #title and .ribbon's real widths,
+     to differ BETWEEN MODES, which is what the user actually saw as
+     "the screen size changes" switching Historical -> Live (measured:
+     #title 259px -> 397px, .ribbon 985px -> 847px, just from this).
+     This full-span rule already existed for mobile only (a DIFFERENT
+     bug, Session 68's ~0px-column word-wrap) -- turns out desktop needed
+     it too, just for a subtler reason. Un-conditional now: these two
+     never again participate in the title/ribbon column split, at any
+     width, regardless of their own content length. */
+  #ribbon-caption, #projection-strip { grid-column: 1 / -1; }
   #title { min-width: 0; }
   #title-heading { display: flex; align-items: center; gap: 8px; }
   /* Session 68: a dedicated navy, not SURPLUS_COLOR's #2a78d6 -- that blue
@@ -154,6 +170,23 @@
   }
   .ribbon__tile--supporting .ribbon__value { font-size: 19px; }
   .ribbon__context { display: block; margin-top: 2px; font-size: 10.5px; color: #898781; line-height: 1.35; }
+  /* Session 73: reserves tile 1's context line's real height in historical
+     mode too (see RIBBON_TILE1_LIVE_CAVEAT) -- same visibility:hidden
+     technique as #ribbon-caption/#projection-strip below, applied here
+     via a dedicated class since this element isn't otherwise ever
+     toggled with the shared .hidden class. */
+  .ribbon__context--mode-hidden { visibility: hidden; pointer-events: none; }
+  /* Session 73: min-height, not just "keep the same text rendered" --
+     found live that tile 1 itself is measurably WIDER on the very first
+     paint than after any later reflow (347px vs 298px at a 1300px
+     viewport, before vs after the first mode switch), which alone made
+     this same fixed caveat sentence wrap to 1 line first-paint and 2
+     lines ever after -- a real timing quirk, not explained further, but
+     this min-height makes the fix correct regardless of WHY the width
+     moves: 2 lines' worth at this font-size/line-height, so reserved
+     space can never be less than live mode's real content needs, on
+     the first paint or any later one. */
+  #ribbon-context-1 { min-height: 28.4px; }
   .ribbon__projected-tag {
     display: inline-block; margin-top: 5px; padding: 1px 6px; border-radius: 6px;
     background: #f0dfc0; color: #8a5a1f; font-size: 9px; font-weight: 700;
@@ -591,6 +624,39 @@
      height, so the pair of them can't shift the map below on a live
      refresh even if either one's text length ever varies. */
   #ribbon-caption { margin-top: 8px; font-size: 11px; color: #666057; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Session 73: user-reported the whole page visibly jumps switching
+     Historical -> Live -- confirmed and measured (78.8px added to
+     #topbar's height, pushing the map and everything below it down by
+     the same amount), since #ribbon-caption/#projection-strip exist
+     ONLY in live mode (renderRibbon()'s historical branch explicitly
+     hides both) and the shared .hidden class's display:none removes
+     them from layout entirely, reserving no space for them in
+     historical mode. visibility:hidden instead, for JUST these two ids
+     -- keeps the exact same layout footprint in BOTH modes (no magic
+     pixel number to keep in sync with content that can reflow), just
+     toggles whether it's seen/interactive/focusable. Deliberately
+     overrides .hidden's own !important, and only for these two.
+
+     That alone still left the exact switch the user described: on a
+     session that hasn't shown Live mode yet, these two hold no text at
+     all (not just hidden text) -- renderProjectionStrip() and the
+     ribbon-caption textContent assignment only ever run in the live
+     branch -- so visibility:hidden was reserving an EMPTY box's height
+     (0 for the caption; 12px of #projection-strip's own padding/border
+     with no text line), not the real one-line height either fills in
+     once populated. Both are white-space:nowrap with ellipsis, so
+     "populated" is always exactly one line -- min-height locks in that
+     one measured size below, so even the very first Historical->Live
+     switch (or a page that never switches) already reserves it. */
+  #ribbon-caption.hidden, #projection-strip.hidden {
+    display: block !important; visibility: hidden; pointer-events: none;
+  }
+  #ribbon-caption { min-height: 15.4px; }
+  /* content-box here (no box-sizing reset on this element), so the
+     reserved height is content only -- 16.8px content + this rule's own
+     10px padding + 2px border = the same 28.8px total a populated line
+     already renders at, not 28.8 on top of the padding/border. */
+  #projection-strip { min-height: 16.8px; }
 
   /* Session 66: the fleet slider's marginal-benefit curve -- one bar per
      fleet size 1-10, height proportional to stations cleared by THAT
@@ -850,15 +916,10 @@
       grid-column: 1 / -1; grid-row: 2;
       padding-top: 10px; border-top: 1px solid #e6e5e1;
     }
-    /* Session 68 bug found at 390px, Live mode: these two are #topbar's
-       3rd/4th grid children with no explicit placement, so auto-flow
-       dropped them into row 1's leftover second column -- a track sized
-       to whatever #title didn't use, which is ~0 once #title's own
-       content (logo + heading + nested mode-toggle) claims the row.
-       Double-outage's caption then rendered its text one word per line
-       down a near-zero-width column instead of a horizontal line. Same
-       full-span fix #ribbon already has above. */
-    #ribbon-caption, #projection-strip { grid-column: 1 / -1; }
+    /* Session 68's mobile-only fix for these two (word-wrap collapse in
+       a near-0px column) now lives in the unconditional rule near
+       #topbar's grid definition, which also covers a desktop-width bug
+       found later -- no longer needed here specifically. */
     .ribbon__tile { padding: 0 12px; }
     .ribbon__value { font-size: 14px; }
     #ribbon-tile-1 .ribbon__value { font-size: 22px; }
@@ -2545,6 +2606,14 @@ function computeSliceTotals() {
 }
 
 const RIBBON_EM_DASH = '—';
+// Session 73: shared between both renderRibbon() branches. Historical
+// mode passes this SAME string as tile 1's context (not '') and then
+// hides the element via visibility, not via clearing its text -- see
+// the historical branch below. Keeping the real content always
+// rendered, just toggling whether it's seen, is what makes tile 1's
+// own height identical in both modes (same fix already applied to
+// #ribbon-caption/#projection-strip for the mode switch overall).
+const RIBBON_TILE1_LIVE_CAVEAT = "Instant reading, not the contract's 60-minute measurement";
 
 // dotColor is a CSS colour or null. Null hides the dot outright rather than
 // painting it neutral -- see the .ribbon__dot comment. context is optional
@@ -2957,8 +3026,11 @@ function renderRibbon() {
         + `An INSTANT proxy for the contract's availability rule -- no 60-minute window is measured. `
         + `The ${ADJACENCY_RADIUS_M} m adjacency radius is this project's operationalisation, not a contract figure, and the figure moves several points if it changes.`,
       '#0b0b0b',
-      "Instant reading, not the contract's 60-minute measurement"
+      RIBBON_TILE1_LIVE_CAVEAT
     );
+    // Session 73: undo historical mode's visibility:hidden below, in
+    // case this render followed a historical one without a full reload.
+    document.getElementById('ribbon-context-1').classList.remove('ribbon__context--mode-hidden');
     setRibbonTile(
       2,
       fill === null ? RIBBON_EM_DASH : fill.nEmpty.toLocaleString(),
@@ -3019,8 +3091,20 @@ function renderRibbon() {
     Math.round(totals.outOfPlace).toLocaleString(),
     'bikes out of place this hour',
     `Total absolute net flow across all stations at ${slice} -- the size of the imbalance the system absorbs in this hour on a typical day.`,
-    null // historical mode is outside the KPI strip's scope -- no status dot
+    null, // historical mode is outside the KPI strip's scope -- no status dot
+    // Session 73: user-reported the whole page jumps switching modes --
+    // this tile's context line was the other real contributor (measured
+    // 28px, on top of the ribbon-caption/projection-strip gap already
+    // fixed): empty here (historical has no analogous caveat), but two
+    // real lines of text in live mode. Passing the SAME live-mode string
+    // here too, rather than '', keeps this tile's own height identical
+    // in both modes; visibility:hidden below (not the shared .hidden
+    // class) hides it without collapsing its layout box. It's never
+    // exposed to sighted users or assistive tech either way -- both
+    // remove hidden content from the accessibility tree.
+    RIBBON_TILE1_LIVE_CAVEAT
   );
+  document.getElementById('ribbon-context-1').classList.add('ribbon__context--mode-hidden');
   // Session 65: tiles 2/3 used to be "stations need bikes/docks" -- EVERY
   // draining or filling station, deficit and big-deficit lumped together.
   // That's the exact same population the Net Flow Distribution card right

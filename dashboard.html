@@ -2662,9 +2662,10 @@ function renderDistribution() {
 
   // Session 69: "Net Flow Distribution" was pipeline-speak; "Station
   // Balance" says the same bins in plain language a DOT reviewer reads
-  // instantly. Live mode's own title is untouched -- "Dock Fill
-  // Distribution" wasn't the one flagged.
-  document.getElementById('distribution-title').textContent = live ? 'Dock fill distribution' : 'Station balance';
+  // instantly. Session 71: "Dock Fill Distribution" gets the same trim --
+  // "distribution" is redundant with the card's own stacked bar right
+  // underneath the title.
+  document.getElementById('distribution-title').textContent = live ? 'Dock fill' : 'Station balance';
   document.getElementById('distribution-total').textContent = `${total.toLocaleString()} stations`;
 
   // Both the bar segments and the key entries are clickable (delegated

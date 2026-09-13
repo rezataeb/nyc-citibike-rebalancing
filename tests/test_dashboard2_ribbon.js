@@ -236,7 +236,7 @@ async function testDistributionSwitchesQuantityWithMode() {
   dash.setMode('live');
   const after = sandbox._elements['distribution-title'].textContent;
   assert.notStrictEqual(before, after, 'the distributed quantity changes with mode');
-  assert.strictEqual(after, 'Dock fill distribution');
+  assert.strictEqual(after, 'Dock fill'); // Session 71: trimmed the redundant "distribution"
 
   // A empty (0/30), B full (25/25), C mid (10/20) -> one in each end bucket
   // and one in the middle.

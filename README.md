@@ -47,11 +47,16 @@ stale. Everything else -- the raw trip archives, Open-Meteo's historical
 weather archive, the fixed 6km weather grid -- is real historical data and
 should reproduce identically.
 
-`data/gbfs_log/snapshots.csv` (the continuously-collected live-density log
-behind Investigator Mode's deferred Phase 5) is a separate artifact
-neither reproduction path touches -- it only grows via the GitHub Actions
-cron (`.github/workflows/gbfs_snapshot.yml`) accumulating real snapshots
-over real elapsed time, and ships as-is in git.
+`data/gbfs_log/` (the continuously-collected live-density log behind
+Investigator Mode's deferred Phase 5 -- one `snapshots_YYYY-MM-DD.csv`
+file per UTC day since Session 71, plus the frozen pre-rotation
+`snapshots.csv`) is a separate artifact neither reproduction path touches
+-- it only grows via the GitHub Actions cron
+(`.github/workflows/gbfs_snapshot.yml`) accumulating real snapshots over
+real elapsed time, and ships as-is in git. The single-file version hit
+GitHub's 100MB per-file push limit in August 2026, silently losing every
+snapshot until the rotation fix -- `pipeline/reliability.py` reads every
+file in the directory together, so that gap is the only real loss.
 
 See `pipeline/reproduce_all.py`'s own module docstring for the full,
 ordered step list and each step's real cost.
@@ -64,7 +69,7 @@ opened directly from disk (`file://...`) for security reasons -- the fetch
 rejects before a response ever comes back. **Double-clicking `dashboard.html`
 will not work.**
 
-Serve the `app/` directory over plain HTTP instead:
+Serve this directory over plain HTTP instead:
 
 ```
 python3 -m http.server 8000
@@ -72,13 +77,19 @@ python3 -m http.server 8000
 
 then open **http://localhost:8000/dashboard.html** in a browser.
 
-Once this project is hosted on GitHub Pages (or any other real HTTP host),
-opening the page's URL directly will work with no extra steps -- the
-`file://` restriction only affects local, on-disk viewing.
+The canonical, deployed copy is **https://nyc-citibike-rebalancing.vercel.app/**
+(a static Vercel deployment of this same directory, `dashboard.html` served
+at the root, `data/*.json` alongside it) -- opening that URL directly works
+with no extra steps, since the `file://` restriction above only affects
+local, on-disk viewing.
 
-## Investigator Mode
+## Scenario Planner
 
-A collapsed-by-default panel ("Investigator mode") that turns the map from
+(Named "Investigator Mode" through early development -- renamed in the
+dashboard's UI, DOM, and JS; this doc's own Phase numbering below still
+refers to `Investigator_Mode_Guideline.md` by its original name.)
+
+A collapsed-by-default panel ("Scenario Planner") that turns the map from
 a report into a "what if" sandbox. Every control reads a precomputed JSON
 file -- nothing here re-runs a model live in the browser. All three
 controls below have their own graceful degradation: a control simply

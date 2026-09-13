@@ -32,9 +32,11 @@ def test_build_fleet_scenarios_covers_requested_fleet_sizes():
 
 
 def test_build_fleet_scenarios_uses_fixed_baseline_params_by_default():
-    # Confirms the decoupling-from-route.json decision: default params come
-    # from plan_routes.py's own constants, not something route.json happens
-    # to be set to.
+    # Default params come from plan_routes.py's own constants, never from an
+    # ad-hoc run's flags. Since Session 48 retired data/route.json, scenario 1
+    # is also the dashboard's historical "Show route" tour, so this is what
+    # keeps that tour reproducible rather than drifting with someone's last
+    # plan_routes.py invocation.
     payload = _payload({"s": _record(BASE_LAT, BASE_LNG, 5.0)})
     result = build_fleet_scenarios(payload)
 
@@ -88,8 +90,20 @@ def test_marginal_benefit_calculation_is_correct_when_candidates_get_exhausted()
         assert later <= earlier, f"marginal benefit must never increase as fleet size grows: {marginal}"
 
 
-def test_build_fleet_scenarios_notes_mention_marginal_benefit_and_decoupling():
+def test_build_fleet_scenarios_notes_mention_marginal_benefit_and_fixed_params():
+    # The notes ship inside data/fleet_scenarios.json, so they are read by
+    # anyone auditing the artifact -- they must state how to read the
+    # cumulative counts, and that the params are fixed.
+    #
+    # Session 48: this used to assert the word "decoupled", from when
+    # data/route.json was a second route artifact to stay decoupled FROM.
+    # That file is retired and scenario 1 is now the dashboard's historical
+    # route, so the note the artifact has to carry is the fixed-params
+    # reproducibility guarantee, not a decoupling that no longer has two
+    # sides.
     payload = _payload({"s": _record(BASE_LAT, BASE_LNG, 5.0)})
     result = build_fleet_scenarios(payload, fleet_sizes=[1, 2])
     assert "MARGINAL" in result["notes"]
-    assert "decoupled" in result["notes"]
+    assert "Fixed baseline params" in result["notes"]
+    assert "never inherited" in result["notes"]
+    assert "route.json was retired" in result["notes"]

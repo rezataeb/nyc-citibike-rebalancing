@@ -27,11 +27,13 @@ the currently-committed version by design, not by bug. Everything else
 (raw trip archives, Open-Meteo's historical weather archive, the fixed
 weather grid) is real historical data and should reproduce identically.
 
-data/gbfs_log/snapshots.csv (the continuously-collected live-density log
-behind Investigator Phase 5) is a separate artifact this script does not
-and cannot reproduce -- it only grows via the GitHub Actions cron
-(.github/workflows/gbfs_snapshot.yml) accumulating real snapshots over
-real elapsed time. It ships as-is in git.
+data/gbfs_log/ (the continuously-collected live-density log behind
+Investigator Phase 5 -- one snapshots_YYYY-MM-DD.csv file per UTC day
+since Session 71, plus the frozen pre-rotation snapshots.csv) is a
+separate artifact this script does not and cannot reproduce -- it only
+grows via the GitHub Actions cron (.github/workflows/gbfs_snapshot.yml)
+accumulating real snapshots over real elapsed time. It ships as-is in
+git.
 """
 
 from __future__ import annotations
@@ -75,15 +77,21 @@ STEPS = [
     (
         "fleet_simulator",
         [],
-        "Precompute 10 fleet-size (1-10 truck) scenarios",
+        "Precompute 10 fleet-size (1-10 truck) scenarios (scenario 1 is also the dashboard's historical route)",
         "seconds",
     ),
-    (
-        "plan_routes",
-        [],
-        "Build the depot-based single-shift route plan",
-        "seconds",
-    ),
+    # Session 48: the "plan_routes" step was removed here. It wrote
+    # data/route.json, which the dashboard no longer reads -- the historical
+    # route is fleet scenario 1, and fleet_simulator.py already produces that
+    # via the same plan_routes.build_route_payload() with the same fixed
+    # baseline params, so the two artifacts were byte-identical and route.json
+    # was a redundant second write of work already done one step above.
+    #
+    # pipeline/plan_routes.py itself STAYS: fleet_simulator.py imports
+    # build_route_payload() from it (it is the routing algorithm), and its CLI
+    # is still the way to run an ad-hoc plan with different --period/--trucks/
+    # --capacity. It just isn't part of the standard reproduce-everything run
+    # any more, because nothing consumes its default output.
     (
         "scenario_presets",
         [],

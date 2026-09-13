@@ -1,8 +1,24 @@
+# Session 71: cron changed from */10 (every 10 min) to hourly. This is not
+# a cut in real data collection -- gh run list's own real run timestamps
+# showed GitHub was already delivering roughly hourly runs on this
+# schedule (matches pipeline/reliability.py's own docstring, which
+# independently documented "~hourly... not the 10-minute cadence" as an
+# observed fact). Declaring the schedule honestly just stops queuing
+# attempts that were never actually going to fire on time.
+#
+# Also: this workflow used to commit+push a single ever-growing
+# snapshots.csv, which crossed GitHub's 100MB per-file push limit around
+# 2026-08-30 -- every run since had fetched real data, committed it
+# locally, and then had that commit rejected on push (GH001: Large files
+# detected), silently losing every snapshot since. pipeline/gbfs_logger.py
+# now writes one file per UTC day instead (see current_log_path()), so
+# the git-add target below is a glob over those dated files, never the
+# frozen legacy snapshots.csv.
 name: GBFS snapshot
 
 "on":
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '0 * * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -26,6 +42,6 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/gbfs_log/snapshots.csv
+          git add data/gbfs_log/snapshots_*.csv
           git diff --staged --quiet || git commit -m "Log GBFS snapshot"
           git push

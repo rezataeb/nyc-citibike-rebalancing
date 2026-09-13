@@ -31,7 +31,14 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const DASHBOARD2_PATH = path.join(__dirname, '..', 'dashboard2.html');
+// Session 64: dashboard2.html was promoted to dashboard.html (the old
+// pre-v2 dashboard.html retired) -- see PROGRESS.md. Kept the DASHBOARD2_*
+// naming here and in every test_dashboard2_*.js file rather than a
+// blanket rename: those names now identify which generation of the
+// dashboard this harness/suite was built for (Session 47+), same reason
+// this project already keeps other Session-scoped names after later
+// renames (see the Investigator -> Scenario Planner note).
+const DASHBOARD2_PATH = path.join(__dirname, '..', 'dashboard.html');
 
 function readDashboard2() {
   return fs.readFileSync(DASHBOARD2_PATH, 'utf8');
@@ -291,7 +298,13 @@ function buildSandbox(options = {}) {
       _fire(event, payload) { if (marker._listeners[event]) marker._listeners[event](payload); },
       on(event, handler) { marker._listeners[event] = handler; return marker; },
       bindTooltip() { return marker; },
-      setTooltipContent() { return marker; },
+      setTooltipContent(content) { marker._tooltipContent = content; return marker; },
+      // Session 64: the hover-tolerance mousemove handler calls these
+      // directly (a near-miss never fires the marker's own native
+      // mouseover/mouseout, so it can't rely on Leaflet's built-in tooltip
+      // show/hide) -- tracked on the stub so a test can assert open/closed.
+      openTooltip(latlng) { marker._tooltipOpen = true; marker._tooltipLatLng = latlng; return marker; },
+      closeTooltip() { marker._tooltipOpen = false; return marker; },
     };
     return marker;
   }
@@ -328,11 +341,29 @@ function buildSandbox(options = {}) {
     _clickAt(lat, lng) {
       if (mapStub._handlers.click) mapStub._handlers.click({ latlng: { lat, lng } });
     },
+    // Test-side helper: dispatch a map mousemove, as Leaflet does for cursor
+    // movement that isn't over an interactive layer -- exercises the
+    // hover-tolerance handler the same way _clickAt exercises click tolerance.
+    _mousemoveAt(lat, lng) {
+      if (mapStub._handlers.mousemove) mapStub._handlers.mousemove({ latlng: { lat, lng } });
+    },
+    // Test-side helper: dispatch the map's own mouseout (cursor leaves the
+    // map entirely), distinct from a marker's mouseout.
+    _mouseoutMap() {
+      if (mapStub._handlers.mouseout) mapStub._handlers.mouseout();
+    },
     // Test-side helper: set the zoom and dispatch zoomend as Leaflet would.
     _zoomTo(zoom) {
       mapStub._zoom = zoom;
       if (mapStub._handlers.zoomend) mapStub._handlers.zoomend();
     },
+    // Session 64: the CARTO tile source was replaced with two stacked Esri
+    // tile layers (base + a separate label overlay), and the label layer
+    // needs its own pane (see dashboard2's own comment there for why) --
+    // real Leaflet's createPane returns a DOM element; a plain object with
+    // a style bag is enough for the two property assignments dashboard2
+    // makes on it.
+    createPane() { return { style: {} }; },
     addLayer(layer) { mapStub._layers.push(layer); return mapStub; },
     removeLayer(layer) { mapStub._layers = mapStub._layers.filter(l => l !== layer); return mapStub; },
     hasLayer(layer) { return mapStub._layers.includes(layer); },

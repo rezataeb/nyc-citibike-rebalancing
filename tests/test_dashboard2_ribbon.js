@@ -31,20 +31,24 @@ async function testHistoricalTilesTrackTheHourSlider() {
   const { dash, sandbox } = await loadDashboard2();
 
   // FAKE_FLOWS weekday curves: A +12 @8, -6 @17; B -9 @8, +4 @17; C +1 @8.
-  // At hour 8 that is |12|+|9|+|1| = 22 out of place, 1 station needing bikes
-  // (B, -9) and 2 needing docks (A, C), and 9 bikes to move.
+  // At hour 8 that is |12|+|9|+|1| = 22 out of place, 9 bikes to move.
+  // Tiles 2/3 are computeDistribution()'s big-deficit/big-surplus counts
+  // (Session 65) -- with only 3 stations spread across the domain, B's -9
+  // lands in "big deficit" and A/C's positive values both land in "big
+  // surplus" (verified against the real computeDistribution() output, not
+  // assumed from the raw values).
   dash.renderHour(8);
   assert.strictEqual(value(sandbox, 1), '22', 'hour 8 bikes-out-of-place');
-  assert.strictEqual(value(sandbox, 2), '1', 'hour 8 stations needing bikes');
-  assert.strictEqual(value(sandbox, 3), '2', 'hour 8 stations needing docks');
+  assert.strictEqual(value(sandbox, 2), '1', 'hour 8 big-deficit stations');
+  assert.strictEqual(value(sandbox, 3), '2', 'hour 8 big-surplus stations');
   assert.strictEqual(value(sandbox, 4), '9', 'hour 8 bikes-to-move');
 
-  // At hour 17: A -6, B +4, C 0. Only nonzero stations are counted on either
-  // side, so C (exactly 0) is in neither -- 1 needing bikes, 1 needing docks.
+  // At hour 17: A -6, B +4, C 0 -- C's exact zero falls in "near balanced",
+  // counted in neither tile.
   dash.renderHour(17);
   assert.strictEqual(value(sandbox, 1), '10', 'hour 17 bikes-out-of-place');
-  assert.strictEqual(value(sandbox, 2), '1', 'hour 17 stations needing bikes');
-  assert.strictEqual(value(sandbox, 3), '1', 'hour 17 stations needing docks');
+  assert.strictEqual(value(sandbox, 2), '1', 'hour 17 big-deficit stations');
+  assert.strictEqual(value(sandbox, 3), '1', 'hour 17 big-surplus stations');
   assert.strictEqual(value(sandbox, 4), '6', 'hour 17 bikes-to-move');
 
   console.log('  historical tiles recompute per hour -- the §10B regression');
@@ -62,8 +66,8 @@ async function testHistoricalTilesTrackDayType() {
 
   assert.notDeepStrictEqual(weekend, weekday, 'day-type switch left the ribbon unchanged');
   assert.strictEqual(value(sandbox, 1), '4', 'weekend hour 8 bikes-out-of-place (|2|+|1|+|0.5| = 3.5, rounded)');
-  assert.strictEqual(value(sandbox, 2), '1', 'weekend hour 8 stations needing bikes');
-  assert.strictEqual(value(sandbox, 3), '2', 'weekend hour 8 stations needing docks');
+  assert.strictEqual(value(sandbox, 2), '1', 'weekend hour 8 big-deficit stations');
+  assert.strictEqual(value(sandbox, 3), '2', 'weekend hour 8 big-surplus stations');
 
   console.log('  historical tiles recompute per day type');
 }
@@ -80,7 +84,7 @@ async function testLiveModeSwapsEveryTile() {
   // All four tiles must change. All three fake stations have usable live data. A is empty (0 bikes), B is
   // full (0 docks), C is neither -- but A and B are ~5 km apart, far beyond
   // the 500 m adjacency radius, so NEITHER is in breach.
-  assert.strictEqual(value(sandbox, 1), '100.0%', 'system compliance: nothing is in double-outage');
+  assert.strictEqual(value(sandbox, 1), '100.0%', 'service availability: nothing is in double-outage');
   assert.strictEqual(value(sandbox, 2), '1', 'one station empty');
   assert.strictEqual(value(sandbox, 3), '1', 'one station full');
   assert.strictEqual(value(sandbox, 4), '0', 'no unusable station has an unusable neighbour within 500 m');
@@ -161,8 +165,13 @@ async function testHistoricalRateIsLabelledAsAWindow() {
   assert.ok(!rate.classList.contains('hidden'), 'rate line shows when the data exists');
   assert.ok(rate.innerHTML.includes('25.0%'), 'reports the payload rate');
   assert.ok(rate.innerHTML.includes('Jul 13–Jul 26'), 'window range is on its face');
-  assert.ok(/not outage hours/.test(rate.title), 'states it is a frequency, not outage hours');
-  assert.ok(!/\$/.test(rate.innerHTML + rate.title),
+  // Session 69: the "frequency, not outage hours" detail moved off
+  // #distribution-rate's hover-only title (a DOT reviewer skimming a
+  // printout never sees a tooltip) into the visible-on-expand Data notes
+  // body, alongside the rest of live mode's methodology.
+  const notesBody = sandbox._elements['distribution-notes-body'];
+  assert.ok(/not outage hours/.test(notesBody.textContent), 'states it is a frequency, not outage hours');
+  assert.ok(!/\$/.test(rate.innerHTML + notesBody.textContent),
     'no dollar figure -- the cadence cannot support a penalty claim');
 
   console.log('  observed-rate line carries its window and refuses the $ claim');
@@ -251,8 +260,11 @@ async function testDistributionStatesWhatItExcluded() {
   const result = dash.computeDistribution();
   assert.strictEqual(result.total, 2, 'offline station is out of the distribution');
   assert.strictEqual(result.excluded, 1, 'and counted as excluded rather than dropped');
+  // Session 69: live mode's exclusion accounting is in the collapsed Data
+  // notes body now, not the always-visible #distribution-note (which this
+  // mode empties -- see renderDistribution()).
   assert.ok(
-    /1 of 3 excluded/.test(sandbox._elements['distribution-note'].textContent),
+    /1 of 3 excluded/.test(sandbox._elements['distribution-notes-body'].textContent),
     'the exclusion is stated on the card, not left implicit'
   );
 
@@ -338,18 +350,27 @@ async function testLegendCaptionIsNotOverwrittenByRenderHour() {
 }
 
 async function testHistoricalSharesUseTheCoverageDenominator() {
-  // Percentages belong on the two STATION-count tiles and nowhere else: tiles
-  // 1 and 4 count bikes, which have no station total to divide by.
-  // The denominator is stations with a curve for THIS period, not all of them
-  // -- period coverage varies per station, so a fixed total would overstate it.
+  // Session 67: the visible label dropped its "X.X%" span entirely --
+  // user-reported that a bare percentage next to a label read like a
+  // database column, not a sentence. The exact share still lives in the
+  // tile's tooltip (title attribute), which is what this test now checks;
+  // the coverage-denominator invariant it originally existed to pin
+  // (period coverage varies per station, so the denominator must be
+  // "stations with a curve for THIS period", not a fixed 2,516) is still
+  // real and still worth asserting, just against the tooltip now.
   const { dash, sandbox } = await loadDashboard2();
   dash.renderHour(8);
 
-  // All 3 fixture stations have all-period data: 1 needs bikes, 2 need docks.
-  assert.ok(label(sandbox, 2).includes('33.3%'), '1 of 3 stations needs bikes');
-  assert.ok(label(sandbox, 3).includes('66.7%'), '2 of 3 stations need docks');
+  // All 3 fixture stations have all-period data: 1 in big deficit, 2 in big
+  // surplus (see computeDistribution() -- same bucketing the map itself uses).
+  assert.ok(tooltip(sandbox, 2).includes('33.3%'), '1 of 3 stations is big-deficit, stated in the tooltip');
+  assert.ok(tooltip(sandbox, 3).includes('66.7%'), '2 of 3 stations are big-surplus, stated in the tooltip');
   assert.ok(!/%/.test(label(sandbox, 1)), 'no share on the bikes-out-of-place tile');
   assert.ok(!/%/.test(label(sandbox, 4)), 'no share on the bikes-to-move tile');
+  assert.ok(!/%/.test(label(sandbox, 2)), 'tile 2\'s visible label is plain English, not a database column');
+  assert.ok(!/%/.test(label(sandbox, 3)), 'tile 3\'s visible label is plain English, not a database column');
+  assert.strictEqual(label(sandbox, 2), 'stations heading toward empty', 'tile 2 reads as a plain sentence with the number above it');
+  assert.strictEqual(label(sandbox, 3), 'stations heading toward full', 'tile 3 reads as a plain sentence with the number above it');
 
   assert.strictEqual(dash.computeSliceTotals().withData, 3, 'denominator is the covered set');
 
@@ -384,16 +405,30 @@ async function testStatusLivesInADotNotInColouredNumerals() {
   console.log('  status lives in a dot; numerals stay uncoloured');
 }
 
-async function testHistoricalTilesCarryNoDots() {
-  // The KPI strip is scoped to live mode. Historical tiles are a different
-  // set of quantities and are deliberately left without status dots.
+async function testHistoricalDotsMarkOnlyTheSevereTiles() {
+  // Session 65: tiles 2/3 changed from "stations need bikes/docks" (every
+  // draining/filling station) to "big deficit/big surplus" (the map's own
+  // most-severe band) -- a real severity cut, so those two now carry a
+  // status dot too, same red/blue the map and live mode already use.
+  // Tiles 1/4 are still plain bike counts with no natural severity band,
+  // and stay dot-less.
   const { dash, sandbox } = await loadDashboard2();
   dash.renderHour(8);
+
+  const dot = i => sandbox._elements[`ribbon-dot-${i}`];
+  assert.ok(!dot(1).classList.contains('shown'), 'tile 1 (bikes out of place) shows no dot');
+  assert.ok(dot(2).classList.contains('shown'), 'tile 2 (big deficit stations) shows a dot');
+  assert.ok(dot(3).classList.contains('shown'), 'tile 3 (big surplus stations) shows a dot');
+  assert.ok(!dot(4).classList.contains('shown'), 'tile 4 (bikes to move) shows no dot');
+  assert.strictEqual(dot(2).style.background, 'rgba(227, 73, 72, 1)', 'big deficit = deficit red');
+  assert.strictEqual(dot(3).style.background, 'rgba(42, 120, 214, 1)', 'big surplus = surplus blue');
+
+  // Numerals still carry no colour, same rule as every other tile.
   for (const i of [1, 2, 3, 4]) {
-    assert.ok(!sandbox._elements[`ribbon-dot-${i}`].classList.contains('shown'),
-      `historical tile ${i} shows no dot`);
+    assert.ok(!sandbox._elements[`ribbon-value-${i}`].style.color,
+      `tile ${i}'s numeral must not be coloured`);
   }
-  console.log('  historical tiles carry no dots (KPI strip is live-only)');
+  console.log('  historical dots mark only the severe tiles (2/3), not the plain bike counts (1/4)');
 }
 
 async function testHoverCardIsModeAwareAndNeverInventsOccupancy() {
@@ -501,7 +536,7 @@ async function testHoverSaysRENTABLEBikesNotJustBikes() {
   await testHistoricalSharesUseTheCoverageDenominator();
   await testLiveModeSwapsEveryTile();
   await testStatusLivesInADotNotInColouredNumerals();
-  await testHistoricalTilesCarryNoDots();
+  await testHistoricalDotsMarkOnlyTheSevereTiles();
   await testHoverCardIsModeAwareAndNeverInventsOccupancy();
   await testHoverPercentageIsExplainedByTheNumbersBesideIt();
   await testHoverSaysRENTABLEBikesNotJustBikes();

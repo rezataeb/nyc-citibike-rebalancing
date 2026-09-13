@@ -560,3 +560,22 @@ contract blocks, `live_status.json` 2,461 stations, all eight data files 200 ove
 Related contract drift found while checking: CLAUDE.md's `flows.json` schema lists `capacity` per
 station, but **0 of 2,516 stations carry it** — capacity lives in `live_status.json`. Nothing reads
 it from `flows.json` (`contextLines()` documents the omission), so this is a docs fix, not a bug.
+
+### 11. School-location dataset vintage — full provenance
+
+Design-polish round (Session 68), item 7: the station detail panel's school-proximity note
+was showing `flows.json`'s full `equity_join.layers.school.vintage_label` string verbatim —
+231 characters of provenance reasoning inline in a popup meant for a quick glance. Trimmed the
+on-screen text (both the detail panel's `schoolVintageNote()` and the Advanced-thresholds
+accordion's `#equity-vintage-note`) to "School locations: NYC DOE 2019–2020 (latest edition with
+coordinates on NYC Open Data)", and linked that trimmed text to this section instead of deleting
+the reasoning — a reviewer who wants the proof can still get it, just not as the default reading
+experience. The full string, as computed by `pipeline/equity_join.py` and carried in
+`flows.json`, unchanged:
+
+> 2019-2020 school locations -- confirmed the only row-queryable, coordinate-bearing
+> school-location dataset on NYC Open Data as of 2026-07-23 (re-checked, not assumed; no newer
+> edition of this dataset series has ever been published)
+
+Nothing about the underlying data or pipeline changed — this is a display/UX trim only, per the
+design-polish round's own scope guard (no new data sources, no new model runs).

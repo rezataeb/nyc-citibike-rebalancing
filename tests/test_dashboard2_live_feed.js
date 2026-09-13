@@ -174,8 +174,12 @@ async function testBothZeroStationIsCountedInBothTilesButBinnedOnce() {
 
   const counts = dash.computeDistribution().counts;
   assert.strictEqual(counts.reduce((a, b) => a + b, 0), fill.total, 'buckets partition exactly once');
+  // Session 69: live mode's exclusion/overlap accounting moved from the
+  // always-visible #distribution-note into the collapsed "Data notes"
+  // disclosure (#distribution-notes-body) -- #distribution-note itself is
+  // emptied in live mode now, see renderDistribution().
   assert.ok(
-    /0 bikes and 0 docks at once/.test(text(sandbox, 'distribution-note')),
+    /0 bikes and 0 docks at once/.test(text(sandbox, 'distribution-notes-body')),
     'and the card explains the overlap rather than leaving two numbers to clash'
   );
 

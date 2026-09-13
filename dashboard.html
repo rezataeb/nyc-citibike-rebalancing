@@ -2722,7 +2722,12 @@ function renderDistribution() {
     if (state.reliability) {
       const w = state.reliability.window;
       body += ` ${state.reliability.system.n_unusable.toLocaleString()} of ${state.reliability.system.n_observations.toLocaleString()} observations across ${w.n_snapshots} snapshots had 0 bikes or 0 docks. `
-        + `Offline observations excluded. A frequency, not outage hours: the log's median gap is ${w.median_gap_minutes} min, which cannot resolve the contract's 60/120-minute thresholds.`;
+        + `Offline observations excluded. A frequency, not outage hours: the log's median gap is ${w.median_gap_minutes} min, which cannot resolve the contract's 60/120-minute thresholds. `
+        // Session 72: the one finding from the Phase 5 investigation
+        // (docs_v2/phase5-closeout.md) worth surfacing -- rounded and
+        // plain here, the exact figure (67.9%, computed against the full
+        // log as of 2026-09-13) lives in that note, not hardcoded twice.
+        + `When a station goes unusable, about 2 in 3 times it's still unusable at the next check (~1 hour later) -- outages tend to persist, not self-heal.`;
     }
     notesBody.textContent = body;
     notesAccordion.classList.remove('hidden');

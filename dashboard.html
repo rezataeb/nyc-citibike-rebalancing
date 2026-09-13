@@ -411,6 +411,7 @@
   .worst { border: 1px solid #d8d7d3; border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
   .worst__title { padding: 10px 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #666057; border-bottom: 1px solid #d8d7d3; }
   #priority-stops-fleet-hint { padding: 8px 14px 0; font-size: 11px; color: #666057; }
+  #worst-lists-scenario-note { margin: 0 0 8px; font-size: 11px; color: #666057; }
   #priority-stops-fleet-link { font: inherit; font-weight: 600; color: #52514e; background: none; border: none; padding: 0; cursor: pointer; }
   #priority-stops-fleet-link:hover, #priority-stops-fleet-link:focus-visible { color: #0b0b0b; text-decoration: underline; }
   .worst ul { list-style: none; margin: 0; padding: 0; }
@@ -449,6 +450,10 @@
   .priority-stop-name-wrap { display: flex; align-items: center; gap: 5px; min-width: 0; }
   .priority-stop-name-wrap .worst-name { min-width: 0; }
   .priority-stop-equity-badge { flex: none; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 7px; background: #f0dfc0; color: #8a5a1f; text-transform: uppercase; letter-spacing: 0.02em; }
+  /* Session 72: neutral gray, not the amber pill every other badge here
+     uses -- reuses #f3f2f0/#666057, this file's existing muted-chip
+     tones (see .worst button:hover), not a new color. */
+  .priority-stop-revisit-badge { flex: none; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 7px; background: #f3f2f0; color: #666057; text-transform: uppercase; letter-spacing: 0.02em; }
   .priority-stop-trail { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
   .priority-stop-action { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px; background: #f0dfc0; color: #8a5a1f; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
   .priority-stops-caption { padding: 10px 14px; font-size: 11px; color: #666057; line-height: 1.4; border-bottom: 1px solid #f0ede7; }
@@ -607,15 +612,20 @@
      method explanation that used to be a permanent second line here.
      Session 70: cursor:help alone is a weak, easily-missed affordance --
      .info-affordance below is the visible signal; cursor:help stays as a
-     secondary cue for mouse users. */
+     secondary cue for mouse users.
+     Session 72: added a dotted underline as a second, standard "there's
+     more here" convention alongside the icon -- excluded from the icon
+     itself (an underlined circle-i reads oddly) via .info-affordance's
+     own text-decoration:none below. */
   #projection-strip {
     margin-top: 8px; padding: 5px 14px; border: 1px solid #d8d7d3; border-radius: 6px;
     background: #fbfaf7; font-size: 11.5px; color: #52514e; line-height: 1.4;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help;
+    text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-color: #b5b3ad;
   }
   #projection-strip b { color: #0b0b0b; font-variant-numeric: tabular-nums; }
   #projection-strip:focus-visible { outline: 2px solid #2166ac; outline-offset: 1px; }
-  .info-affordance { color: #666057; font-size: 12px; }
+  .info-affordance { color: #666057; font-size: 12px; text-decoration: none; }
 
   #preset-load-error { margin-top: 6px; font-size: 11px; color: #e34948; } /* DEFICIT_COLOR, this file's one "something's wrong" red */
 
@@ -1190,7 +1200,9 @@
        only while a station is selected -- see setDetailVisible(). -->
   <div id="map-corner-stack">
     <div id="legend-card">
-      <div id="legend-title">Net Daily Flow (bikes/day)</div>
+      <!-- Session 72: matches Station Balance's own rename -- this was
+           the last place on the page still saying "Net Daily Flow." -->
+      <div id="legend-title">Station balance (bikes/day)</div>
       <div class="bar" id="legend-bar"></div>
       <div id="legend-ticks"><span id="legend-tick-low"></span><span id="legend-tick-mid"></span><span id="legend-tick-high"></span></div>
       <div class="labels"><span id="legend-label-low"></span><span id="legend-label-mid"></span><span id="legend-label-high"></span></div>
@@ -1356,7 +1368,12 @@
                    buried behind an unrelated section someone has to know
                    to look in. -->
               <button id="reset-baseline-btn" class="share-btn">Reset</button>
-              <button id="save-preset-btn" class="share-btn">&#10554; Share</button>
+              <!-- Session 72: dropped the "⤴" glyph (cryptic on its
+                   own) -- kept "Share", not "Copy share link" as
+                   suggested, since the click handler only populates the
+                   visible #preset-url-output field, it doesn't write to
+                   the clipboard; "Copy" would overclaim. -->
+              <button id="save-preset-btn" class="share-btn">Share</button>
             </div>
           </div>
           <input type="text" id="preset-url-output" readonly placeholder="Shareable link appears here after Share">
@@ -1510,6 +1527,21 @@
           </div>
         </details>
 
+        <!-- Session 72: moved here (was after the whole Scenario Planner
+             closed) -- cause then effect: set the equity thresholds right
+             above, then see what they produce, instead of the gap sitting
+             behind an unrelated Weather section. Kept its own card look
+             (.worst, matching Priority Truck Stops/the two worst-lists)
+             rather than restyled to match the accordion sections around
+             it -- it's a live-computed result, not a control, so a
+             visually distinct "output" card is the right signal, not
+             noise. -->
+        <div class="worst" id="equity-gap-wrap">
+          <div class="worst__title">Equity gap</div>
+          <div id="equity-gap-body"></div>
+          <div id="equity-gap-method">Compares stations currently reporting 0 bikes or 0 docks (live GBFS), grouped by whether they're within your current NYCHA/school/subway-gap thresholds -- a snapshot, not a historical frequency.</div>
+        </div>
+
         <section class="planner-section" id="weather-accordion">
           <h3 class="planner-section-title">Weather scenario</h3>
           <div class="planner-section-body" id="weather-scenario-wrap">
@@ -1543,18 +1575,6 @@
         </div>
       </details>
 
-      <!-- Session 68: moved to directly after Scenario Planner (was after
-           Priority Truck Stops, before the planner) -- the planner is now
-           the sidebar's primary above-the-fold destination (also reached
-           via the new floating "Simulate scenarios" pill on the map), and
-           the equity gap reads as one of its outputs, not an unrelated
-           card interrupting the path to it. -->
-      <div class="worst" id="equity-gap-wrap">
-        <div class="worst__title">Equity gap</div>
-        <div id="equity-gap-body"></div>
-        <div id="equity-gap-method">Compares stations currently reporting 0 bikes or 0 docks (live GBFS), grouped by whether they're within your current NYCHA/school/subway-gap thresholds -- a snapshot, not a historical frequency.</div>
-      </div>
-
       <!-- "Worst now" -- real per-station ranking under whatever filter is
            currently active, doubling as the keyboard/screen-reader-
            reachable equivalent of the map's 2,516 SVG circles (task 11):
@@ -1570,6 +1590,11 @@
            which problem a given station actually has. Split into two
            independently-ranked top-8 lists instead; each is now
            internally comparable (same sign, same real problem). -->
+      <!-- Session 72: user-reported these lists recompute under a weather
+           scenario (renderWorstNow() reads weatherMultiplierFor() same as
+           the map) with nothing on screen saying so -- easy to read a
+           weather-adjusted ranking as the plain baseline one. -->
+      <div id="worst-lists-scenario-note">Top needs under the current scenario settings.</div>
       <div class="worst" id="worst-deficit-wrap">
         <div class="worst__title">Most bikes needed</div>
         <ul id="worst-deficit-list"></ul>
@@ -2041,12 +2066,22 @@ function hasLiveData(id) {
 // as deterministic as UTC for a given input timestamp, which is the
 // property this rule actually cares about -- the same reasoning
 // nycHourFromIso()/nycDayTypeFromIso() below already rely on, just not yet
-// applied here. NYC_TIME_ZONE and DATE_TIME_FORMATTER are shared by all
-// three functions now, not redefined per-function.
+// applied here. NYC_TIME_ZONE is shared by all three functions;
+// DATE_TIME_FORMATTER is formatAsOf()'s own (the other two need different
+// field sets, via their own plain toLocaleString() calls).
 const NYC_TIME_ZONE = 'America/New_York';
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
   timeZone: NYC_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
   hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  // Session 72: was a hardcoded " ET" suffix -- wrong for roughly 8 months
+  // of the year (America/New_York is EDT March-November). timeZoneName
+  // is driven by the INPUT timestamp against the pinned zone, same as
+  // every other field here -- not the viewer's own clock/locale -- so
+  // this stays exactly as deterministic as the hardcoded string was
+  // (verified: a September 2026 input resolves EDT, a January 2026 input
+  // resolves EST, and the actual 2026 spring-forward instant flips
+  // between them correctly).
+  timeZoneName: 'short',
 });
 function formatAsOf(isoString) {
   if (!isoString) return 'unknown';
@@ -2054,7 +2089,7 @@ function formatAsOf(isoString) {
   // hour12:false renders midnight as "24" in some ICU builds -- same quirk
   // nycHourFromIso() below already documents and guards against.
   const hour = parts.hour === '24' ? '00' : parts.hour;
-  return `${parts.year}-${parts.month}-${parts.day} ${hour}:${parts.minute}:${parts.second} ET`;
+  return `${parts.year}-${parts.month}-${parts.day} ${hour}:${parts.minute}:${parts.second} ${parts.timeZoneName}`;
 }
 
 // Session 49: marker CLUSTERING was removed here -- computeClusterColor(),
@@ -2691,7 +2726,11 @@ function renderDistribution() {
   const rate = document.getElementById('distribution-rate');
   if (live && state.reliability) {
     const w = state.reliability.window;
-    rate.innerHTML = `<b>${(state.reliability.system.unusable_rate * 100).toFixed(1)}%</b> of station-observations were unusable `
+    // Session 72: "station-observations" is precise but jargon-y for a
+    // one-line caption; "recent snapshots" says the same thing plainly.
+    // The exact statistical term (each row is one station's reading at
+    // one snapshot) still lives in the Data notes detail below, unchanged.
+    rate.innerHTML = `<b>${(state.reliability.system.unusable_rate * 100).toFixed(1)}%</b> of recent snapshots were unusable `
       + `<span class="ribbon__window">${formatWindowRange(w)}</span>`;
     rate.classList.remove('hidden');
   } else {
@@ -3137,16 +3176,21 @@ function renderWorstNow() {
   const surplusWrap = document.getElementById('worst-surplus-wrap');
   const deficitList = document.getElementById('worst-deficit-list');
   const surplusList = document.getElementById('worst-surplus-list');
+  // Session 72: same hidden/shown rule as the two lists themselves --
+  // a caption above hidden lists would be a caption pointing at nothing.
+  const scenarioNote = document.getElementById('worst-lists-scenario-note');
   deficitList.innerHTML = '';
   surplusList.innerHTML = '';
 
   if (state.mode === 'live') {
     deficitWrap.classList.add('hidden');
     surplusWrap.classList.add('hidden');
+    scenarioNote.classList.add('hidden');
     return;
   }
   deficitWrap.classList.remove('hidden');
   surplusWrap.classList.remove('hidden');
+  scenarioNote.classList.remove('hidden');
 
   const deficits = [];
   const surpluses = [];
@@ -3286,6 +3330,20 @@ function renderPriorityStops() {
     shown = allStops.slice(0, PRIORITY_STOPS_SIZE).map(stop => ({ stop, flagged: isStationEquityFlagged(stop.station_id) }));
   }
 
+  // Session 72: user-reported "duplicate" in the top 8 (same station twice,
+  // different amounts) -- checked against the real route data, not
+  // assumed: truck 1 genuinely revisits some stations mid-route (e.g.
+  // station 6726.01 is real stops #9 and #12 of 45, dropping off 20 then
+  // 19 bikes -- two separate real passes, not one record counted twice).
+  // Same precedent this file already established for the plain (non-
+  // equity) list. Labelled rather than deduplicated, since deduplicating
+  // would misrepresent the truck's real route.
+  const seenStationIds = new Set();
+  for (const entry of shown) {
+    entry.isRevisit = seenStationIds.has(entry.stop.station_id);
+    seenStationIds.add(entry.stop.station_id);
+  }
+
   // Session 69: the previous one-sentence version led with "Truck 1 of N,
   // in its own planned order" -- a fact this caption needed to STATE, not
   // OPEN with, so it read as a hedge before saying anything useful. Also
@@ -3299,16 +3357,24 @@ function renderPriorityStops() {
   const amRange = Array.isArray(amHours) && amHours.length
     ? `${formatHourLabel(Math.min(...amHours))}–${formatHourLabel(Math.max(...amHours) + 1)}`
     : 'AM';
+  // Session 72: user-reported this list looks connected to the planner
+  // (the fleet-size hint link says so) but visibly never updates when the
+  // fleet slider or weather scenario move. Real, and not something to
+  // silently fix by wiring it up (that's a routing change, out of scope
+  // for a copy pass) -- stated plainly instead, same file that already
+  // reads "Estimated from historical elasticity, not a weather-specific
+  // model" would rather say a limitation aloud than let a reader assume
+  // otherwise.
   caption.textContent = equityWeighted
     ? `Truck 1's own real stops, reordered by equity-weighted priority (${PRIORITY_EQUITY_WEIGHT_MULTIPLIER}× weight for flagged stations) rather than drive order -- not a route to follow stop-by-stop.`
-    : `Baseline route for the ${amRange} window (all-period average). Not synced to the hour slider or day-type toggle.`;
+    : `Baseline route for the ${amRange} window (all-period average). Not synced to the hour slider, day-type toggle, fleet size, or weather scenarios -- the planner models those separately.`;
 
   list.innerHTML = '';
   if (shown.length === 0) {
     list.innerHTML = '<li class="worst-empty">No stops in this scenario.</li>';
     return;
   }
-  shown.forEach(({ stop, flagged }, i) => {
+  shown.forEach(({ stop, flagged, isRevisit }, i) => {
     const li = document.createElement('li');
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -3338,6 +3404,22 @@ function renderPriorityStops() {
       equityBadge.textContent = 'Equity';
       equityBadge.title = 'Within your current NYCHA/school proximity or subway-gap threshold';
       nameSpan.appendChild(equityBadge);
+    }
+    // Session 72: user-reported the same station appearing twice read as a
+    // bug -- checked against the real route (see the comment where
+    // isRevisit is computed above): it's a genuine second pass by the
+    // same truck. Labelled, not deduplicated, and deliberately NOT the
+    // amber pill style every other badge on this page already uses --
+    // this is a routing fact, not a status/state flag, and amber is
+    // already carrying enough different meanings on this page (see
+    // .priority-stop-equity-badge, .priority-stop-action, PROJECTED tags,
+    // the diff bar's warn pills).
+    if (isRevisit) {
+      const revisitBadge = document.createElement('span');
+      revisitBadge.className = 'priority-stop-revisit-badge';
+      revisitBadge.textContent = 'Revisit';
+      revisitBadge.title = "Truck 1's route passes this station more than once -- a real second stop, not a duplicate entry";
+      nameSpan.appendChild(revisitBadge);
     }
 
     const trail = document.createElement('span');
@@ -3608,14 +3690,31 @@ function renderDiffBar() {
 
     if (!isDefaultFleetSize) {
       const overlap = computeServicedEquityOverlap(scenario, state.scenarioState.equityThresholds);
+      // Session 72: user-reported "including" was logically broken here --
+      // real bug, not just awkward phrasing: totalServiced (every station
+      // the truck VISITED, cleared or not) can be larger than `cleared`
+      // (only the ones fully resolved), so "cleared 31 ... including 34
+      // of 68" claimed a 34 was included inside a smaller 31. These are
+      // two separate facts (how many got fully cleared; of everything
+      // visited, how many were in-threshold), not one nested inside the
+      // other -- now two independent clauses.
       let clause = `${fleetSize} truck${fleetSize === 1 ? '' : 's'} cleared ${cleared.toLocaleString()} of ${flagged.toLocaleString()} flagged deficit stations`;
       if (overlap.totalServiced > 0) {
-        clause += `, including ${overlap.equityServiced.toLocaleString()} of ${overlap.totalServiced.toLocaleString()} serviced stations within equity thresholds`;
+        clause += `; ${overlap.equityServiced.toLocaleString()} of the ${overlap.totalServiced.toLocaleString()} serviced stations are within equity thresholds`;
       }
       summaryClauses.push(clause + '.');
     }
+    // Session 72: user-reported "−17 unserved" reads as getting WORSE (a
+    // negative number attached to a noun), when fleetDelta<0 actually
+    // means fewer unserved than baseline -- a real improvement (see this
+    // function's own comment above: "negative = fewer unserved than
+    // baseline = real improvement"). Plain English instead of a sign a
+    // reader has to correctly invert.
+    const fleetDeltaText = fleetDelta === 0 ? 'no change in unserved'
+      : fleetDelta < 0 ? `${Math.abs(fleetDelta).toLocaleString()} fewer unserved`
+      : `${fleetDelta.toLocaleString()} more unserved`;
     renderScenarioRow('fleet', {
-      pillText: isDefaultFleetSize ? 'No change' : `${fleetDelta > 0 ? '+' : '−'}${Math.abs(fleetDelta).toLocaleString()} unserved`,
+      pillText: isDefaultFleetSize ? 'No change' : fleetDeltaText,
       pillWarn: !isDefaultFleetSize,
       // Session 69: "truck(s)" printed literally regardless of count --
       // fixed to match the real pluralization the summary clause above
@@ -4629,7 +4728,9 @@ function renderLegendScale() {
     return;
   }
 
-  title.textContent = 'Net Daily Flow (bikes/day)';
+  // Session 72: matches Station Balance's own rename -- keep the
+  // Deficit/Balanced/Surplus end labels below unchanged, only the title.
+  title.textContent = 'Station balance (bikes/day)';
   mid.textContent = '0'; // net flow's real midpoint: as many bikes arriving as leaving
   const max = state.domainMax ? state.domainMax.toFixed(1) : '0.0';
   low.textContent = `-${max}`;

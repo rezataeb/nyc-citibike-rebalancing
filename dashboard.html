@@ -48,22 +48,6 @@
     display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 16px;
     padding: 18px 20px; border-bottom: 1px solid #d8d7d3; background: #fcfcfb; flex-shrink: 0;
   }
-  /* Session 73: found live -- these two are #topbar's 3rd/4th grid
-     children (after #title, .ribbon) with no explicit placement, so
-     auto-placement drops them into row 1's leftover second column,
-     landing in the SAME column as #title. An "auto" grid TRACK sizes to
-     its widest item's natural content width -- so #ribbon-caption
-     (empty in historical, a full sentence in live) was itself pushing
-     that whole column, and therefore #title and .ribbon's real widths,
-     to differ BETWEEN MODES, which is what the user actually saw as
-     "the screen size changes" switching Historical -> Live (measured:
-     #title 259px -> 397px, .ribbon 985px -> 847px, just from this).
-     This full-span rule already existed for mobile only (a DIFFERENT
-     bug, Session 68's ~0px-column word-wrap) -- turns out desktop needed
-     it too, just for a subtler reason. Un-conditional now: these two
-     never again participate in the title/ribbon column split, at any
-     width, regardless of their own content length. */
-  #ribbon-caption, #projection-strip { grid-column: 1 / -1; }
   #title { min-width: 0; }
   #title-heading { display: flex; align-items: center; gap: 8px; }
   /* Session 68: a dedicated navy, not SURPLUS_COLOR's #2a78d6 -- that blue
@@ -626,31 +610,19 @@
      Hidden by default, same "only show it when there's something to
      flag" rule the hero subtitle line itself already follows. */
   #live-coverage-note { margin-top: 4px; color: #666057; }
-  /* Session 69: white-space:nowrap -- a single guaranteed-one-line box
-     never changes height as long as it holds text, regardless of length.
-     Session 73 first fixed the mode-switch jump this and #projection-strip
-     caused (below) by reserving their live-mode height in historical too
-     (a min-height, keyed off a real measurement). Session 74 replaces
-     that: user preferred historical's original, more compact height over
-     the two modes being forced to match, so this now animates open/closed
-     on the same .hidden class renderRibbon() already toggles (JS
-     unchanged) instead of reserving space for it in historical.
-     display:block!important still has to be restated here -- the shared
-     .hidden{display:none!important} rule would otherwise win outright
-     (display can't be part of a transition, so this isn't about easing
-     it, it's that display:none leaves nothing for max-height/opacity/
-     visibility below to animate between). */
-  #ribbon-caption.hidden, #projection-strip.hidden { display: block !important; }
-  #ribbon-caption {
-    margin-top: 0; font-size: 11px; color: #666057; line-height: 1.4;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    max-height: 0; opacity: 0; visibility: hidden;
-    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease, visibility 0s linear 0.2s;
-  }
-  #ribbon-caption:not(.hidden) {
-    max-height: 20px; opacity: 1; margin-top: 8px; visibility: visible;
-    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease, visibility 0s linear 0s;
-  }
+  /* Session 69-73 tried several ways to keep these two from changing the
+     MASTHEAD's height across modes (reserved space, then an animated
+     collapse) before the user asked to just move them out of the header
+     instead -- see #live-as-of's own comment for where they live now.
+     #timebar is position:absolute (this file's dock-over-the-map
+     pattern), so a plain show/hide is enough here: the card growing or
+     shrinking by a line never moves anything else on the page, which was
+     the entire problem those earlier attempts were solving around. Free
+     to wrap now too (was forced to one line via nowrap+ellipsis when this
+     had to fit a masthead grid column) -- #timebar's own width is
+     content-driven, so long text just makes the card a little wider or
+     taller instead of needing to be truncated. */
+  #ribbon-caption { margin-top: 4px; font-size: 11px; color: #666057; line-height: 1.4; }
 
   /* Session 66: the fleet slider's marginal-benefit curve -- one bar per
      fleet size 1-10, height proportional to stations cleared by THAT
@@ -668,8 +640,8 @@
   #fleet-marginal-caption { font-size: 10.5px; color: #898781; margin-top: -4px; margin-bottom: 8px; display: flex; justify-content: space-between; }
   #fleet-no-change-note { margin: 8px 0; padding: 6px 10px; border-left: 2px solid #898781; background: #f3f2f0; color: #52514e; font-size: 11px; line-height: 1.4; border-radius: 0 4px 4px 0; }
 
-  /* Session 68: one slim line, cursor:help signals the tooltip carries the
-     method explanation that used to be a permanent second line here.
+  /* Session 68: cursor:help signals the tooltip carries the method
+     explanation that used to be a permanent second line here.
      Session 70: cursor:help alone is a weak, easily-missed affordance --
      .info-affordance below is the visible signal; cursor:help stays as a
      secondary cue for mouse users.
@@ -677,27 +649,13 @@
      more here" convention alongside the icon -- excluded from the icon
      itself (an underlined circle-i reads oddly) via .info-affordance's
      own text-decoration:none below.
-     Session 74: same animated open/close as #ribbon-caption above, on
-     the same .hidden class -- only the vertical padding/border animate
-     (left/right stay a constant 1px/14px, nothing to collapse
-     horizontally); content-box sizing here (no reset on this element)
-     means max-height below is a CONTENT budget, so it's sized well
-     under the padding/border it sits alongside, not the total card
-     height. */
+     Session 74: dropped its own card look (background/border/padding) --
+     now living inside #timebar's own white card (#live-as-of's comment),
+     a second nested card here would just be a box inside a box. Plain
+     text, matching #ribbon-caption right above it. */
   #projection-strip {
-    margin-top: 0; padding: 0 14px; border: 0 solid #d8d7d3; border-left-width: 1px; border-right-width: 1px;
-    border-radius: 6px; background: #fbfaf7; font-size: 11.5px; color: #52514e; line-height: 1.4;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help;
+    margin-top: 4px; font-size: 11px; color: #666057; line-height: 1.4; cursor: help;
     text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-color: #b5b3ad;
-    max-height: 0; opacity: 0; visibility: hidden;
-    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease,
-                padding 0.25s ease, border-width 0.25s ease, visibility 0s linear 0.2s;
-  }
-  #projection-strip:not(.hidden) {
-    max-height: 18px; opacity: 1; margin-top: 8px; visibility: visible;
-    padding-top: 5px; padding-bottom: 5px; border-top-width: 1px; border-bottom-width: 1px;
-    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease,
-                padding 0.25s ease, border-width 0.25s ease, visibility 0s linear 0s;
   }
   #projection-strip b { color: #0b0b0b; font-variant-numeric: tabular-nums; }
   #projection-strip:focus-visible { outline: 2px solid #2166ac; outline-offset: 1px; }
@@ -926,10 +884,6 @@
       grid-column: 1 / -1; grid-row: 2;
       padding-top: 10px; border-top: 1px solid #e6e5e1;
     }
-    /* Session 68's mobile-only fix for these two (word-wrap collapse in
-       a near-0px column) now lives in the unconditional rule near
-       #topbar's grid definition, which also covers a desktop-width bug
-       found later -- no longer needed here specifically. */
     .ribbon__tile { padding: 0 12px; }
     .ribbon__value { font-size: 14px; }
     #ribbon-tile-1 .ribbon__value { font-size: 22px; }
@@ -1140,28 +1094,10 @@
       <span class="ribbon__projected-tag hidden" id="ribbon-projected-4">Projected</span>
     </div>
   </div>
-  <!-- Session 66: double-outage's definition already lived in tile 4's
-       hover title -- easy to miss, and its count sitting next to
-       "empty now" + "full now" invites the wrong arithmetic (adjacency
-       makes it a subset, not their sum). Same fact, visible without a
-       hover now. -->
-  <div id="ribbon-caption" class="hidden"></div>
   <!-- Session 68: the full-width amber banner that used to live here
        ("Currently showing: Steady rain (projected, not baseline)...")
        is gone -- replaced by a PROJECTED tag on every affected KPI tile
-       plus an amber hero-tile border (see renderRibbon()'s own comment).
-       Per-tile is where a reviewer's eye already is; a banner between
-       the KPI row and the map was one screen-region removed from the
-       numbers it was disclaiming. -->
-  <!-- Session 66: "now" (Live Docks) and an averaged past hour (Historical
-       Flow) were the only two views -- no answer to "what happens next". -->
-  <!-- Session 70: user-reported that cursor:help alone (a cursor-shape
-       change) is too weak an affordance to notice -- most people don't
-       know a cursor shape means "hover here." tabindex makes the same
-       tooltip reachable by keyboard focus, not just mouse hover. -->
-  <div id="projection-strip" class="hidden" tabindex="0"></div>
-
-
+       plus an amber hero-tile border (see renderRibbon()'s own comment). -->
 </header>
 
 
@@ -1257,6 +1193,26 @@
     <div id="live-as-of" class="hidden">
       <div id="live-as-of-timestamp"></div>
       <div id="live-coverage-note" class="hidden"></div>
+      <!-- Session 74: relocated from the masthead ribbon -- their presence
+           was directly why the masthead changed height switching modes
+           (Sessions 73/74 both tried to fix that in place; the user asked
+           to just move it instead). #timebar is `position: absolute`
+           (below), so this card growing/shrinking by a line or two never
+           moves anything else on the page -- the actual reason this is a
+           better home, not just a different one. ids/JS untouched: every
+           render call (renderRibbon(), renderProjectionStrip()) still
+           finds them by the same id, only their place in the document
+           changed. Session 66: double-outage's definition already lived
+           in tile 4's hover title -- easy to miss, and its count sitting
+           next to "empty now" + "full now" invites the wrong arithmetic
+           (adjacency makes it a subset, not their sum); stated plainly
+           here instead. -->
+      <div id="ribbon-caption" class="hidden"></div>
+      <!-- Session 70: cursor:help alone (a cursor-shape change) is too
+           weak an affordance to notice on its own; tabindex makes the
+           same tooltip reachable by keyboard focus too, not just mouse
+           hover. -->
+      <div id="projection-strip" class="hidden" tabindex="0"></div>
     </div>
 
 
@@ -2616,13 +2572,9 @@ function computeSliceTotals() {
 }
 
 const RIBBON_EM_DASH = '—';
-// Session 73: shared between both renderRibbon() branches. Historical
-// mode passes this SAME string as tile 1's context (not '') and then
-// hides the element via visibility, not via clearing its text -- see
-// the historical branch below. Keeping the real content always
-// rendered, just toggling whether it's seen, is what makes tile 1's
-// own height identical in both modes (same fix already applied to
-// #ribbon-caption/#projection-strip for the mode switch overall).
+// Only the live branch passes this; historical passes '' for tile 1's
+// context -- see .ribbon__context's own :empty-driven CSS for why that
+// alone is enough to show/hide/animate it correctly.
 const RIBBON_TILE1_LIVE_CAVEAT = "Instant reading, not the contract's 60-minute measurement";
 
 // dotColor is a CSS colour or null. Null hides the dot outright rather than

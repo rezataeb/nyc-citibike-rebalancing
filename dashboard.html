@@ -169,24 +169,31 @@
     text-transform: uppercase;
   }
   .ribbon__tile--supporting .ribbon__value { font-size: 19px; }
-  .ribbon__context { display: block; margin-top: 2px; font-size: 10.5px; color: #898781; line-height: 1.35; }
-  /* Session 73: reserves tile 1's context line's real height in historical
-     mode too (see RIBBON_TILE1_LIVE_CAVEAT) -- same visibility:hidden
-     technique as #ribbon-caption/#projection-strip below, applied here
-     via a dedicated class since this element isn't otherwise ever
-     toggled with the shared .hidden class. */
-  .ribbon__context--mode-hidden { visibility: hidden; pointer-events: none; }
-  /* Session 73: min-height, not just "keep the same text rendered" --
-     found live that tile 1 itself is measurably WIDER on the very first
-     paint than after any later reflow (347px vs 298px at a 1300px
-     viewport, before vs after the first mode switch), which alone made
-     this same fixed caveat sentence wrap to 1 line first-paint and 2
-     lines ever after -- a real timing quirk, not explained further, but
-     this min-height makes the fix correct regardless of WHY the width
-     moves: 2 lines' worth at this font-size/line-height, so reserved
-     space can never be less than live mode's real content needs, on
-     the first paint or any later one. */
-  #ribbon-context-1 { min-height: 28.4px; }
+  /* Session 74: reworked from Session 73's "reserve tile 1's live-mode
+     context height in historical too" (padded historical to match live's
+     taller content) -- user preferred historical's original, more
+     compact height and asked for live's extra line to be handled on its
+     own instead of forcing the two modes to match. :empty is true
+     exactly when a tile's context span has no text -- renderRibbon()'s
+     historical branch passes '' for tile 1 again (Session 73's
+     RIBBON_TILE1_LIVE_CAVEAT-in-both-branches trick is gone), so this
+     collapses to nothing with no JS class needed, and grows in smoothly
+     once live mode's real text lands. max-height/opacity animate the
+     visual collapse; display can't (an element switching display just
+     jumps, regardless of any transition property) -- visibility is
+     delayed to the end of the fade-out (immediate on fade-in) so a
+     screen reader or Tab press never lands on the collapsed content
+     mid-animation, the same correctness display:none used to give for
+     free. */
+  .ribbon__context {
+    display: block; margin-top: 0; font-size: 10.5px; color: #898781; line-height: 1.35;
+    max-height: 0; opacity: 0; overflow: hidden; visibility: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease, visibility 0s linear 0.2s;
+  }
+  .ribbon__context:not(:empty) {
+    max-height: 30px; opacity: 1; margin-top: 2px; visibility: visible;
+    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease, visibility 0s linear 0s;
+  }
   .ribbon__projected-tag {
     display: inline-block; margin-top: 5px; padding: 1px 6px; border-radius: 6px;
     background: #f0dfc0; color: #8a5a1f; font-size: 9px; font-weight: 700;
@@ -619,44 +626,31 @@
      Hidden by default, same "only show it when there's something to
      flag" rule the hero subtitle line itself already follows. */
   #live-coverage-note { margin-top: 4px; color: #666057; }
-  /* Session 69: same nowrap/ellipsis treatment #projection-strip already
-     has right below it -- a single guaranteed-one-line box never changes
-     height, so the pair of them can't shift the map below on a live
-     refresh even if either one's text length ever varies. */
-  #ribbon-caption { margin-top: 8px; font-size: 11px; color: #666057; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* Session 73: user-reported the whole page visibly jumps switching
-     Historical -> Live -- confirmed and measured (78.8px added to
-     #topbar's height, pushing the map and everything below it down by
-     the same amount), since #ribbon-caption/#projection-strip exist
-     ONLY in live mode (renderRibbon()'s historical branch explicitly
-     hides both) and the shared .hidden class's display:none removes
-     them from layout entirely, reserving no space for them in
-     historical mode. visibility:hidden instead, for JUST these two ids
-     -- keeps the exact same layout footprint in BOTH modes (no magic
-     pixel number to keep in sync with content that can reflow), just
-     toggles whether it's seen/interactive/focusable. Deliberately
-     overrides .hidden's own !important, and only for these two.
-
-     That alone still left the exact switch the user described: on a
-     session that hasn't shown Live mode yet, these two hold no text at
-     all (not just hidden text) -- renderProjectionStrip() and the
-     ribbon-caption textContent assignment only ever run in the live
-     branch -- so visibility:hidden was reserving an EMPTY box's height
-     (0 for the caption; 12px of #projection-strip's own padding/border
-     with no text line), not the real one-line height either fills in
-     once populated. Both are white-space:nowrap with ellipsis, so
-     "populated" is always exactly one line -- min-height locks in that
-     one measured size below, so even the very first Historical->Live
-     switch (or a page that never switches) already reserves it. */
-  #ribbon-caption.hidden, #projection-strip.hidden {
-    display: block !important; visibility: hidden; pointer-events: none;
+  /* Session 69: white-space:nowrap -- a single guaranteed-one-line box
+     never changes height as long as it holds text, regardless of length.
+     Session 73 first fixed the mode-switch jump this and #projection-strip
+     caused (below) by reserving their live-mode height in historical too
+     (a min-height, keyed off a real measurement). Session 74 replaces
+     that: user preferred historical's original, more compact height over
+     the two modes being forced to match, so this now animates open/closed
+     on the same .hidden class renderRibbon() already toggles (JS
+     unchanged) instead of reserving space for it in historical.
+     display:block!important still has to be restated here -- the shared
+     .hidden{display:none!important} rule would otherwise win outright
+     (display can't be part of a transition, so this isn't about easing
+     it, it's that display:none leaves nothing for max-height/opacity/
+     visibility below to animate between). */
+  #ribbon-caption.hidden, #projection-strip.hidden { display: block !important; }
+  #ribbon-caption {
+    margin-top: 0; font-size: 11px; color: #666057; line-height: 1.4;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-height: 0; opacity: 0; visibility: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease, visibility 0s linear 0.2s;
   }
-  #ribbon-caption { min-height: 15.4px; }
-  /* content-box here (no box-sizing reset on this element), so the
-     reserved height is content only -- 16.8px content + this rule's own
-     10px padding + 2px border = the same 28.8px total a populated line
-     already renders at, not 28.8 on top of the padding/border. */
-  #projection-strip { min-height: 16.8px; }
+  #ribbon-caption:not(.hidden) {
+    max-height: 20px; opacity: 1; margin-top: 8px; visibility: visible;
+    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease, visibility 0s linear 0s;
+  }
 
   /* Session 66: the fleet slider's marginal-benefit curve -- one bar per
      fleet size 1-10, height proportional to stations cleared by THAT
@@ -682,12 +676,28 @@
      Session 72: added a dotted underline as a second, standard "there's
      more here" convention alongside the icon -- excluded from the icon
      itself (an underlined circle-i reads oddly) via .info-affordance's
-     own text-decoration:none below. */
+     own text-decoration:none below.
+     Session 74: same animated open/close as #ribbon-caption above, on
+     the same .hidden class -- only the vertical padding/border animate
+     (left/right stay a constant 1px/14px, nothing to collapse
+     horizontally); content-box sizing here (no reset on this element)
+     means max-height below is a CONTENT budget, so it's sized well
+     under the padding/border it sits alongside, not the total card
+     height. */
   #projection-strip {
-    margin-top: 8px; padding: 5px 14px; border: 1px solid #d8d7d3; border-radius: 6px;
-    background: #fbfaf7; font-size: 11.5px; color: #52514e; line-height: 1.4;
+    margin-top: 0; padding: 0 14px; border: 0 solid #d8d7d3; border-left-width: 1px; border-right-width: 1px;
+    border-radius: 6px; background: #fbfaf7; font-size: 11.5px; color: #52514e; line-height: 1.4;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help;
     text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-color: #b5b3ad;
+    max-height: 0; opacity: 0; visibility: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease,
+                padding 0.25s ease, border-width 0.25s ease, visibility 0s linear 0.2s;
+  }
+  #projection-strip:not(.hidden) {
+    max-height: 18px; opacity: 1; margin-top: 8px; visibility: visible;
+    padding-top: 5px; padding-bottom: 5px; border-top-width: 1px; border-bottom-width: 1px;
+    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease,
+                padding 0.25s ease, border-width 0.25s ease, visibility 0s linear 0s;
   }
   #projection-strip b { color: #0b0b0b; font-variant-numeric: tabular-nums; }
   #projection-strip:focus-visible { outline: 2px solid #2166ac; outline-offset: 1px; }
@@ -3028,9 +3038,6 @@ function renderRibbon() {
       '#0b0b0b',
       RIBBON_TILE1_LIVE_CAVEAT
     );
-    // Session 73: undo historical mode's visibility:hidden below, in
-    // case this render followed a historical one without a full reload.
-    document.getElementById('ribbon-context-1').classList.remove('ribbon__context--mode-hidden');
     setRibbonTile(
       2,
       fill === null ? RIBBON_EM_DASH : fill.nEmpty.toLocaleString(),
@@ -3092,19 +3099,10 @@ function renderRibbon() {
     'bikes out of place this hour',
     `Total absolute net flow across all stations at ${slice} -- the size of the imbalance the system absorbs in this hour on a typical day.`,
     null, // historical mode is outside the KPI strip's scope -- no status dot
-    // Session 73: user-reported the whole page jumps switching modes --
-    // this tile's context line was the other real contributor (measured
-    // 28px, on top of the ribbon-caption/projection-strip gap already
-    // fixed): empty here (historical has no analogous caveat), but two
-    // real lines of text in live mode. Passing the SAME live-mode string
-    // here too, rather than '', keeps this tile's own height identical
-    // in both modes; visibility:hidden below (not the shared .hidden
-    // class) hides it without collapsing its layout box. It's never
-    // exposed to sighted users or assistive tech either way -- both
-    // remove hidden content from the accessibility tree.
-    RIBBON_TILE1_LIVE_CAVEAT
+    '' // historical has no analogous caveat -- .ribbon__context's own
+       // :empty rule (Session 74) collapses this tile's context line to
+       // nothing here and grows it in when live mode populates it
   );
-  document.getElementById('ribbon-context-1').classList.add('ribbon__context--mode-hidden');
   // Session 65: tiles 2/3 used to be "stations need bikes/docks" -- EVERY
   // draining or filling station, deficit and big-deficit lumped together.
   // That's the exact same population the Net Flow Distribution card right

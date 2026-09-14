@@ -152,11 +152,28 @@
      to every tile. Each tile's own TYPOGRAPHY stays exactly where it
      was: #ribbon-tile-1's smaller/muted label two lines up, .ribbon__
      tile--supporting's bigger/bold/uppercase one just below -- only the
-     shared layout mechanics moved. */
+     shared layout mechanics moved.
+
+     Found live, chasing the user's next report ("still a ~9px gap
+     switching modes"): tiles 2-4's labels have had min-height:0 here
+     since Session 68 -- meaning the exact problem #ribbon__label's OWN
+     base rule exists to prevent (see its Session 59 comment two screens
+     up: live labels are short, historical ones are long, so without a
+     shared reservation the ribbon resizes on every mode switch) was
+     quietly back in effect for these three tiles the whole time, just
+     smaller than the bigger issues fixed earlier this session and never
+     separately noticed until those were gone. Unlike ribbon-caption/
+     projection-strip (moved out entirely, Session 74) this isn't a
+     concept that's ABSENT in one mode -- every tile's label is real,
+     non-empty text in both modes, just longer in historical ("stations
+     heading toward empty" vs. "empty now") -- so reserving its taller
+     mode's height here is the same case Session 59 already solved, not
+     the case the user pushed back on. 2.6em -- not 0 -- restores that
+     for every tile now that all four share this selector. */
   .ribbon__tile-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
   .ribbon__tile-head .ribbon__dot { margin-bottom: 0; }
   .ribbon__tile-head .ribbon__label {
-    display: block; -webkit-line-clamp: unset; overflow: visible; min-height: 0; margin-top: 0;
+    display: block; -webkit-line-clamp: unset; overflow: visible; min-height: 2.6em; margin-top: 0;
   }
   .ribbon__tile--supporting .ribbon__label { font-size: 12px; font-weight: 700; color: #3a3937; letter-spacing: 0.01em; text-transform: uppercase; }
   .ribbon__tile--supporting .ribbon__value { font-size: 19px; }
@@ -988,6 +1005,14 @@
        "empty") at 3 lines even with the milder ratio. */
     .ribbon { grid-template-columns: 1.25fr 1fr 1fr 1fr; }
     .ribbon__label { -webkit-line-clamp: 4; min-height: 4.6em; }
+    /* Session 75: .ribbon__tile-head .ribbon__label's own 2.6em (two
+       screens up) outranks this bare selector on specificity regardless
+       of being inside this media query, so the 4-line reservation above
+       needs restating here to actually apply once tile 1 also uses that
+       selector -- without this, tile 1 would silently fall back to
+       2.6em at exactly the width its own longest historical label
+       ("bikes out of place this hour") needs the most room. */
+    .ribbon__tile-head .ribbon__label { min-height: 4.6em; }
     /* Session 68 bug found at 390px: tiles 2-4 are ~80px wide here (4.25
        fr-units sharing 338px), leaving ~55px of padded content width --
        too little for .ribbon__value's 19px tabular digits to fit a real

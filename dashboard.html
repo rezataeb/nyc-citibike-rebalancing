@@ -141,17 +141,24 @@
   }
   #ribbon-tile-1 .ribbon__value { font-size: 26px; }
   #ribbon-tile-1 .ribbon__label { font-size: 11px; color: #52514e; }
-  /* Session 68: supporting tiles (2-4) invert tile 1's stacking --
-     label leads, larger than before (the small gray label was this
-     page's weakest typographic element), number follows, and an
-     optional one-line context sits underneath. */
-  .ribbon__tile--supporting .ribbon__tile-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
-  .ribbon__tile--supporting .ribbon__dot { display: block; margin-bottom: 0; }
-  .ribbon__tile--supporting .ribbon__label {
-    display: block; -webkit-line-clamp: unset; overflow: visible; min-height: 0;
-    font-size: 12px; font-weight: 700; color: #3a3937; letter-spacing: 0.01em; margin-top: 0;
-    text-transform: uppercase;
+  /* Session 68: supporting tiles (2-4) invert tile 1's ORIGINAL
+     stacking -- label leads, larger than before (the small gray label
+     was this page's weakest typographic element), number follows, and
+     an optional one-line context sits underneath.
+     Session 75: unscoped from .ribbon__tile--supporting -- tile 1 now
+     uses this same .ribbon__tile-head layout too (see its own comment
+     in the markup), so the structural part (flex row, dot's spacing,
+     label's reset out of the 2-line-clamp block treatment below) applies
+     to every tile. Each tile's own TYPOGRAPHY stays exactly where it
+     was: #ribbon-tile-1's smaller/muted label two lines up, .ribbon__
+     tile--supporting's bigger/bold/uppercase one just below -- only the
+     shared layout mechanics moved. */
+  .ribbon__tile-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .ribbon__tile-head .ribbon__dot { margin-bottom: 0; }
+  .ribbon__tile-head .ribbon__label {
+    display: block; -webkit-line-clamp: unset; overflow: visible; min-height: 0; margin-top: 0;
   }
+  .ribbon__tile--supporting .ribbon__label { font-size: 12px; font-weight: 700; color: #3a3937; letter-spacing: 0.01em; text-transform: uppercase; }
   .ribbon__tile--supporting .ribbon__value { font-size: 19px; }
   /* Session 74: reworked from Session 73's "reserve tile 1's live-mode
      context height in historical too" (padded historical to match live's
@@ -174,8 +181,18 @@
     max-height: 0; opacity: 0; overflow: hidden; visibility: hidden;
     transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease, visibility 0s linear 0.2s;
   }
+  /* Session 75: max-height is a transition target, not a hard cap on how
+     much text this can ever hold -- 30px (sized for tile 1's caveat
+     sentence wrapping to at most 2 lines at DESKTOP tile widths) was
+     silently clipping most of that same sentence at 390px, where the
+     narrower column wraps it to ~5 lines (measured scrollHeight 71px
+     against this 30px budget). Generous on purpose: content shorter than
+     this just settles at its own natural height, same as before --
+     there's no cost to sizing this well above anything the ribbon's
+     tiles realistically wrap to at any width, and it means the next
+     longer sentence added here won't silently clip again either. */
   .ribbon__context:not(:empty) {
-    max-height: 30px; opacity: 1; margin-top: 2px; visibility: visible;
+    max-height: 100px; opacity: 1; margin-top: 2px; visibility: visible;
     transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease, visibility 0s linear 0s;
   }
   .ribbon__projected-tag {
@@ -1061,14 +1078,28 @@
 
 
   <div class="ribbon" id="ribbon" role="group" aria-label="Key metrics" aria-live="off">
-    <!-- Session 68: tile 1 keeps its original number-first stacking --
-         it's the hero, not a fourth instance of the supporting pattern
-         below. .ribbon__projected-tag is the shared badge item 4 toggles
-         (never removed from the DOM, only shown/hidden, so a projected
-         number is never a state this markup can express without it). -->
+    <!-- Session 75: tile 1 used to stack dot/value/label/context as four
+         separate rows (number-first, "the hero, not a fourth instance of
+         the supporting pattern below") -- but its context line is the
+         one thing on this whole ribbon that's genuinely empty in
+         historical mode and real text in live mode (every other tile's
+         label/context stays populated in both), so tile 1 alone had a
+         row that appeared and disappeared -- and because all four tiles
+         stretch to match the tallest (CSS Grid row, align-items default),
+         that one row's presence/absence was resizing the ENTIRE ribbon
+         (measured 92.5px -> 108.7px) every time you switched modes, on
+         top of making tile 1 taller than 2-4 even within a single mode
+         (dot+label as their own row costs a whole row 2-4 don't pay for).
+         User-suggested fix: fold the dot+label into the SAME
+         .ribbon__tile-head wrapper 2-4 already use, above the value, so
+         tile 1 is structurally the same 3-row shape (head, value,
+         context) as its siblings -- still visually distinct via its own
+         border/background/larger value font (all unchanged, keyed off
+         #ribbon-tile-1 and .ribbon__tile--supporting separately, neither
+         touched here), just not a whole extra row taller. -->
     <div class="ribbon__tile" id="ribbon-tile-1">
-      <i class="ribbon__dot" id="ribbon-dot-1" aria-hidden="true"></i><b class="ribbon__value" id="ribbon-value-1"></b>
-      <span class="ribbon__label" id="ribbon-label-1"></span>
+      <div class="ribbon__tile-head"><i class="ribbon__dot" id="ribbon-dot-1" aria-hidden="true"></i><span class="ribbon__label" id="ribbon-label-1"></span></div>
+      <b class="ribbon__value" id="ribbon-value-1"></b>
       <!-- Session 70: was hover-tooltip-only ("An INSTANT proxy for the
            contract's availability rule") -- a caveat this load-bearing
            belongs where it's read without knowing to hover, same as every

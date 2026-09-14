@@ -720,6 +720,20 @@
   #tab-panel-model tbody td:last-child { color: #191817; font-weight: 700; }
   #model-eval-caption { margin-bottom: 4px; color: #4a4744; line-height: 1.5; font-size: 12.5px; font-style: normal; }
 
+  /* Session 76: reuses #tab-panel-model's own table look exactly (same
+     selectors, same values, just re-scoped) rather than a second table
+     style -- one visual language for "here is a small evidence table,"
+     per this file's own no-new-styles constraint for this pass. */
+  #reliability-capacity-content table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  #reliability-capacity-content th, #reliability-capacity-content td { text-align: right; padding: 6px 4px; font-size: 12px; }
+  #reliability-capacity-content th:first-child, #reliability-capacity-content td:first-child { text-align: left; }
+  #reliability-capacity-content thead th { color: #52514e; font-weight: 600; border-bottom: 1px solid #d8d7d3; text-transform: uppercase; font-size: 10px; letter-spacing: 0.03em; }
+  #reliability-capacity-content tbody td { border-bottom: 1px solid #f3f2f0; }
+  #reliability-capacity-sentences { color: #4a4744; line-height: 1.5; font-size: 12.5px; margin-bottom: 4px; }
+  #reliability-capacity-sentences p { margin: 0 0 8px; }
+  #reliability-capacity-sentences p:last-child { margin-bottom: 0; }
+  #reliability-capacity-method { margin-top: 10px; padding-top: 8px; border-top: 1px solid #f3f2f0; color: #898781; font-size: 10.5px; font-style: italic; line-height: 1.4; }
+
   .scenario-planner-slider { margin-bottom: 12px; }
   .scenario-planner-slider label { display: block; font-size: 12px; color: #52514e; margin-bottom: 6px; }
   .scenario-planner-slider input[type="range"] { width: 100%; box-sizing: border-box; accent-color: #c9832b; }
@@ -1644,6 +1658,34 @@
           <div id="equity-gap-method">Compares stations currently reporting 0 bikes or 0 docks (live GBFS), grouped by whether they're within your current NYCHA/school/subway-gap thresholds -- a snapshot, not a historical frequency.</div>
         </div>
 
+        <!-- Session 76 (DOT-oversight reframe, item 4): the one analysis
+             here answering a question only DOT owns -- "where should we
+             add docks or stations" -- not the operator's daily dispatch.
+             Placed directly under Equity Gap, same prominence tier as
+             Equity thresholds/Equity Gap (bold .accordion-toggle, not
+             the quiet Fleet & routing/Model performance/Glossary tier)
+             -- the reframe explicitly promotes this to core rather than
+             optional. Collapsed by default like every other <details>
+             here; hidden entirely (graceful degradation, .hidden
+             toggled by renderReliabilityCapacity(), same rule as every
+             other optional analysis layer) if data/reliability_capacity
+             .json failed to generate OR its own regression wasn't
+             buildable on the current join -- see
+             pipeline/reliability_capacity.py's own buildable:false
+             path, which this dashboard treats as "don't show it," not
+             "show it anyway." -->
+        <details id="reliability-capacity-accordion">
+          <summary class="planner-section-title accordion-toggle" id="reliability-capacity-toggle">What predicts reliability (patterns, not proof)</summary>
+          <div class="planner-section-body" id="reliability-capacity-content">
+            <div id="reliability-capacity-sentences"></div>
+            <table>
+              <thead><tr><th>Capacity</th><th>Stations</th><th>Unusable rate</th></tr></thead>
+              <tbody id="reliability-capacity-tbody"></tbody>
+            </table>
+            <div id="reliability-capacity-method"></div>
+          </div>
+        </details>
+
         <section class="planner-section" id="weather-accordion">
           <h3 class="planner-section-title">Weather scenario</h3>
           <div class="planner-section-body" id="weather-scenario-wrap">
@@ -2322,6 +2364,7 @@ const state = {
   elasticities: null, // raw elasticities.json payload, or null if missing -- Phase 4's weather-scenario projection needs this
   scenarioPresets: null, // raw scenario_presets.json payload, or null if missing
   modelPerformance: null, // raw model_performance.json payload, or null if missing -- Session 30's walk-forward result
+  reliabilityCapacity: null, // raw reliability_capacity.json payload, or null if missing/not buildable -- Session 76's capacity-vs-reliability regression
   equityJoinMeta: null, // flows.json's own equity_join{} metadata block (layer vintage labels etc.), or null if flows.json failed to load
   distributionHighlightBin: null, // 0-4 index into the current mode's distribution buckets, or null -- see renderDistribution()/toggleDistributionHighlight()
 };
@@ -2367,6 +2410,52 @@ function renderModelPerformance(payload) {
     `MAE in bikes/day, ${nFolds}-fold leave-one-month-out walk-forward across ${formatPeriodLabel('month:' + firstMonth)} – ${formatPeriodLabel('month:' + lastMonth)}. ` +
     `Seasonal-naive still wins overall (p<0.05 both comparisons) -- fixing the earlier extrapolation problem (real per-date weather instead of monthly averages) ` +
     `didn't flip the result, it just made it statistically rigorous instead of a single train/test split.`;
+}
+
+// pipeline/reliability_capacity.py's capacity-vs-reliability regression
+// (Session 76). Hides entirely -- same graceful-degradation rule as every
+// other optional analysis layer -- both when the file is missing AND when
+// its own buildable:false path fired (a real, checked "the data can't
+// support this honestly" outcome, not an error to paper over). One-shot
+// render, same reasoning as renderModelPerformance() above: a fixed
+// regression over a closed window, nothing here is a function of
+// hour/mode/period.
+function renderReliabilityCapacity(payload) {
+  const wrap = document.getElementById('reliability-capacity-accordion');
+  if (!payload || !payload.buildable) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+
+  // Sentence 1 is the specific finding, computed in the pipeline script
+  // from the real fitted coefficient -- never rebuilt from raw numbers
+  // here, so there is exactly one place that turns a coefficient into
+  // English. Sentence 2 is this section's own non-negotiable epistemic
+  // caveat (see the header's own "patterns, not proof"): capacity,
+  // demand, and location are not randomly assigned to stations, so a
+  // correlation here is not evidence that adding docks alone would
+  // cause the improvement -- fixed text, not data-dependent, because
+  // it's true regardless of what the fitted number turns out to be.
+  const sentences = document.getElementById('reliability-capacity-sentences');
+  sentences.innerHTML =
+    `<p>${payload.headline}</p>` +
+    `<p>This is a pattern in the data, not a controlled experiment -- station capacity, demand, and location were not randomly assigned, so it is not evidence that adding docks by itself would cause the improvement.</p>`;
+
+  const tbody = document.getElementById('reliability-capacity-tbody');
+  tbody.innerHTML = '';
+  for (const band of payload.band_summary) {
+    const row = document.createElement('tr');
+    const rate = band.mean_unusable_rate === null ? '—' : `${(band.mean_unusable_rate * 100).toFixed(1)}%`;
+    row.innerHTML = `<td>${band.label}</td><td>${band.n_stations.toLocaleString()}</td><td>${rate}</td>`;
+    tbody.appendChild(row);
+  }
+
+  document.getElementById('reliability-capacity-method').textContent =
+    `Method: reliability.py's per-station unusable rate (${formatWindowRange(payload.window)}, ${payload.window.days} days, `
+    + `≥${payload.min_observations} observations) joined against a live GBFS capacity fetch and each station's weekday `
+    + `demand magnitude from flows.json (${payload.n_joined.toLocaleString()} stations in the join). Controls for demand only `
+    + `-- borough/zone is not available anywhere in this pipeline.`;
 }
 
 // A paired Wilcoxon result -> "p=0.0024 (naive better)" / "not significant"
@@ -5214,6 +5303,14 @@ const modelPerformanceReady = fetchJSON('data/model_performance.json').catch(() 
 // failing to render.
 const reliabilityReady = fetchJSON('data/reliability.json').catch(() => null);
 
+// reliability_capacity.json (pipeline/reliability_capacity.py, Session 76)
+// -- does capacity predict reliability once demand is held constant. Same
+// optional/non-fatal treatment as every other analysis layer above, PLUS
+// its own internal buildable:false case (the regression can decline to
+// fit on a degenerate join) that renderReliabilityCapacity() also treats
+// as "don't show this section," same as a missing file.
+const reliabilityCapacityReady = fetchJSON('data/reliability_capacity.json').catch(() => null);
+
 // flows.json and live_status.json now fail INDEPENDENTLY -- a live-feed
 // hiccup must not take down real historical data, and a historical-data
 // problem must not be masked by fabricating live counts under real
@@ -5285,8 +5382,8 @@ const liveReady = fetchLiveFeed()
     .then(payload => ({ payload: Object.assign({}, payload, { source: 'snapshot' }), ok: true }))
     .catch(error => ({ payload: null, ok: false, error })));
 
-const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady, reliabilityReady])
-  .then(([flowsResult, liveResult, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload, reliabilityPayload]) => {
+const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady, reliabilityReady, reliabilityCapacityReady])
+  .then(([flowsResult, liveResult, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload, reliabilityPayload, reliabilityCapacityPayload]) => {
     state.stations = flowsResult.payload.stations;
     state.equityJoinMeta = flowsResult.payload.equity_join || null;
     state.liveAvailable = liveResult.ok;
@@ -5729,6 +5826,13 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     renderEquityCounts(); // populate the three count lines at the default 300m/800m thresholds before any slider interaction
     renderEquityGap(); // real empty/full snapshot comparison; self-hides if live data never loaded
 
+    // Same one-shot treatment as Model performance above: this is a
+    // fixed regression result over a closed window, not a function of
+    // hour/mode/period, so it renders once here rather than through
+    // renderReadout()'s per-change hook.
+    state.reliabilityCapacity = reliabilityCapacityPayload;
+    renderReliabilityCapacity(state.reliabilityCapacity);
+
     // Same rAF-coalescing pattern as the hour slider above -- 2,347
     // stations recomputed on every 'input' event during a drag would be
     // wasteful; only the latest value per animation frame is ever rendered.
@@ -5801,7 +5905,7 @@ if (typeof globalThis !== 'undefined') {
     markerRadiusForZoom, radiusFor, MARKER_HOVER_RADIUS_DELTA_PX,
     setDetailVisible, setDetailMoreInfoExpanded, updateStationDetail, contextLines, schoolVintageNote,
     renderLegendScale, overplotAlphaForZoom, nearestStationWithin, CLICK_TOLERANCE_PX, markerStyleFor,
-    renderModelPerformance, formatSignificance, computeEquityCounts, renderEquityCounts, setEquityThreshold,
+    renderModelPerformance, renderReliabilityCapacity, formatSignificance, computeEquityCounts, renderEquityCounts, setEquityThreshold,
     renderFleetStats, computeServicedEquityOverlap, setFleetSize, renderPriorityStops,
     isStationEquityFlagged, computeEquityGap, renderEquityGap,
     fleetTotalCleared, renderFleetMarginalChart,

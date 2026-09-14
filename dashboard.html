@@ -317,15 +317,19 @@
      collapsed-by-default <details> pattern as #equity-accordion --
      historical mode's own one-line note is short enough already and
      keeps rendering as plain text, unwrapped, see renderDistribution().
-     Session 70: reused for #weather-notes-* below -- Weather's own
-     methodology paragraph was the same shape of problem. */
-  #distribution-notes-accordion, #weather-notes-accordion { margin-top: 8px; }
-  #distribution-notes-toggle, #weather-notes-toggle {
+     Session 70: reused for #weather-notes-* -- Weather's own methodology
+     paragraph was the same shape of problem.
+     Session 77: #weather-notes-accordion/-toggle/-body are gone -- that
+     content merged into this one, always-reachable regardless of mode
+     now (see renderDistribution()'s own comment for why). Selectors
+     below no longer need the second half of each pair. */
+  #distribution-notes-accordion { margin-top: 8px; }
+  #distribution-notes-toggle {
     padding: 0; background: none; font-size: 10.5px; font-weight: 600; color: #666057;
   }
-  #distribution-notes-toggle:hover, #weather-notes-toggle:hover { background: none; color: #0b0b0b; }
-  #distribution-notes-toggle::after, #weather-notes-toggle::after { font-size: 9px; }
-  #distribution-notes-body, #weather-notes-body { margin-top: 6px; font-size: 10px; color: #666057; line-height: 1.4; }
+  #distribution-notes-toggle:hover { background: none; color: #0b0b0b; }
+  #distribution-notes-toggle::after { font-size: 9px; }
+  #distribution-notes-body { margin-top: 6px; font-size: 10px; color: #666057; line-height: 1.4; }
 
   /* Session 52: the stack no longer forces one width on both children.
      The legend is a colour key -- a gradient and two end labels, nothing
@@ -759,10 +763,12 @@
     letter-spacing: 0.08em; text-transform: uppercase; color: #666057;
   }
   /* Session 70: #weather-scenario-note went from a 4-sentence paragraph to
-     one real short sentence (the rest moved into #weather-notes-body,
-     collapsed) -- back to being a phrase, not a paragraph, so it goes back
-     to #detail-context-note's italic treatment rather than the boxed
-     "Method" block #fleet-sim-note still needs for its own longer text. */
+     one real short sentence (the rest moved into a collapsed Data notes
+     disclosure -- Session 77: that content now lives in
+     #distribution-notes-body, see renderDistribution()) -- back to being
+     a phrase, not a paragraph, so it goes back to #detail-context-note's
+     italic treatment rather than the boxed "Method" block #fleet-sim-note
+     still needs for its own longer text. */
   #weather-scenario-note { margin-top: 8px; color: #666057; line-height: 1.4; font-style: italic; font-size: 11px; }
 
   /* Real map wiring already existed here (fleet size drives the actual
@@ -1416,7 +1422,7 @@
              ranked-need computation a dispatcher would act on IS the fact
              an overseer audits, just read for a different decision. One
              line says so rather than leaving "who is this for" implicit. -->
-        <div id="priority-stops-framing">Where intervention is most urgent, in ranked order -- the same ranking a dispatcher acts on and an overseer audits.</div>
+        <div id="priority-stops-framing">Where intervention is most urgent, in ranked order — the same ranking a dispatcher acts on and an overseer audits.</div>
         <!-- Session 70: user-reported this list's real control (fleet
              size) lives in a different, separate collapsible section
              below it -- nothing here hinted that. One line, not a bigger
@@ -1434,7 +1440,7 @@
           <input type="checkbox" id="priority-equity-toggle">
           Equity-weighted ranking
         </label>
-        <div id="priority-equity-note">Stations near NYCHA/school, or beyond the subway gap, rank higher.</div>
+        <div id="priority-equity-note">Stations near NYCHA or a school, or beyond the subway gap, rank higher.</div>
         <div class="priority-stops-caption" id="priority-stops-caption"></div>
         <ol id="priority-stops-list"></ol>
       </div>
@@ -1655,7 +1661,7 @@
         <div class="worst" id="equity-gap-wrap">
           <div class="worst__title">Equity gap</div>
           <div id="equity-gap-body"></div>
-          <div id="equity-gap-method">Compares stations currently reporting 0 bikes or 0 docks (live GBFS), grouped by whether they're within your current NYCHA/school/subway-gap thresholds -- a snapshot, not a historical frequency.</div>
+          <div id="equity-gap-method">Compares stations currently reporting 0 bikes or 0 docks (live GBFS), grouped by whether they're within your current NYCHA, school, and subway-gap thresholds — a snapshot, not a historical frequency.</div>
         </div>
 
         <!-- Session 76 (DOT-oversight reframe, item 4): the one analysis
@@ -1708,11 +1714,14 @@
                  same collapsed "Data notes" pattern. All static text, no
                  data dependency, so no JS render call is needed the way
                  Dock Fill's does. -->
+            <!-- Session 77: this section's own "Data notes" disclosure
+                 (the regression/geography/exclusion detail that used to
+                 sit right here) merged into #distribution-notes-accordion
+                 near the legend -- two separate "Data notes" toggles both
+                 reachable at once on Live Docks read as a duplicate UI
+                 pattern. See renderDistribution()'s own comment for
+                 where this text lives now. -->
             <div id="weather-scenario-note">Estimated from historical elasticity, not a weather-specific model.</div>
-            <details id="weather-notes-accordion">
-              <summary class="accordion-toggle" id="weather-notes-toggle">Data notes</summary>
-              <div id="weather-notes-body">A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Jul 2025-Jun 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading &mdash; each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.</div>
-            </details>
           </div>
         </section>
 
@@ -2408,7 +2417,7 @@ function renderModelPerformance(payload) {
   const lastMonth = payload.months[payload.months.length - 1];
   document.getElementById('model-eval-caption').textContent =
     `MAE in bikes/day, ${nFolds}-fold leave-one-month-out walk-forward across ${formatPeriodLabel('month:' + firstMonth)} – ${formatPeriodLabel('month:' + lastMonth)}. ` +
-    `Seasonal-naive still wins overall (p<0.05 both comparisons) -- fixing the earlier extrapolation problem (real per-date weather instead of monthly averages) ` +
+    `Seasonal-naive still wins overall (p<0.05 both comparisons) — fixing the earlier extrapolation problem (real per-date weather instead of monthly averages) ` +
     `didn't flip the result, it just made it statistically rigorous instead of a single train/test split.`;
 }
 
@@ -2440,7 +2449,7 @@ function renderReliabilityCapacity(payload) {
   const sentences = document.getElementById('reliability-capacity-sentences');
   sentences.innerHTML =
     `<p>${payload.headline}</p>` +
-    `<p>This is a pattern in the data, not a controlled experiment -- station capacity, demand, and location were not randomly assigned, so it is not evidence that adding docks by itself would cause the improvement.</p>`;
+    `<p>This is a pattern in the data, not a controlled experiment — station capacity, demand, and location were not randomly assigned, so it is not evidence that adding docks by itself would cause the improvement.</p>`;
 
   const tbody = document.getElementById('reliability-capacity-tbody');
   tbody.innerHTML = '';
@@ -2455,7 +2464,7 @@ function renderReliabilityCapacity(payload) {
     `Method: reliability.py's per-station unusable rate (${formatWindowRange(payload.window)}, ${payload.window.days} days, `
     + `≥${payload.min_observations} observations) joined against a live GBFS capacity fetch and each station's weekday `
     + `demand magnitude from flows.json (${payload.n_joined.toLocaleString()} stations in the join). Controls for demand only `
-    + `-- borough/zone is not available anywhere in this pipeline.`;
+    + `— borough/zone is not available anywhere in this pipeline.`;
 }
 
 // A paired Wilcoxon result -> "p=0.0024 (naive better)" / "not significant"
@@ -2589,7 +2598,7 @@ function renderEquityGap() {
   // reason instead.
   if (gap.flaggedRate === null || gap.otherRate === null) {
     const emptySide = gap.flaggedTotal === 0 ? 'within' : 'outside';
-    body.textContent = `Your current thresholds leave no stations with live data ${emptySide} them to compare -- widen or narrow the Equity thresholds sliders for a two-sided comparison.`;
+    body.textContent = `Your current thresholds leave no stations with live data ${emptySide} them to compare — widen or narrow the Equity thresholds sliders for a two-sided comparison.`;
     return;
   }
   const flaggedPct = (gap.flaggedRate * 100).toFixed(1);
@@ -2985,6 +2994,16 @@ function renderDistribution() {
   const note = document.getElementById('distribution-note');
   const notesAccordion = document.getElementById('distribution-notes-accordion');
   const notesBody = document.getElementById('distribution-notes-body');
+  // Session 77: this accordion now also carries the weather-methodology
+  // note that used to live in its own separate "Data notes" disclosure
+  // inside Weather Scenario (#weather-notes-accordion, now removed) --
+  // two "Data notes" toggles both reachable at once on Live Docks (this
+  // one was already live-only; that one was never mode-gated) read as a
+  // duplicate UI pattern even though their content differed. One
+  // disclosure now, always reachable regardless of mode -- its CONTENT
+  // still varies, since the dock-fill/reliability paragraph only makes
+  // sense in live mode.
+  const weatherMethodNote = `A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Jul 2025-Jun 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading — each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.`;
   if (live) {
     note.textContent = '';
     const fill = computeFillDistribution();
@@ -3000,20 +3019,22 @@ function renderDistribution() {
         // (docs_v2/phase5-closeout.md) worth surfacing -- rounded and
         // plain here, the exact figure (67.9%, computed against the full
         // log as of 2026-09-13) lives in that note, not hardcoded twice.
-        + `When a station goes unusable, about 2 in 3 times it's still unusable at the next check (~1 hour later) -- outages tend to persist, not self-heal.`;
+        + `When a station goes unusable, about 2 in 3 times it's still unusable at the next check (~1 hour later) — outages tend to persist, not self-heal.`;
     }
-    notesBody.textContent = body;
-    notesAccordion.classList.remove('hidden');
+    notesBody.textContent = `${body} ${weatherMethodNote}`;
   } else {
-    notesAccordion.classList.add('hidden');
-    notesBody.textContent = '';
+    notesBody.textContent = weatherMethodNote;
     // Session 70: the unit clarification used to live only in this card's
     // hover title -- moved into the caption itself, visible without
     // hovering, per the same reasoning as tile 1's context line above.
-    note.textContent = `Net flow during the ${formatHourLabel(state.currentHour)} hour, ${state.dayType}, ${periodOptionLabel(state.period)} `
-      + `— in bikes/day (this hour's average, not a 24-hour total), binned by the same cutoffs that colour the map.`
+    // Session 77: shortened per a decluttering pass, kept dynamic on
+    // purpose -- a static "8 AM, weekdays" version would go wrong the
+    // moment someone moves the hour slider or day-type toggle away from
+    // the defaults it happens to match at load.
+    note.textContent = `Average net flow for the ${formatHourLabel(state.currentHour)} hour, ${state.dayType}, ${periodOptionLabel(state.period)}, in bikes/day — same cutoffs as the map.`
       + (excluded ? ` ${excluded.toLocaleString()} stations have no data for this period.` : '');
   }
+  notesAccordion.classList.remove('hidden');
 }
 
 // Session 68: click a bin (bar segment or key entry) to highlight ONLY those
@@ -3128,13 +3149,13 @@ function renderProjectionStrip() {
   const projection = computeTwoHourProjection();
   if (!projection || projection.withProjection === 0) { strip.classList.add('hidden'); return; }
   const { nProjectedEmpty, nProjectedFull, withProjection } = projection;
-  let title = `Projects today's live fill through each station's own weekday/weekend rhythm -- not a separate forecast model, and not the walk-forward model reported under Model performance.`;
+  let title = `Projects today's live fill through each station's own weekday/weekend rhythm — not a separate forecast model, and not the walk-forward model reported under Model performance.`;
   let line = `Next 2 hours (projected): <b>${nProjectedEmpty.toLocaleString()}</b> of ${withProjection.toLocaleString()} may run empty, <b>${nProjectedFull.toLocaleString()}</b> may fill up.`;
   if (!isBaselineWeatherScenario()) {
     const preset = matchingWeatherPreset();
     const label = preset ? preset.label : 'Custom scenario';
     line += ` &middot; ${label}${preset ? ' scenario' : ''}`;
-    title += ` A weather scenario is dialed in in Historical Flow, shown here for awareness -- it has no effect on this live projection, which is never weather-adjusted.`;
+    title += ` A weather scenario is dialed in in Historical Flow, shown here for awareness — it has no effect on this live projection, which is never weather-adjusted.`;
   }
   // Session 70: a visible marker, not just cursor:help -- a cursor-shape
   // change is too easy to miss as a signal that there's more to read here.
@@ -3177,7 +3198,7 @@ function renderRibbon() {
       'service availability (now)',
       `100% minus (double-outage stations / stations with usable live data): `
         + `${(standard.total - standard.inBreach).toLocaleString()} of ${standard.total.toLocaleString()} are not in double-outage. `
-        + `An INSTANT proxy for the contract's availability rule -- no 60-minute window is measured. `
+        + `An INSTANT proxy for the contract's availability rule — no 60-minute window is measured. `
         + `The ${ADJACENCY_RADIUS_M} m adjacency radius is this project's operationalisation, not a contract figure, and the figure moves several points if it changes.`,
       '#0b0b0b',
       RIBBON_TILE1_LIVE_CAVEAT
@@ -3241,7 +3262,7 @@ function renderRibbon() {
     1,
     Math.round(totals.outOfPlace).toLocaleString(),
     'bikes out of place this hour',
-    `Total absolute net flow across all stations at ${slice} -- the size of the imbalance the system absorbs in this hour on a typical day.`,
+    `Total absolute net flow across all stations at ${slice} — the size of the imbalance the system absorbs in this hour on a typical day.`,
     null, // historical mode is outside the KPI strip's scope -- no status dot
     '' // historical has no analogous caveat -- .ribbon__context's own
        // :empty rule (Session 74) collapses this tile's context line to
@@ -3278,7 +3299,7 @@ function renderRibbon() {
     2,
     dist.counts[0].toLocaleString(),
     'stations heading toward empty',
-    `${dist.counts[0].toLocaleString()} of ${dist.total.toLocaleString()} stations (${dist.total ? (100 * dist.counts[0] / dist.total).toFixed(1) : '0.0'}%) are in the map's own "big deficit" band at ${slice} -- the most severe drain risk, not merely draining.`,
+    `${dist.counts[0].toLocaleString()} of ${dist.total.toLocaleString()} stations (${dist.total ? (100 * dist.counts[0] / dist.total).toFixed(1) : '0.0'}%) are in the map's own "big deficit" band at ${slice} — the most severe drain risk, not merely draining.`,
     rgba(DEFICIT_COLOR, 1),
     shareContext(dist.counts[0], dist.total)
   );
@@ -3286,7 +3307,7 @@ function renderRibbon() {
     3,
     dist.counts[4].toLocaleString(),
     'stations heading toward full',
-    `${dist.counts[4].toLocaleString()} of ${dist.total.toLocaleString()} stations (${dist.total ? (100 * dist.counts[4] / dist.total).toFixed(1) : '0.0'}%) are in the map's own "big surplus" band at ${slice} -- the most severe fill risk, not merely filling.`,
+    `${dist.counts[4].toLocaleString()} of ${dist.total.toLocaleString()} stations (${dist.total ? (100 * dist.counts[4] / dist.total).toFixed(1) : '0.0'}%) are in the map's own "big surplus" band at ${slice} — the most severe fill risk, not merely filling.`,
     rgba(SURPLUS_COLOR, 1),
     shareContext(dist.counts[4], dist.total)
   );
@@ -3294,7 +3315,7 @@ function renderRibbon() {
     4,
     Math.round(totals.bikesToMove).toLocaleString(),
     'bikes a truck needs to deliver',
-    `Bikes that would have to arrive at draining stations to bring them level in this hour -- the truck-side half of tile 1. `
+    `Bikes that would have to arrive at draining stations to bring them level in this hour — the truck-side half of tile 1. `
       + 'Not an optimised plan: no depots, no travel times, no vehicle capacities.',
     null, // historical mode is outside the KPI strip's scope -- no status dot
     totals.outOfPlace ? `${(100 * totals.bikesToMove / totals.outOfPlace).toFixed(0)}% of the total imbalance` : ''
@@ -3362,7 +3383,7 @@ function buildWorstListItem(entry) {
   const li = document.createElement('li');
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.setAttribute('aria-label', `${entry.name}, ${entry.value > 0 ? 'surplus' : 'deficit'} ${Math.abs(entry.value).toFixed(1)} bikes/day -- select on map`);
+  btn.setAttribute('aria-label', `${entry.name}, ${entry.value > 0 ? 'surplus' : 'deficit'} ${Math.abs(entry.value).toFixed(1)} bikes/day — select on map`);
 
   const nameSpan = document.createElement('span');
   nameSpan.className = 'worst-name';
@@ -3602,9 +3623,17 @@ function renderPriorityStops() {
   // reads "Estimated from historical elasticity, not a weather-specific
   // model" would rather say a limitation aloud than let a reader assume
   // otherwise.
+  // Session 77: the baseline (non-equity-weighted) branch used to mention
+  // the hour slider and day-type toggle unconditionally -- accurate on
+  // Historical Flow, stale on Live Docks, which has neither control.
+  // Live's own version keeps the one caveat that's still true there
+  // (weather scenarios don't touch this list either) and drops the two
+  // that reference controls this tab doesn't have.
   caption.textContent = equityWeighted
-    ? `Truck 1's own real stops, reordered by equity-weighted priority (${PRIORITY_EQUITY_WEIGHT_MULTIPLIER}× weight for flagged stations) rather than drive order -- not a route to follow stop-by-stop.`
-    : `Baseline route for the ${amRange} window (all-period average). Not synced to the hour slider, day-type toggle, fleet size, or weather scenarios -- the planner models those separately.`;
+    ? `Truck 1's own real stops, reordered by equity-weighted priority (${PRIORITY_EQUITY_WEIGHT_MULTIPLIER}× weight for flagged stations) rather than drive order — not a route to follow stop-by-stop.`
+    : state.mode === 'live'
+      ? `Live snapshot ranking. Not synced to weather scenarios — the planner models those separately.`
+      : `Baseline route for the ${amRange} window (all-period average). Not synced to the hour slider, day-type toggle, fleet size, or weather scenarios — the planner models those separately.`;
 
   list.innerHTML = '';
   if (shown.length === 0) {
@@ -3616,7 +3645,7 @@ function renderPriorityStops() {
     const btn = document.createElement('button');
     btn.type = 'button';
     const actionLabel = PRIORITY_STOP_ACTION_LABEL[stop.action] || stop.action;
-    btn.setAttribute('aria-label', `Stop ${i + 1}: ${stop.name}${flagged ? ', within equity thresholds' : ''}, ${actionLabel.toLowerCase()}, ${stop.amount} bikes -- select on map`);
+    btn.setAttribute('aria-label', `Stop ${i + 1}: ${stop.name}${flagged ? ', within equity thresholds' : ''}, ${actionLabel.toLowerCase()}, ${stop.amount} bikes — select on map`);
 
     const rank = document.createElement('span');
     rank.className = 'priority-stop-rank';
@@ -3639,7 +3668,7 @@ function renderPriorityStops() {
       const equityBadge = document.createElement('span');
       equityBadge.className = 'priority-stop-equity-badge';
       equityBadge.textContent = 'Equity';
-      equityBadge.title = 'Within your current NYCHA/school proximity or subway-gap threshold';
+      equityBadge.title = 'Within your current NYCHA, school, or subway-gap threshold';
       nameSpan.appendChild(equityBadge);
     }
     // Session 72: user-reported the same station appearing twice read as a
@@ -3733,7 +3762,7 @@ function renderFleetMarginalChart(fleetSize) {
   // the slider looking broken again.
   const noChangeNote = document.getElementById('fleet-no-change-note');
   if (idx > 0 && marginals[idx] === 0) {
-    noChangeNote.textContent = `No change at this slice -- each truck hits its 45-stop shift cap before running out of flagged stations.`;
+    noChangeNote.textContent = `No change at this slice — each truck hits its 45-stop shift cap before running out of flagged stations.`;
     noChangeNote.classList.remove('hidden');
   } else {
     noChangeNote.classList.add('hidden');
@@ -3765,7 +3794,7 @@ function renderFleetStats(fleetSize) {
     `(${scenario.n_deficit_serviced.toLocaleString()} cleared); ${surplusRemaining.toLocaleString()} of ` +
     `${scenario.n_surplus_flagged.toLocaleString()} surplus stations still unserved (${scenario.n_surplus_serviced.toLocaleString()} cleared). ` +
     `Of the ${overlap.totalServiced.toLocaleString()} stations serviced${partialClause}, ${overlap.equityServiced.toLocaleString()} are within your equity thresholds.`;
-  document.getElementById('fleet-badge').textContent = `${fleetSize} truck(s)`;
+  document.getElementById('fleet-badge').textContent = `${fleetSize} truck${fleetSize === 1 ? '' : 's'}`;
 }
 
 function setFleetSize(fleetSize) {
@@ -4677,6 +4706,13 @@ function setMode(mode) {
   // depend on mode at all; kept for symmetry with every other render call
   // in this function, not because mode-switching changes its text.
   renderWeatherScenarioStatus();
+  // Session 77: the truck-stop list itself is mode-independent (a fixed
+  // baseline snapshot either way), but its caption became tab-aware --
+  // the hour-slider/day-type-toggle mention is stale on Live Docks, which
+  // has neither control. Guarded the same way every other call site here
+  // is: renderPriorityStops() reads state.fleetScenarios directly and
+  // does nothing useful before it has loaded.
+  if (state.fleetScenarios) renderPriorityStops();
 }
 
 
@@ -4990,7 +5026,7 @@ function renderLegendScale() {
   }
   document.getElementById('legend-card').title = 'Deficit = heading toward no bikes. Surplus = heading toward no open docks. '
     + (beyond
-    ? `Scale ends are the 95th percentile of |net flow|, not the range: colour saturates at \u00b1${max}, and ${beyond.toLocaleString()} of ${shown.toLocaleString()} stations are past it at this slice. Click one for its real value.`
+    ? `Scale ends are the 95th percentile of |net flow|, not the range: color saturates at \u00b1${max}, and ${beyond.toLocaleString()} of ${shown.toLocaleString()} stations are past it at this slice. Click one for its real value.`
     : `Scale ends are the 95th percentile of |net flow| (\u00b1${max}).`);
 }
 

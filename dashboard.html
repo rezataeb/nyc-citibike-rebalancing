@@ -397,19 +397,22 @@
      de-emphasis); Model performance is intentionally smaller/quieter,
      sitting right before the footer, since it's a static reference table
      rather than something you work within. */
-  #scenario-planner-panel, #model-eval, #glossary { margin-bottom: 16px; }
+  #scenario-planner-panel, #fleet-accordion, #model-eval, #glossary { margin-bottom: 16px; }
   /* Design critique task 09: these are native <summary> elements now, not
      buttons -- list-style/marker rules strip the native disclosure
      triangle (Chrome/Safari need the ::-webkit-details-marker rule too,
      display:none on ::marker alone isn't enough in WebKit) so the custom
      ::after chevron below is the only arrow shown, same look as before. */
-  #scenario-planner-toggle, #model-eval-toggle, #glossary-toggle { width: 100%; display: flex; flex-wrap: wrap; align-items: center; font: inherit; font-weight: 600; font-size: 13px; color: #52514e; cursor: pointer; list-style: none; }
-  #scenario-planner-toggle::-webkit-details-marker, #model-eval-toggle::-webkit-details-marker, #glossary-toggle::-webkit-details-marker { display: none; }
-  #scenario-planner-toggle::after, #model-eval-toggle::after, #glossary-toggle::after { order: 2; content: '\25B8'; color: #666057; font-size: 11px; transition: transform 0.15s ease; flex-shrink: 0; margin-left: auto; }
-  #scenario-planner-panel[open] > #scenario-planner-toggle::after, #model-eval[open] > #model-eval-toggle::after, #glossary[open] > #glossary-toggle::after { transform: rotate(90deg); }
-  #scenario-planner-toggle:hover, #model-eval-toggle:hover, #glossary-toggle:hover { color: #0b0b0b; }
-  #model-eval-toggle, #glossary-toggle { font-size: 11px; color: #666057; }
-  #model-eval-toggle:hover, #glossary-toggle:hover { color: #52514e; }
+  #scenario-planner-toggle, #fleet-accordion-toggle, #model-eval-toggle, #glossary-toggle { width: 100%; display: flex; flex-wrap: wrap; align-items: center; font: inherit; font-weight: 600; font-size: 13px; color: #52514e; cursor: pointer; list-style: none; }
+  #scenario-planner-toggle::-webkit-details-marker, #fleet-accordion-toggle::-webkit-details-marker, #model-eval-toggle::-webkit-details-marker, #glossary-toggle::-webkit-details-marker { display: none; }
+  #scenario-planner-toggle::after, #fleet-accordion-toggle::after, #model-eval-toggle::after, #glossary-toggle::after { order: 2; content: '\25B8'; color: #666057; font-size: 11px; transition: transform 0.15s ease; flex-shrink: 0; margin-left: auto; }
+  #scenario-planner-panel[open] > #scenario-planner-toggle::after, #fleet-accordion[open] > #fleet-accordion-toggle::after, #model-eval[open] > #model-eval-toggle::after, #glossary[open] > #glossary-toggle::after { transform: rotate(90deg); }
+  #scenario-planner-toggle:hover, #fleet-accordion-toggle:hover, #model-eval-toggle:hover, #glossary-toggle:hover { color: #0b0b0b; }
+  /* Session 73: fleet joins model-eval/glossary's quieter tier -- moved
+     here in this same reframe, so it gets the same lower-emphasis
+     treatment as its new neighbors, not equity/weather's bolder look. */
+  #fleet-accordion-toggle, #model-eval-toggle, #glossary-toggle { font-size: 11px; color: #666057; }
+  #fleet-accordion-toggle:hover, #model-eval-toggle:hover, #glossary-toggle:hover { color: #52514e; }
   /* Session 70: term/definition pairs, one line each -- real <dl> markup
      (structure is information: this genuinely is a list of terms and
      their definitions, not decoration) rather than a table or a run of
@@ -434,6 +437,7 @@
 
   .worst { border: 1px solid #d8d7d3; border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
   .worst__title { padding: 10px 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #666057; border-bottom: 1px solid #d8d7d3; }
+  #priority-stops-framing { padding: 10px 14px 0; font-size: 11px; color: #666057; line-height: 1.4; }
   #priority-stops-fleet-hint { padding: 8px 14px 0; font-size: 11px; color: #666057; }
   #worst-lists-scenario-note { margin: 0 0 8px; font-size: 11px; color: #666057; }
   #priority-stops-fleet-link { font: inherit; font-weight: 600; color: #52514e; background: none; border: none; padding: 0; cursor: pointer; }
@@ -624,6 +628,10 @@
      taller instead of needing to be truncated. */
   #ribbon-caption { margin-top: 4px; font-size: 11px; color: #666057; line-height: 1.4; }
 
+  /* Session 73: same treatment as #weather-scenario-note right below --
+     one italic caveat sentence at the top of a control, not a permanent
+     paragraph. */
+  #fleet-operator-note { margin-bottom: 8px; color: #666057; line-height: 1.4; font-style: italic; font-size: 11px; }
   /* Session 66: the fleet slider's marginal-benefit curve -- one bar per
      fleet size 1-10, height proportional to stations cleared by THAT
      truck alone (this size's total minus the previous size's), not a
@@ -1331,6 +1339,14 @@
            graceful-degradation rule as every other optional file here. -->
       <div class="worst" id="priority-stops-wrap">
         <div class="worst__title">Priority truck stops</div>
+        <!-- Session 73: this dashboard serves DOT oversight/planning, not
+             the operator's own dispatch -- Lyft, not DOT, decides how
+             many trucks run (see CLAUDE.md/PROGRESS.md's reframe notes).
+             This list stays exactly what it was either way: the same
+             ranked-need computation a dispatcher would act on IS the fact
+             an overseer audits, just read for a different decision. One
+             line says so rather than leaving "who is this for" implicit. -->
+        <div id="priority-stops-framing">Where intervention is most urgent, in ranked order -- the same ranking a dispatcher acts on and an overseer audits.</div>
         <!-- Session 70: user-reported this list's real control (fleet
              size) lives in a different, separate collapsible section
              below it -- nothing here hinted that. One line, not a bigger
@@ -1384,12 +1400,22 @@
       <details id="scenario-planner-panel">
         <summary id="scenario-planner-toggle">
           <span class="accordion-head-row"><span>Scenario Planner</span><span id="scenario-planner-badge" class="scenario-planner-badge hidden"></span></span>
-          <span id="scenario-planner-teaser">Simulate fleet size, weather, and equity thresholds against real data.</span>
+          <!-- Session 73: fleet dropped from the teaser's own verb list --
+               "simulate" implies a decision this dashboard drives, and
+               fleet sizing is the operator's call, not DOT's (see this
+               section's own reframe note below). Named as included, not
+               as something to simulate. -->
+          <span id="scenario-planner-teaser">Simulate weather and equity thresholds against real data &mdash; fleet sizing included for completeness.</span>
           <!-- Session 69: was describing the amber "Currently showing"
                banner (Session 66), removed in Session 68 and replaced by
                per-tile PROJECTED tags -- nobody swept this one reference
-               to it when the banner went. -->
-          <span id="scenario-planner-subtitle">Fleet and equity stay separate from Live Docks and Historical Flow's real numbers. Weather is the one control that projects across them too &mdash; every number it touches carries its own PROJECTED tag.</span>
+               to it when the banner went.
+               Session 73: fleet's clause reworded from "stays separate"
+               (mechanical -- true of equity too, said nothing about WHY)
+               to "operator-side context" -- names whose decision it is,
+               not just that it doesn't touch the real numbers. Equity and
+               weather's own roles are unchanged. -->
+          <span id="scenario-planner-subtitle">Fleet sizing is operator-side context; equity stays a separate lens too &mdash; neither changes Live Docks or Historical Flow's real numbers. Weather is the one control that projects new numbers across them &mdash; every number it touches carries its own PROJECTED tag.</span>
         </summary>
         <div id="tab-panel-scenario-planner">
         <div id="scenario-planner-diff-bar" class="hidden">
@@ -1490,34 +1516,16 @@
 
         <!-- Session 55: these were four <details class="accordion"> sharing a
              `name`, which made them MUTUALLY EXCLUSIVE -- opening Fleet closed
-             Equity. Fine for unrelated sections; wrong for these four, which
-             are one sandbox: a reviewer who changes fleet size usually wants
-             to see what it did to the equity counts, and could not see both.
-             They are plain sections now, all open together inside the one
+             Equity. Fine for unrelated sections; wrong for the three that
+             remain here (equity thresholds/gap, weather), which are one
+             sandbox: a reviewer who dials in a weather scenario usually
+             wants to see what it did to the equity counts, and could not
+             see both. Plain sections, all open together inside the one
              collapsible panel, whose single <summary> is the only collapse
-             control left.
-
-             Element ids are unchanged on purpose, so the graceful-degradation
-             logic that reveals Fleet and Weather when their optional data
-             files load needed no rewiring -- only the tag changed. Neither section
-             carries a hidden state in markup: the ready handler sets both
-             branches for each (shown when its data file loaded, hidden when
-             it did not), so the markup default was never consulted. -->
-        <section class="planner-section" id="fleet-accordion">
-          <h3 class="planner-section-title">Fleet &amp; routing<span class="accordion-badge" id="fleet-badge"></span></h3>
-          <div class="planner-section-body" id="fleet-sim-wrap">
-            <div class="scenario-planner-slider">
-              <label for="fleet-size-slider">Fleet size: <span id="fleet-size-value">1</span> truck(s)</label>
-              <input type="range" id="fleet-size-slider" min="1" max="10" step="1" value="1">
-            </div>
-            <div id="fleet-no-change-note" class="hidden"></div>
-            <div id="fleet-marginal-chart" aria-hidden="true"></div>
-            <div id="fleet-marginal-caption"><span>Stations cleared per truck added</span><span id="fleet-marginal-current"></span></div>
-            <div id="fleet-stats"></div>
-            <div id="fleet-sim-note">Checked against real data, not assumed: added trucks do not show smoothly diminishing returns at this scale. Every truck hits its own 45-stop shift cap before ever running out of flagged stations, so the binding constraint here is each truck's per-shift stop budget, not overall demand.</div>
-          </div>
-        </section>
-
+             control left. Fleet & routing was originally the fourth of
+             these four -- moved out in Session 73's DOT-oversight reframe
+             (operator's decision, not the city's) to sit collapsed near
+             Model performance instead; see its own comment down there. -->
         <!-- Session 67: was a plain, always-open section -- "Equity
              thresholds" -- that recomputed counts but drove no decision,
              which read as a toy (user-reported). Demoted to a native,
@@ -1641,6 +1649,45 @@
         <div class="worst__title">Most docks needed</div>
         <ul id="worst-surplus-list"></ul>
       </div>
+
+      <!-- Session 73: DOT-oversight reframe. This dashboard serves DOT
+           (contract oversight, equity mandate, network planning), not
+           Lyft's own dispatch operation -- fleet SIZING is the operator's
+           call, not the city's, so it moved from leading the Scenario
+           Planner (was the first of four sandbox sections) to a
+           collapsed, low-emphasis disclosure alongside Model performance
+           and Glossary -- the same tier, same quiet toggle style, not
+           the bold card look equity/weather keep. The ranked stop LIST
+           above (Priority Truck Stops) stays exactly as prominent as
+           before: "where is action needed most" is a real DOT question
+           too (the same ranking a dispatcher acts on, an overseer
+           audits), only the truck-COUNT slider is what's demoted here.
+           Moved out of #scenario-planner-panel entirely (was nested
+           inside it, alongside equity/weather) rather than just
+           reordered within it -- #worst-deficit-wrap/#worst-surplus-wrap
+           above are ALREADY siblings after that panel closes, always
+           visible regardless of whether a reviewer has expanded the
+           planner; nesting fleet inside the (collapsed-by-default)
+           planner while leaving it here would have made it invisible by
+           default in a way nothing asked for. Same fleet math, same
+           ids -- every render call/listener below still finds this by
+           id, only its place in the document and its tag (<section> ->
+           <details>, so it can actually collapse) changed. -->
+      <details id="fleet-accordion">
+        <summary id="fleet-accordion-toggle">Fleet &amp; routing<span class="accordion-badge" id="fleet-badge"></span></summary>
+        <div class="planner-section-body" id="fleet-sim-wrap">
+          <div id="fleet-operator-note">Fleet sizing is the operator's decision &mdash; included here for completeness.</div>
+          <div class="scenario-planner-slider">
+            <label for="fleet-size-slider">Fleet size: <span id="fleet-size-value">1</span> truck(s)</label>
+            <input type="range" id="fleet-size-slider" min="1" max="10" step="1" value="1">
+          </div>
+          <div id="fleet-no-change-note" class="hidden"></div>
+          <div id="fleet-marginal-chart" aria-hidden="true"></div>
+          <div id="fleet-marginal-caption"><span>Stations cleared per truck added</span><span id="fleet-marginal-current"></span></div>
+          <div id="fleet-stats"></div>
+          <div id="fleet-sim-note">Checked against real data, not assumed: added trucks do not show smoothly diminishing returns at this scale. Every truck hits its own 45-stop shift cap before ever running out of flagged stations, so the binding constraint here is each truck's per-shift stop budget, not overall demand.</div>
+        </div>
+      </details>
 
       <!-- Model performance: a small, low-emphasis reference disclosure
            near the footer -- real numbers, but static and read-once, so
@@ -5569,8 +5616,13 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // summary) since that's the one control this specific list depends
     // on. Opens the panel first in case a reviewer closed it -- scrolling
     // to a closed <details>'s content does nothing, it's hidden either way.
+    // Session 73: #fleet-accordion moved out of #scenario-planner-panel
+    // and became its own collapsed-by-default <details> -- opening the
+    // (now unrelated) planner alone would land a reviewer on a closed
+    // Fleet & routing toggle with nothing visible under it, so it needs
+    // the exact same open=true treatment, not just the scroll.
     document.getElementById('priority-stops-fleet-link').addEventListener('click', () => {
-      document.getElementById('scenario-planner-panel').open = true;
+      document.getElementById('fleet-accordion').open = true;
       document.getElementById('fleet-accordion').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 

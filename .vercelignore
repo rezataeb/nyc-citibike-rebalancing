@@ -1,0 +1,26 @@
+# Vercel Deployment Storage was at 7.5/10 GB (2026-09-15) -- almost all of
+# it was this one file, re-uploaded whole on every single deployment:
+# data/gbfs_log/snapshots.csv alone is 100MB, and dashboard.html never
+# fetches it (or anything else in data/gbfs_log/) at runtime -- it's pure
+# pipeline input for pipeline/reliability.py, which runs locally and
+# commits its OUTPUT (data/reliability.json, a few hundred KB) for the
+# dashboard to actually read. Everything below this line is real,
+# committed, needed by the pipeline or by a human working in this repo --
+# just never served to a browser, so it has no reason to ship in a
+# deployment. Confirmed each exclusion against dashboard.html's own
+# fetchJSON()/href calls before adding it here, not assumed.
+
+data/gbfs_log/
+data/raw/
+data/models/
+data/data_manifest.json
+
+# Python pipeline source, tests, and notebooks -- this is a static site
+# with no build step; nothing here ever runs in the browser.
+pipeline/
+tests/
+notebooks/
+
+# The pre-rewrite v2 implementation CLAUDE.md keeps around for local
+# "compare to reference" work -- not linked from dashboard.html.
+reference/

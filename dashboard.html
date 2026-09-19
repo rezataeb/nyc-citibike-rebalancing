@@ -1071,6 +1071,75 @@
   }
   #skip-link { position: absolute; left: 8px; top: -60px; z-index: 2000; background: #0b0b0b; color: #fff; padding: 10px 16px; border-radius: 0 0 8px 8px; font: inherit; font-weight: 700; font-size: 13px; text-decoration: none; transition: top 0.15s ease; }
   #skip-link:focus { top: 0; }
+
+  /* ── Sidebar progressive-disclosure redesign ─────────────────────── */
+
+  /* Tier 1 — Station Balance: tinted section, not a plain white card */
+  .distribution {
+    background: #f7f6f3; border-radius: 8px; border-color: #dddbd6;
+    padding: 14px 16px;
+  }
+  .distribution__head span:first-child {
+    font-size: 13px; letter-spacing: 0; text-transform: none;
+  }
+  .distribution__bar { height: 18px; border-radius: 4px; }
+  .distribution__key { gap: 3px 10px; }
+
+  /* Section headers: real visual weight — sentence case, dark, 13 px */
+  .worst__title {
+    padding: 13px 16px 9px; font-size: 13px; font-weight: 700;
+    text-transform: none; letter-spacing: 0; color: #0b0b0b;
+  }
+
+  /* Priority stops: meta-text is context, not content — quiet it */
+  #priority-stops-framing { font-size: 10px; color: #898781; }
+  #priority-stops-fleet-hint { font-size: 10px; color: #898781; }
+  #priority-truck-selector { font-size: 10px; }
+  #priority-equity-toggle-row { font-size: 11.5px; }
+
+  /* Action badge semantic colors — amber is reserved for scenario/projection */
+  .priority-stop-action { background: #e8f0fd; color: #1a4fa3; }          /* default */
+  .priority-stop-action--pickup { background: #e8f0fd; color: #1a4fa3; }  /* collecting surplus bikes → blue */
+  .priority-stop-action--dropoff { background: #eaf3ee; color: #1a5c35; } /* delivering bikes → green */
+
+  /* Tier separator: hairline rule + label between operational and analysis */
+  .sidebar-tier-sep {
+    display: flex; align-items: center; gap: 8px; margin: 6px 0;
+    padding: 0 16px;
+  }
+  .sidebar-tier-sep::before, .sidebar-tier-sep::after {
+    content: ''; flex: 1; height: 1px; background: #dddbd6;
+  }
+  .sidebar-tier-sep-label {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: #aaa8a2; white-space: nowrap;
+  }
+
+  /* Tier 2 — Scenario Planner: top-border accent, warm tint background */
+  #scenario-planner-panel {
+    border-left: none; border-radius: 8px;
+    border: 1.5px solid #e0c9a0; background: #fffcf6; margin-bottom: 12px;
+  }
+  #scenario-planner-toggle { font-size: 13px; color: #0b0b0b; }
+  #scenario-planner-teaser { font-size: 10px; color: #7a5b1e; margin-top: 2px; }
+  #scenario-planner-subtitle { border-left: none; font-size: 10px; padding-left: 0; margin-top: 2px; color: #8a6c38; }
+
+  /* Scenario inner sections: cleaner spacing */
+  .planner-section { border-top: 1px solid #e6e3dc; padding-top: 12px; margin-top: 8px; }
+  .planner-section-title { font-size: 11px; color: #666057; margin-bottom: 6px; }
+
+  /* Equity gap inside planner: no double-border, just a rule */
+  #equity-gap-wrap { border-radius: 0; margin: 8px -16px 0; border-left: none; border-right: none; border-bottom: none; border-top: 1px solid #e6e3dc; }
+  #equity-gap-wrap .worst__title { font-size: 12px; font-weight: 600; padding: 10px 16px 8px; }
+  #equity-gap-body { padding: 8px 16px 4px; }
+  #equity-gap-method { padding: 0 16px 10px; }
+
+  /* Historical worst-now lists: match section style */
+  #worst-lists-scenario-note { font-size: 10px; color: #898781; margin-bottom: 4px; }
+
+  /* Tier 3 — Fleet / model / glossary: quieter, already collapsed */
+  #fleet-accordion, #model-eval, #glossary { border-top: 1px solid #ece9e3; margin-bottom: 8px; }
+  /* ─────────────────────────────────────────────────────────────────── */
 </style>
 </head>
 <body>
@@ -1459,6 +1528,8 @@
            source computeFillDistribution() reads), not a hardcoded
            figure; hidden if live data never loaded, same rule as every
            other live-only figure in this file. -->
+      <div class="sidebar-tier-sep"><span class="sidebar-tier-sep-label">Analysis &amp; Scenario</span></div>
+
       <!-- Session 55: the Scenario Planner sits ABOVE the two worst-station
            lists now. It had been below both, i.e. below the fold on a 900px
            viewport -- the original "don't bury the differentiator" complaint,
@@ -3729,7 +3800,7 @@ function renderPriorityStops() {
     trail.className = 'priority-stop-trail';
 
     const action = document.createElement('span');
-    action.className = 'priority-stop-action';
+    action.className = `priority-stop-action priority-stop-action--${stop.action}`;
     action.textContent = actionLabel;
 
     const valueWrap = document.createElement('span');

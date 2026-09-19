@@ -877,9 +877,9 @@
      no longer has a bar at all (see the markup), so there's no third,
      incomparable domain left to caption around. */
   .scenario-bar-domain { font-size: 10px; color: #666057; margin: -4px 0 6px; }
-  .scenario-row-foot { display: flex; justify-content: space-between; font-size: 12px; font-variant-numeric: tabular-nums; }
-  .scenario-row-foot .baseline { color: #666057; }
-  .scenario-row-foot .scenario { color: #0b0b0b; font-weight: 700; }
+  .scenario-row-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .scenario-row-foot .baseline { color: #666057; min-width: 0; overflow-wrap: break-word; }
+  .scenario-row-foot .scenario { color: #0b0b0b; font-weight: 700; min-width: 0; overflow-wrap: break-word; }
   .scenario-weather-value { font-size: 12px; color: #0b0b0b; font-variant-numeric: tabular-nums; }
   #scenario-summary { margin-top: 14px; padding-top: 12px; border-top: 1px solid #f3f2f0; font-size: 12px; line-height: 1.5; color: #52514e; }
 
@@ -1494,7 +1494,7 @@
              ranked-need computation a dispatcher would act on IS the fact
              an overseer audits, just read for a different decision. One
              line says so rather than leaving "who is this for" implicit. -->
-        <div id="priority-stops-framing">Where intervention is most urgent, in ranked order — the same ranking a dispatcher acts on and an overseer audits.</div>
+        <div id="priority-stops-framing">Where intervention is most urgent, ranked by AM-baseline deficit — not synced to the live scenario controls.</div>
         <!-- Session 70: user-reported this list's real control (fleet
              size) lives in a different, separate collapsible section
              below it -- nothing here hinted that. One line, not a bigger
@@ -1516,7 +1516,7 @@
           <input type="checkbox" id="priority-equity-toggle">
           Equity-weighted ranking
         </label>
-        <div id="priority-equity-note">Stations near NYCHA or a school, or beyond the subway gap, rank higher.</div>
+        <div id="priority-equity-note">Stations near NYCHA or a school, or beyond the subway gap, rank higher and may displace others in this list.</div>
         <div class="priority-stops-caption" id="priority-stops-caption"></div>
         <ol id="priority-stops-list"></ol>
       </div>
@@ -1774,7 +1774,7 @@
           <h3 class="planner-section-title">Weather scenario</h3>
           <div class="planner-section-body" id="weather-scenario-wrap">
             <select id="weather-preset-select"></select>
-            <div class="map-tie-in-cue">Watch the map recolor live as you adjust these &mdash; no separate toggle needed.</div>
+            <div class="map-tie-in-cue">In Historical mode: the map recolors live as you adjust these &mdash; no separate toggle needed.</div>
             <div class="scenario-planner-slider">
               <label for="weather-temp-slider">Temperature: <span id="weather-temp-value">72</span>&deg;F</label>
               <input type="range" id="weather-temp-slider" min="0" max="90" step="1" value="72">
@@ -3738,7 +3738,7 @@ function renderPriorityStops() {
   // (weather scenarios don't touch this list either) and drops the two
   // that reference controls this tab doesn't have.
   caption.textContent = equityWeighted
-    ? `${truckLabel}'s own real stops, reordered by equity-weighted priority (${PRIORITY_EQUITY_WEIGHT_MULTIPLIER}× weight for flagged stations) rather than drive order — not a route to follow stop-by-stop.`
+    ? `${truckLabel}'s stops re-ranked by equity-weighted amount (${PRIORITY_EQUITY_WEIGHT_MULTIPLIER}× for stations near NYCHA, a school, or beyond the subway gap) — which stops appear may differ from the baseline list. Not a route to follow stop-by-stop.`
     : state.mode === 'live'
       ? `Derived from historical AM-window flow patterns, not live dock data. Not synced to weather scenarios — the planner models those separately.`
       : `Baseline route for the ${amRange} window (all-period average). Not synced to the hour slider, day-type toggle, fleet size, or weather scenarios — the planner models those separately.`;
@@ -3792,7 +3792,7 @@ function renderPriorityStops() {
       const revisitBadge = document.createElement('span');
       revisitBadge.className = 'priority-stop-revisit-badge';
       revisitBadge.textContent = 'Revisit';
-      revisitBadge.title = "Truck 1's route passes this station more than once -- a real second stop, not a duplicate entry";
+      revisitBadge.title = `${truckLabel}'s route passes this station more than once — a real second stop, not a duplicate entry`;
       nameSpan.appendChild(revisitBadge);
     }
 
@@ -4093,8 +4093,8 @@ function renderDiffBar() {
       // Session 69: "truck(s)" printed literally regardless of count --
       // fixed to match the real pluralization the summary clause above
       // already uses.
-      baselineText: `${defaultRemaining.toLocaleString()} unserved baseline (${defaultScenarioState().fleetSize} truck, of ${flagged.toLocaleString()} total flagged)`,
-      scenarioText: `${remaining.toLocaleString()} scenario (${fleetSize} truck${fleetSize === 1 ? '' : 's'})`,
+      baselineText: `${defaultRemaining.toLocaleString()} unserved · baseline · ${defaultScenarioState().fleetSize} truck`,
+      scenarioText: `${remaining.toLocaleString()} unserved · scenario · ${fleetSize} truck${fleetSize === 1 ? '' : 's'}`,
       deltaPct: flagged ? fleetDelta / flagged : 0,
     });
   } else {

@@ -217,7 +217,7 @@
     background: #f0dfc0; color: #8a5a1f; font-size: 9px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.03em;
   }
-  #ribbon-tile-1 .ribbon__projected-tag { position: absolute; top: 9px; right: 11px; margin-top: 0; }
+  #ribbon-tile-1 .ribbon__projected-tag { position: static; display: inline-block; margin-top: 5px; }
   /* Two lines allowed, then clamped: "bikes to move into deficit stations"
      does not fit one line at this width, and truncating it to "bikes to
      move into..." would lose the part that says WHERE they move. */
@@ -477,6 +477,8 @@
   .worst__title { padding: 10px 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #666057; border-bottom: 1px solid #d8d7d3; }
   #priority-stops-framing { padding: 10px 14px 0; font-size: 11px; color: #666057; line-height: 1.4; }
   #priority-stops-fleet-hint { padding: 8px 14px 0; font-size: 11px; color: #666057; }
+  #priority-truck-selector { padding: 6px 14px 0; font-size: 11px; color: #666057; display: flex; align-items: center; gap: 6px; }
+  #priority-truck-select { font-size: 11px; padding: 2px 4px; border: 1px solid #d8d7d3; border-radius: 4px; background: #faf9f7; color: #3a3937; cursor: pointer; }
   #worst-lists-scenario-note { margin: 0 0 8px; font-size: 11px; color: #666057; }
   #priority-stops-fleet-link { font: inherit; font-weight: 600; color: #52514e; background: none; border: none; padding: 0; cursor: pointer; }
   #priority-stops-fleet-link:hover, #priority-stops-fleet-link:focus-visible { color: #0b0b0b; text-decoration: underline; }
@@ -1048,7 +1050,7 @@
        on top of the value's own digits ("3,614" behind "PROJECTED").
        Static flow, after the label (last in the DOM -- see the tile-1
        markup), makes it a plain third line instead of an overlay. */
-    #ribbon-tile-1 .ribbon__projected-tag { position: static; display: inline-block; margin-top: 4px; }
+    /* #ribbon-tile-1 .ribbon__projected-tag position now matches all tiles (inline-block) at all breakpoints */
   }
 
   /* Design critique task 11: accessibility quick wins. */
@@ -1430,6 +1432,10 @@
              headline, per Session 55's own reasoning, just with a real
              path to what changes it. -->
         <div id="priority-stops-fleet-hint">Fleet size is set in <button type="button" id="priority-stops-fleet-link">Scenario Planner</button> below.</div>
+        <div id="priority-truck-selector" class="hidden">
+          <label for="priority-truck-select">Truck:</label>
+          <select id="priority-truck-select"></select>
+        </div>
         <!-- Session 67: equity repositioned from a counter (the old
              always-open threshold sliders, which recomputed a count but
              drove no decision) to a LENS on this exact list -- reranks
@@ -1491,7 +1497,7 @@
                to "operator-side context" -- names whose decision it is,
                not just that it doesn't touch the real numbers. Equity and
                weather's own roles are unchanged. -->
-          <span id="scenario-planner-subtitle">Fleet sizing is operator-side context; equity stays a separate lens too &mdash; neither changes Live Docks or Historical Flow's real numbers. Weather is the one control that projects new numbers across them &mdash; every number it touches carries its own PROJECTED tag.</span>
+          <span id="scenario-planner-subtitle">Fleet sizing is operator-side context; equity stays a separate lens too &mdash; neither changes Live Docks or Historical Flow's real numbers. Weather is the one control that projects new numbers &mdash; every Historical Flow number it touches carries its own PROJECTED tag. (No effect in Live Docks mode.)</span>
         </summary>
         <div id="tab-panel-scenario-planner">
         <div id="scenario-planner-diff-bar" class="hidden">
@@ -1613,7 +1619,7 @@
              metric below it -- a lens on the decision, not just a counter.
              No JS needed to start closed: that's <details>'s own real
              default, not a stub-invisible class, same as #model-eval. -->
-        <details id="equity-accordion">
+        <details id="equity-accordion" open>
           <!-- Session 70: renamed from "Advanced thresholds" -- that name
                genericized what this actually is (equity proximity
                sliders) enough that a reviewer looking for "how is equity
@@ -2784,11 +2790,16 @@ const RIBBON_TILE1_LIVE_CAVEAT = "Instant reading, not the contract's 60-minute 
 // 1 has no #ribbon-context-1 element at all (it's the hero, not a
 // supporting tile), so this is a no-op there rather than an error.
 function setRibbonTile(index, value, labelHtml, title, dotColor, context) {
-  document.getElementById(`ribbon-value-${index}`).textContent = value;
+  const valueEl = document.getElementById(`ribbon-value-${index}`);
+  valueEl.textContent = value;
+  const plainLabel = typeof labelHtml === 'string' ? labelHtml.replace(/<[^>]+>/g, '') : labelHtml;
+  valueEl.setAttribute('aria-label', `${value} ${plainLabel}`);
   document.getElementById(`ribbon-label-${index}`).innerHTML = labelHtml;
   // The full sentence lives in the tooltip; the visible label has one line to
   // work with. Set on the tile, not the label, so the whole target is hoverable.
-  document.getElementById(`ribbon-tile-${index}`).title = title;
+  const tileEl = document.getElementById(`ribbon-tile-${index}`);
+  tileEl.title = title;
+  tileEl.setAttribute('aria-label', `${plainLabel}: ${value}${context ? ', ' + context : ''}`);
 
   const dot = document.getElementById(`ribbon-dot-${index}`);
   dot.classList.toggle('shown', Boolean(dotColor));
@@ -3154,7 +3165,7 @@ function renderProjectionStrip() {
   if (!isBaselineWeatherScenario()) {
     const preset = matchingWeatherPreset();
     const label = preset ? preset.label : 'Custom scenario';
-    line += ` &middot; ${label}${preset ? ' scenario' : ''}`;
+    line += ` &middot; ${label} scenario active in Historical Flow (no effect on these live numbers)`;
     title += ` A weather scenario is dialed in in Historical Flow, shown here for awareness — it has no effect on this live projection, which is never weather-adjusted.`;
   }
   // Session 70: a visible marker, not just cursor:help -- a cursor-shape
@@ -3217,7 +3228,8 @@ function renderRibbon() {
       fill === null ? RIBBON_EM_DASH : fill.nFull.toLocaleString(),
       'full now',
       fill === null ? 'No stations currently report usable live data.'
-        : `Stations with 0 docks available right now: ${fill.nFull} of ${fill.total.toLocaleString()} with usable live data. A rider cannot end a trip there.`,
+        : `Stations with 0 docks available right now: ${fill.nFull} of ${fill.total.toLocaleString()} with usable live data. A rider cannot end a trip there.`
+          + (fill.nBoth > 0 ? ` (${fill.nBoth} also report 0 bikes and are counted under "empty now" in the dock-fill chart, so that chart's full count is ${fill.nBoth} fewer.)` : ''),
       rgba(SURPLUS_COLOR, 1),
       fill === null ? '' : pctContext(fill.nFull)
     );
@@ -3298,16 +3310,16 @@ function renderRibbon() {
   setRibbonTile(
     2,
     dist.counts[0].toLocaleString(),
-    'stations heading toward empty',
-    `${dist.counts[0].toLocaleString()} of ${dist.total.toLocaleString()} stations (${dist.total ? (100 * dist.counts[0] / dist.total).toFixed(1) : '0.0'}%) are in the map's own "big deficit" band at ${slice} — the most severe drain risk, not merely draining.`,
+    'fastest-draining stations',
+    `Stations in the map's own "big deficit" band at ${slice}: ${dist.counts[0].toLocaleString()} of ${dist.total.toLocaleString()} (${dist.total ? (100 * dist.counts[0] / dist.total).toFixed(1) : '0.0'}%) — the most severe drain tier (1.5+ bikes/day), not all stations heading toward empty.`,
     rgba(DEFICIT_COLOR, 1),
     shareContext(dist.counts[0], dist.total)
   );
   setRibbonTile(
     3,
     dist.counts[4].toLocaleString(),
-    'stations heading toward full',
-    `${dist.counts[4].toLocaleString()} of ${dist.total.toLocaleString()} stations (${dist.total ? (100 * dist.counts[4] / dist.total).toFixed(1) : '0.0'}%) are in the map's own "big surplus" band at ${slice} — the most severe fill risk, not merely filling.`,
+    'fastest-filling stations',
+    `Stations in the map's own "big surplus" band at ${slice}: ${dist.counts[4].toLocaleString()} of ${dist.total.toLocaleString()} (${dist.total ? (100 * dist.counts[4] / dist.total).toFixed(1) : '0.0'}%) — the most severe fill tier (1.5+ bikes/day), not all stations heading toward full.`,
     rgba(SURPLUS_COLOR, 1),
     shareContext(dist.counts[4], dist.total)
   );
@@ -3571,7 +3583,31 @@ function renderPriorityStops() {
 
   const fleetSize = state.scenarioState.fleetSize;
   const scenario = state.fleetScenarios.scenarios[String(fleetSize)];
-  const allStops = scenario.trucks[0].stops;
+  const truckSelector = document.getElementById('priority-truck-selector');
+  const truckSelect = document.getElementById('priority-truck-select');
+  const truckCount = scenario.trucks.length;
+
+  // Show truck selector only when multiple trucks are available
+  if (truckCount > 1) {
+    truckSelector.classList.remove('hidden');
+    // Rebuild options if the count changed
+    if (truckSelect.options.length !== truckCount) {
+      truckSelect.innerHTML = '';
+      for (let t = 0; t < truckCount; t++) {
+        const opt = document.createElement('option');
+        opt.value = String(t);
+        opt.textContent = `Truck ${t + 1}`;
+        truckSelect.appendChild(opt);
+      }
+    }
+  } else {
+    truckSelector.classList.add('hidden');
+    truckSelect.innerHTML = '<option value="0">Truck 1</option>';
+  }
+
+  const selectedTruck = Math.min(Number(truckSelect.value) || 0, truckCount - 1);
+  const truckLabel = truckCount > 1 ? `Truck ${selectedTruck + 1}` : 'Truck 1';
+  const allStops = scenario.trucks[selectedTruck].stops;
   const equityWeighted = document.getElementById('priority-equity-toggle').checked;
 
   let shown;
@@ -3630,9 +3666,9 @@ function renderPriorityStops() {
   // (weather scenarios don't touch this list either) and drops the two
   // that reference controls this tab doesn't have.
   caption.textContent = equityWeighted
-    ? `Truck 1's own real stops, reordered by equity-weighted priority (${PRIORITY_EQUITY_WEIGHT_MULTIPLIER}× weight for flagged stations) rather than drive order — not a route to follow stop-by-stop.`
+    ? `${truckLabel}'s own real stops, reordered by equity-weighted priority (${PRIORITY_EQUITY_WEIGHT_MULTIPLIER}× weight for flagged stations) rather than drive order — not a route to follow stop-by-stop.`
     : state.mode === 'live'
-      ? `Live snapshot ranking. Not synced to weather scenarios — the planner models those separately.`
+      ? `Derived from historical AM-window flow patterns, not live dock data. Not synced to weather scenarios — the planner models those separately.`
       : `Baseline route for the ${amRange} window (all-period average). Not synced to the hour slider, day-type toggle, fleet size, or weather scenarios — the planner models those separately.`;
 
   list.innerHTML = '';
@@ -3985,7 +4021,7 @@ function renderDiffBar() {
       // Session 69: "truck(s)" printed literally regardless of count --
       // fixed to match the real pluralization the summary clause above
       // already uses.
-      baselineText: `${defaultRemaining.toLocaleString()} baseline (${defaultScenarioState().fleetSize} truck${defaultScenarioState().fleetSize === 1 ? '' : 's'})`,
+      baselineText: `${defaultRemaining.toLocaleString()} unserved baseline (${defaultScenarioState().fleetSize} truck, of ${flagged.toLocaleString()} total flagged)`,
       scenarioText: `${remaining.toLocaleString()} scenario (${fleetSize} truck${fleetSize === 1 ? '' : 's'})`,
       deltaPct: flagged ? fleetDelta / flagged : 0,
     });
@@ -4103,6 +4139,11 @@ function applyScenarioState(loaded) {
 
 function resetToBaseline() {
   applyScenarioState(defaultScenarioState());
+  const equityToggle = document.getElementById('priority-equity-toggle');
+  if (equityToggle && equityToggle.checked) {
+    equityToggle.checked = false;
+    renderPriorityStops();
+  }
 }
 
 const PRESET_QUERY_PARAM = 'scenario';
@@ -5507,6 +5548,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // JS, never implied by static HTML) has caught real bugs here before.
     document.getElementById('priority-equity-toggle').checked = false;
     document.getElementById('priority-equity-toggle').addEventListener('change', renderPriorityStops);
+    document.getElementById('priority-truck-select').addEventListener('change', renderPriorityStops);
     renderPriorityStops(); // self-guards on state.fleetScenarios; safe whether or not the file loaded
 
     // Fleet simulator sub-section: visible only if fleet_scenarios.json

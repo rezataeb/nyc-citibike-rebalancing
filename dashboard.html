@@ -140,7 +140,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #ribbon-tile-1 .ribbon__value { font-size: 26px; }
-  #ribbon-tile-1 .ribbon__label { font-size: 11px; color: #52514e; }
+  #ribbon-tile-1 .ribbon__label { font-size: 12px; font-weight: 700; color: #3a3937; letter-spacing: 0.01em; text-transform: uppercase; }
   /* Session 68: supporting tiles (2-4) invert tile 1's ORIGINAL
      stacking -- label leads, larger than before (the small gray label
      was this page's weakest typographic element), number follows, and
@@ -529,6 +529,7 @@
   #priority-equity-toggle-row {
     display: flex; align-items: center; gap: 7px; padding: 10px 14px 0;
     font-size: 12px; font-weight: 600; color: #0b0b0b; cursor: pointer;
+    border-top: 1px solid #ece9e3; margin-top: 8px;
   }
   #priority-equity-toggle { margin: 0; accent-color: #c9832b; }
   #priority-equity-note { padding: 3px 14px 10px; font-size: 10.5px; color: #898781; line-height: 1.4; border-bottom: 1px solid #f0ede7; }
@@ -811,7 +812,7 @@
   /* Flat sections, separated by a rule rather than a box each: four nested
      bordered cards inside an already-bordered panel read as clutter, and
      these are parts of one sandbox, not four independent things. */
-  .planner-section { padding: 14px 0 0; border-top: 1px solid #ece9e3; }
+  .planner-section { padding: 14px 0 0; border-top: 2px solid #d8d7d3; margin-top: 6px; }
   .planner-section:first-of-type { border-top: none; padding-top: 4px; }
   .planner-section-title {
     margin: 0 0 8px; font-size: 12px; font-weight: 700; color: #0b0b0b;
@@ -3211,7 +3212,7 @@ function renderRibbon() {
         + `${(standard.total - standard.inBreach).toLocaleString()} of ${standard.total.toLocaleString()} are not in double-outage. `
         + `An INSTANT proxy for the contract's availability rule — no 60-minute window is measured. `
         + `The ${ADJACENCY_RADIUS_M} m adjacency radius is this project's operationalisation, not a contract figure, and the figure moves several points if it changes.`,
-      '#0b0b0b',
+      '#2a7a4b',
       RIBBON_TILE1_LIVE_CAVEAT
     );
     setRibbonTile(
@@ -3240,7 +3241,7 @@ function renderRibbon() {
       `Stations that are completely empty or full AND have another such station within ${ADJACENCY_RADIUS_M} m, right now: `
         + `${standard.inBreach.toLocaleString()} of ${standard.total.toLocaleString()}. `
         + `This follows the contract's "adjacent stations also unavailable" carve-out, measured instantaneously rather than over a 60-minute window.`,
-      '#0b0b0b',
+      '#c9832b',
       `subset of empty + full, not their sum`
     );
     // Session 66: stated once, visibly, rather than only on hover -- empty

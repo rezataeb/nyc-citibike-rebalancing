@@ -1386,7 +1386,7 @@
        child, so anchoring to body-row's bottom-left corner lands in the
        same place map-col's would, without becoming a positioning
        ancestor for the legend/timebar stack that already uses body-row. -->
-  <button type="button" id="simulate-scenarios-pill">Simulate scenarios</button>
+  <button type="button" id="simulate-scenarios-pill">Simulate Scenarios</button>
 
   <!-- Legend is the FIRST child (bottom, in flex column-reverse below) --
        it never moves. Detail is the LAST child (stacks above it), shown
@@ -1395,12 +1395,12 @@
     <div id="legend-card">
       <!-- Session 72: matches Station Balance's own rename -- this was
            the last place on the page still saying "Net Daily Flow." -->
-      <div id="legend-title">Station balance (bikes/day)</div>
+      <div id="legend-title">Station Balance (bikes/day)</div>
       <div class="bar" id="legend-bar"></div>
       <div id="legend-ticks"><span id="legend-tick-low"></span><span id="legend-tick-mid"></span><span id="legend-tick-high"></span></div>
       <div class="labels"><span id="legend-label-low"></span><span id="legend-label-mid"></span><span id="legend-label-high"></span></div>
       <div id="legend-caption">Click a station for its daily flow</div>
-      <div id="legend-double-outage-note" class="hidden" style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:#52514e;"><span style="flex:none;width:12px;height:12px;border-radius:50%;border:1.75px solid #c9832b;display:inline-block;box-sizing:border-box;"></span>Amber ring = double-outage cluster</div>
+      <div id="legend-double-outage-note" class="hidden" style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:#52514e;"><span style="flex:none;width:12px;height:12px;border-radius:50%;border:1.75px solid #c9832b;display:inline-block;box-sizing:border-box;"></span>Amber Ring = Double-Outage Cluster</div>
     </div>
 
     <div id="detail-card" class="hidden">
@@ -1409,7 +1409,7 @@
       <div class="striptitle">24-hour flow rhythm (<span id="detail-daylabel"></span>)</div>
       <svg class="strip" id="detail-strip" viewBox="0 0 240 70" preserveAspectRatio="none"></svg>
       <button id="detail-more-toggle" class="detail-more-toggle">
-        <span>More info</span>
+        <span>More Info</span>
         <span class="accordion-chevron" id="detail-more-chevron">&#9656;</span>
       </button>
       <div id="detail-more-content" class="hidden">
@@ -2927,7 +2927,7 @@ function renderClimatologyNote() {
 // What a rider experiences is the operational one: 0 docks means you cannot
 // return a bike, whatever the capacity arithmetic says. The middle three
 // buckets are fill percentage, which is what fill percentage is good for.
-const DISTRIBUTION_LIVE_LABELS = ['empty', '1-25%', '25-75%', '75-99%', 'full'];
+const DISTRIBUTION_LIVE_LABELS = ['Empty', '1-25%', '25-75%', '75-99%', 'Full'];
 function liveDistributionBucket(live) {
   if (live.bikes_available === 0) return 0;   // cannot rent
   if (live.docks_available === 0) return 4;   // cannot return
@@ -2936,7 +2936,7 @@ function liveDistributionBucket(live) {
   if (pct <= 75) return 2;
   return 3;
 }
-const DISTRIBUTION_HISTORICAL_LABELS = ['big deficit', 'deficit', 'near balanced', 'surplus', 'big surplus'];
+const DISTRIBUTION_HISTORICAL_LABELS = ['Big Deficit', 'Deficit', 'Near Balanced', 'Surplus', 'Big Surplus'];
 
 // Session 68: one place computing which distribution bucket a SINGLE station
 // falls into for the CURRENT mode/slice -- used by both computeDistribution()
@@ -2985,7 +2985,7 @@ function distributionHistoricalThresholds() {
 // classOf()/liveDistributionBucket() comments above), so their numeric
 // clarification is stated rather than a percent range; bins 1-3 already
 // carry their real percent-of-capacity cutoffs.
-const DISTRIBUTION_LIVE_KEY_LABELS = ['empty (0 bikes)', '1–25% full', '25–75% full', '75–99% full', 'full (0 docks)'];
+const DISTRIBUTION_LIVE_KEY_LABELS = ['Empty (0 Bikes)', '1–25% Full', '25–75% Full', '75–99% Full', 'Full (0 Docks)'];
 
 // Session 69: user-reported the raw "(< -1.5/day)" notation reads as
 // modeler units, not English -- added the plain-word gloss each bin's own
@@ -3005,11 +3005,11 @@ function distributionKeyLabels(live) {
   const [t0, t1, t2, t3] = distributionHistoricalThresholds();
   const mag = v => Math.abs(v).toFixed(1);
   return [
-    `Big deficit — heading toward empty fastest (${mag(t0)}+/day)`,
-    `Deficit — heading toward empty (${mag(t1)}–${mag(t0)}/day)`,
-    `Near balanced (within ${mag(t2)}/day)`,
-    `Surplus — heading toward full (${mag(t2)}–${mag(t3)}/day)`,
-    `Big surplus — heading toward full fastest (${mag(t3)}+/day)`,
+    `Big Deficit — Heading Toward Empty Fastest (${mag(t0)}+/day)`,
+    `Deficit — Heading Toward Empty (${mag(t1)}–${mag(t0)}/day)`,
+    `Near Balanced (within ${mag(t2)}/day)`,
+    `Surplus — Heading Toward Full (${mag(t2)}–${mag(t3)}/day)`,
+    `Big Surplus — Heading Toward Full Fastest (${mag(t3)}+/day)`,
   ];
 }
 
@@ -3025,7 +3025,7 @@ function renderDistribution() {
   // instantly. Session 71: "Dock Fill Distribution" gets the same trim --
   // "distribution" is redundant with the card's own stacked bar right
   // underneath the title.
-  document.getElementById('distribution-title').textContent = live ? 'Dock Fill' : 'Station balance';
+  document.getElementById('distribution-title').textContent = live ? 'Dock Fill' : 'Station Balance';
   document.getElementById('distribution-total').textContent = `${total.toLocaleString()} stations`;
 
   // Both the bar segments and the key entries are clickable (delegated
@@ -3277,7 +3277,7 @@ function renderRibbon() {
     setRibbonTile(
       1,
       standard.meetingRate === null ? RIBBON_EM_DASH : `${(standard.meetingRate * 100).toFixed(1)}%`,
-      'service availability (now)',
+      'Service Availability (Now)',
       `100% minus (double-outage stations / stations with usable live data): `
         + `${(standard.total - standard.inBreach).toLocaleString()} of ${standard.total.toLocaleString()} are not in double-outage. `
         + `An INSTANT proxy for the contract's availability rule — no 60-minute window is measured. `
@@ -3288,7 +3288,7 @@ function renderRibbon() {
     setRibbonTile(
       2,
       fill === null ? RIBBON_EM_DASH : fill.nEmpty.toLocaleString(),
-      'empty now',
+      'Empty Now',
       fill === null ? 'No stations currently report usable live data.'
         : `Stations with 0 bikes available right now: ${fill.nEmpty} of ${fill.total.toLocaleString()} with usable live data. A rider cannot start a trip there.`,
       rgba(DEFICIT_COLOR, 1),
@@ -3297,7 +3297,7 @@ function renderRibbon() {
     setRibbonTile(
       3,
       fill === null ? RIBBON_EM_DASH : fill.nFull.toLocaleString(),
-      'full now',
+      'Full Now',
       fill === null ? 'No stations currently report usable live data.'
         : `Stations with 0 docks available right now: ${fill.nFull} of ${fill.total.toLocaleString()} with usable live data. A rider cannot end a trip there.`
           + (fill.nBoth > 0 ? ` (${fill.nBoth} also report 0 bikes and are counted under "empty now" in the dock-fill chart, so that chart's full count is ${fill.nBoth} fewer.)` : ''),
@@ -3307,12 +3307,12 @@ function renderRibbon() {
     setRibbonTile(
       4,
       standard.inBreach.toLocaleString(),
-      'double-outage now',
+      'Double-Outage Now',
       `Stations that are completely empty or full AND have another such station within ${ADJACENCY_RADIUS_M} m, right now: `
         + `${standard.inBreach.toLocaleString()} of ${standard.total.toLocaleString()}. `
         + `This follows the contract's "adjacent stations also unavailable" carve-out, measured instantaneously rather than over a 60-minute window.`,
       '#c9832b',
-      `subset of empty + full, not their sum`
+      `Subset of Empty + Full, Not Their Sum`
     );
     // Session 66: stated once, visibly, rather than only on hover -- empty
     // + full does not equal double-outage because adjacency makes it a
@@ -3344,7 +3344,7 @@ function renderRibbon() {
   setRibbonTile(
     1,
     Math.round(totals.outOfPlace).toLocaleString(),
-    'bikes out of place this hour',
+    'Bikes Out of Place This Hour',
     `Total absolute net flow across all stations at ${slice} — the size of the imbalance the system absorbs in this hour on a typical day.`,
     null, // historical mode is outside the KPI strip's scope -- no status dot
     '' // historical has no analogous caveat -- .ribbon__context's own
@@ -3381,7 +3381,7 @@ function renderRibbon() {
   setRibbonTile(
     2,
     dist.counts[0].toLocaleString(),
-    'fastest-draining stations',
+    'Fastest-Draining Stations',
     `Stations in the map's own "big deficit" band at ${slice}: ${dist.counts[0].toLocaleString()} of ${dist.total.toLocaleString()} (${dist.total ? (100 * dist.counts[0] / dist.total).toFixed(1) : '0.0'}%) — the most severe drain tier (1.5+ bikes/day), not all stations heading toward empty.`,
     rgba(DEFICIT_COLOR, 1),
     shareContext(dist.counts[0], dist.total)
@@ -3389,7 +3389,7 @@ function renderRibbon() {
   setRibbonTile(
     3,
     dist.counts[4].toLocaleString(),
-    'fastest-filling stations',
+    'Fastest-Filling Stations',
     `Stations in the map's own "big surplus" band at ${slice}: ${dist.counts[4].toLocaleString()} of ${dist.total.toLocaleString()} (${dist.total ? (100 * dist.counts[4] / dist.total).toFixed(1) : '0.0'}%) — the most severe fill tier (1.5+ bikes/day), not all stations heading toward full.`,
     rgba(SURPLUS_COLOR, 1),
     shareContext(dist.counts[4], dist.total)
@@ -3397,7 +3397,7 @@ function renderRibbon() {
   setRibbonTile(
     4,
     Math.round(totals.bikesToMove).toLocaleString(),
-    'bikes a truck needs to deliver',
+    'Bikes a Truck Needs to Deliver',
     `Bikes that would have to arrive at draining stations to bring them level in this hour — the truck-side half of tile 1. `
       + 'Not an optimised plan: no depots, no travel times, no vehicle capacities.',
     null, // historical mode is outside the KPI strip's scope -- no status dot
@@ -3615,7 +3615,7 @@ function computeServicedEquityOverlap(scenario, thresholds) {
 // line), so it's re-run from setEquityThreshold() too, not just from
 // setFleetSize().
 const PRIORITY_STOPS_SIZE = 8;
-const PRIORITY_STOP_ACTION_LABEL = { pickup: 'Pick up bikes', dropoff: 'Send bikes' };
+const PRIORITY_STOP_ACTION_LABEL = { pickup: 'Pick Up Bikes', dropoff: 'Send Bikes' };
 // Session 67: 2x, not a fitted or tuned weight -- a plain, statable
 // multiplier ("stations near NYCHA/school, or beyond the subway gap,
 // rank higher") rather than a number that would need its own
@@ -5121,7 +5121,7 @@ function renderLegendScale() {
   // Session 72: matches Station Balance's own rename -- keep the
   // Deficit/Balanced/Surplus end labels below unchanged, only the title.
   document.getElementById('legend-double-outage-note').classList.add('hidden');
-  title.textContent = 'Station balance (bikes/day)';
+  title.textContent = 'Station Balance (bikes/day)';
   mid.textContent = '0'; // net flow's real midpoint: as many bikes arriving as leaving
   const max = state.domainMax ? state.domainMax.toFixed(1) : '0.0';
   low.textContent = `-${max}`;

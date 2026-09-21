@@ -5211,7 +5211,16 @@ function nearestStationWithin(latlng, tolerancePx) {
 
 map.on('click', event => {
   const id = nearestStationWithin(event.latlng, CLICK_TOLERANCE_PX);
-  if (id !== null) selectStation(id);
+  if (id !== null) {
+    selectStation(id);
+  } else if (state.homeCenter) {
+    // Empty-map click: fly back to the initial full-city view and close
+    // any open station detail. Reads the same media query flyToStation uses.
+    closeStation();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+      map.setView(state.homeCenter, state.homeZoom);
+    else map.flyTo(state.homeCenter, state.homeZoom, { duration: 0.6 });
+  }
 });
 
 // Session 64: the click tolerance above never helped hover, which has the
@@ -5579,6 +5588,9 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     map.fitBounds(trimmedViewBounds(state.stations, ids, VIEW_TRIM_FRACTION), { padding: [28, 28], maxZoom: VIEW_MAX_ZOOM, animate: false });
     map.setMaxBounds(bounds.pad(0.30));
     map.setMinZoom(map.getBoundsZoom(bounds) - 1);
+    // Save home view once after the initial fitBounds so empty-map-click can fly back.
+    state.homeCenter = map.getCenter();
+    state.homeZoom = map.getZoom();
 
     state.domainMax = computeDomainMax(state.stations);
 

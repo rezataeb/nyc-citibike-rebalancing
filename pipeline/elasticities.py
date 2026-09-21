@@ -124,8 +124,8 @@ ELASTICITIES_PATH = Path(__file__).resolve().parent.parent / "data" / "elasticit
 # have at all. This also takes the daily weather regression from ~90 days
 # (3 non-contiguous months) to ~365 real contiguous days, for free -- no
 # new download, just reading data already on disk.
-WEATHER_FETCH_START = "2025-07-01"
-WEATHER_FETCH_END = "2026-06-30"  # matches build_full_year's own window -- reuses the same cached Open-Meteo pull
+WEATHER_FETCH_START = "2025-09-01"
+WEATHER_FETCH_END = "2026-08-31"  # matches build_full_year's own window -- reuses the same cached Open-Meteo pull
 MIN_DAILY_OBSERVATIONS = 10  # real degrees-of-freedom floor for a 3-coefficient (intercept+temp+precip) fit
 CI_Z_SCORE = 1.96  # normal approximation for a 95% CI -- appropriate here since every real fit in this module has well over 30 degrees of freedom, so t and normal critical values are indistinguishable to 2 decimal places
 

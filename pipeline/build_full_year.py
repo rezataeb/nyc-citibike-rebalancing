@@ -35,8 +35,9 @@ from pipeline.qc import run_qc
 from pipeline.station_typology import apply_typology
 
 TARGET_MONTHS = [
-    "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12",
+    "2025-09", "2025-10", "2025-11", "2025-12",
     "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+    "2026-07", "2026-08",
 ]
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"

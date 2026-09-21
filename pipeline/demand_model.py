@@ -58,7 +58,7 @@ from pipeline.weather import compute_weather_zones, fetch_weather_at_points
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MODEL_PERFORMANCE_PATH = DATA_DIR / "model_performance.json"
 
-WEATHER_START, WEATHER_END = "2025-07-01", "2026-06-30"
+WEATHER_START, WEATHER_END = "2025-09-01", "2026-08-31"
 
 # How far past a fold's observed training temperature range (in Celsius)
 # the GAM tier is still trusted before falling back all the way to the

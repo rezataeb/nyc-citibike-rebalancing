@@ -1400,6 +1400,7 @@
       <div id="legend-ticks"><span id="legend-tick-low"></span><span id="legend-tick-mid"></span><span id="legend-tick-high"></span></div>
       <div class="labels"><span id="legend-label-low"></span><span id="legend-label-mid"></span><span id="legend-label-high"></span></div>
       <div id="legend-caption">Click a station for its daily flow</div>
+      <div id="legend-double-outage-note" class="hidden" style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:#52514e;"><span style="flex:none;width:12px;height:12px;border-radius:50%;border:1.75px solid #c9832b;display:inline-block;box-sizing:border-box;"></span>Amber ring = double-outage cluster</div>
     </div>
 
     <div id="detail-card" class="hidden">
@@ -2708,6 +2709,14 @@ function isUnusableLive(live) {
   return live.bikes_available === 0 || live.docks_available === 0;
 }
 
+// True when this station has live data AND is a double-outage station (unusable
+// with another unusable station within ADJACENCY_RADIUS_M). Used by markerStyleFor
+// to draw the amber ring. computeLiveStandard() is memoised so this is O(1).
+function isDoubleOutage(id) {
+  if (!hasLiveData(id)) return false;
+  return computeLiveStandard().inBreachIds.has(id);
+}
+
 // Adjacency radius for the SLA's "only if adjacent stations also unavailable"
 // clause. THIS NUMBER IS OURS, NOT THE CONTRACT'S: the Comptroller's summary
 // states the carve-out in words and never defines "adjacent" in metres. 500 m
@@ -2751,6 +2760,7 @@ function computeLiveStandard() {
     if (!hasLiveData(id)) continue;
     const station = state.stations[id];
     usable.push({
+      id,
       lat: station.lat,
       lng: station.lng,
       unusable: isUnusableLive(state.liveStations[id]),
@@ -2763,12 +2773,12 @@ function computeLiveStandard() {
   // few hundred thousand distance checks instead of millions.
   const unusable = usable.filter(entry => entry.unusable);
 
-  let inBreach = 0;
+  const inBreachIds = new Set();
   for (const station of unusable) {
     for (const other of unusable) {
       if (other === station) continue;
       if (metresBetween(station.lat, station.lng, other.lat, other.lng) <= ADJACENCY_RADIUS_M) {
-        inBreach += 1;
+        inBreachIds.add(station.id);
         break;
       }
     }
@@ -2777,10 +2787,11 @@ function computeLiveStandard() {
   liveStandardCache = {
     total: usable.length,
     nUnusable: unusable.length,
-    inBreach,
+    inBreach: inBreachIds.size,
+    inBreachIds,
     // Guarded: a live feed that resolved to zero usable stations would
     // otherwise print NaN% as though it were a measurement.
-    meetingRate: usable.length > 0 ? (usable.length - inBreach) / usable.length : null,
+    meetingRate: usable.length > 0 ? (usable.length - inBreachIds.size) / usable.length : null,
   };
   return liveStandardCache;
 }
@@ -4252,6 +4263,8 @@ const NO_DATA_STROKE = '#b5b3ad';
 const DEFAULT_WEIGHT = 0.75;
 const SELECTED_WEIGHT = 2;
 const NO_DATA_WEIGHT = 1; // slightly heavier than default so a hollow ring reads clearly against the basemap
+const DOUBLE_OUTAGE_STROKE = '#c9832b'; // amber ring: same amber as the double-outage header tile
+const DOUBLE_OUTAGE_WEIGHT = 1.75;
 
 // User-reported gap, not from the critique: at this map's small marker
 // radii (2.5-8px, see markerRadiusForZoom), SELECTED_WEIGHT's 2px dark
@@ -4429,12 +4442,17 @@ function markerStyleFor(id) {
     const live = state.liveStations[id];
     const pctFull = (live.bikes_available / live.capacity) * 100;
     const centered = pctFull - 50;
+    // Double-outage stations get an amber ring (same amber as the header tile)
+    // on top of their normal fill color, so you can see both the empty/full
+    // state AND the cluster-concern signal simultaneously. Selection always
+    // wins: a selected double-outage station keeps the dark selection ring.
+    const doubleOutage = !selected && isDoubleOutage(id);
     return {
       fillColor: rampColor(centered, LIVE_FILL_DOMAIN),
       fillOpacity: rampOpacity(centered, LIVE_FILL_DOMAIN) * finalAlpha,
-      color: selected ? SELECTED_STROKE : rampStroke(centered, LIVE_FILL_DOMAIN),
+      color: selected ? SELECTED_STROKE : (doubleOutage ? DOUBLE_OUTAGE_STROKE : rampStroke(centered, LIVE_FILL_DOMAIN)),
       opacity: finalAlpha,
-      weight: selected ? SELECTED_WEIGHT : DEFAULT_WEIGHT,
+      weight: selected ? SELECTED_WEIGHT : (doubleOutage ? DOUBLE_OUTAGE_WEIGHT : DEFAULT_WEIGHT),
     };
   }
 
@@ -5096,11 +5114,13 @@ function renderLegendScale() {
     // a quantity Live mode doesn't even show. Own definition now,
     // written every time, not left stale from the other mode.
     document.getElementById('legend-card').title = 'Percent of capacity currently holding a bike -- 0% is empty (cannot rent), 100% is full (cannot return). Click a station for its live bikes/docks reading.';
+    document.getElementById('legend-double-outage-note').classList.remove('hidden');
     return;
   }
 
   // Session 72: matches Station Balance's own rename -- keep the
   // Deficit/Balanced/Surplus end labels below unchanged, only the title.
+  document.getElementById('legend-double-outage-note').classList.add('hidden');
   title.textContent = 'Station balance (bikes/day)';
   mid.textContent = '0'; // net flow's real midpoint: as many bikes arriving as leaving
   const max = state.domainMax ? state.domainMax.toFixed(1) : '0.0';

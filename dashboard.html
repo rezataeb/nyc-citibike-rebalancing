@@ -1471,7 +1471,7 @@
              longer methodology text in here instead, collapsed by
              default, same as #equity-accordion. -->
         <details class="hidden" id="distribution-notes-accordion">
-          <summary class="accordion-toggle" id="distribution-notes-toggle">Data notes</summary>
+          <summary class="accordion-toggle" id="distribution-notes-toggle">Data Notes</summary>
           <div id="distribution-notes-body"></div>
         </details>
       </div>
@@ -1490,7 +1490,7 @@
            entirely if fleet_scenarios.json failed to load, same
            graceful-degradation rule as every other optional file here. -->
       <div class="worst" id="priority-stops-wrap">
-        <div class="worst__title">Priority truck stops</div>
+        <div class="worst__title">Priority Truck Stops</div>
         <!-- Session 73: this dashboard serves DOT oversight/planning, not
              the operator's own dispatch -- Lyft, not DOT, decides how
              many trucks run (see CLAUDE.md/PROGRESS.md's reframe notes).
@@ -1690,7 +1690,7 @@
                genericized what this actually is (equity proximity
                sliders) enough that a reviewer looking for "how is equity
                computed here" had no reason to open it. -->
-          <summary class="planner-section-title accordion-toggle" id="equity-accordion-toggle">Equity thresholds</summary>
+          <summary class="planner-section-title accordion-toggle" id="equity-accordion-toggle">Equity Thresholds</summary>
           <div class="planner-section-body" id="equity-accordion-content">
             <div class="scenario-planner-slider">
               <label for="nycha-school-slider">NYCHA / school proximity: <span id="nycha-school-value">300</span> m</label>
@@ -1727,7 +1727,7 @@
              visually distinct "output" card is the right signal, not
              noise. -->
         <div class="worst" id="equity-gap-wrap">
-          <div class="worst__title">Equity gap</div>
+          <div class="worst__title">Equity Gap</div>
           <div id="equity-gap-body"></div>
           <div id="equity-gap-method">Compares stations currently reporting 0 bikes or 0 docks (live GBFS), grouped by whether they're within your current NYCHA, school, and subway-gap thresholds — a snapshot, not a historical frequency.</div>
         </div>
@@ -1749,7 +1749,7 @@
              path, which this dashboard treats as "don't show it," not
              "show it anyway." -->
         <details id="reliability-capacity-accordion">
-          <summary class="planner-section-title accordion-toggle" id="reliability-capacity-toggle">Reliability patterns</summary>
+          <summary class="planner-section-title accordion-toggle" id="reliability-capacity-toggle">Reliability Patterns</summary>
           <div class="planner-section-body" id="reliability-capacity-content">
             <div id="reliability-capacity-sentences"></div>
             <table>
@@ -1761,7 +1761,7 @@
         </details>
 
         <section class="planner-section" id="weather-accordion">
-          <h3 class="planner-section-title">Weather scenario</h3>
+          <h3 class="planner-section-title">Weather Scenario</h3>
           <div class="planner-section-body" id="weather-scenario-wrap">
             <div id="weather-preset-pills"></div>
             <div class="scenario-planner-slider">
@@ -1815,11 +1815,11 @@
            weather-adjusted ranking as the plain baseline one. -->
       <div id="worst-lists-scenario-note">Top needs under the current scenario settings.</div>
       <div class="worst" id="worst-deficit-wrap">
-        <div class="worst__title">Most bikes needed</div>
+        <div class="worst__title">Most Bikes Needed</div>
         <ul id="worst-deficit-list"></ul>
       </div>
       <div class="worst" id="worst-surplus-wrap">
-        <div class="worst__title">Most docks needed</div>
+        <div class="worst__title">Most Docks Needed</div>
         <ul id="worst-surplus-list"></ul>
       </div>
 
@@ -1847,7 +1847,7 @@
            id, only its place in the document and its tag (<section> ->
            <details>, so it can actually collapse) changed. -->
       <details id="fleet-accordion">
-        <summary id="fleet-accordion-toggle">Fleet &amp; routing<span class="accordion-badge" id="fleet-badge"></span></summary>
+        <summary id="fleet-accordion-toggle">Fleet &amp; Routing<span class="accordion-badge" id="fleet-badge"></span></summary>
         <div class="planner-section-body" id="fleet-sim-wrap">
           <div id="fleet-operator-note">Fleet sizing is the operator's decision &mdash; included here for completeness.</div>
           <div class="scenario-planner-slider">
@@ -1881,7 +1881,7 @@
            re-renders on toggle -- the table is populated once at load
            regardless of visibility. -->
       <details id="model-eval" class="hidden">
-        <summary id="model-eval-toggle">Model performance</summary>
+        <summary id="model-eval-toggle">Model Performance</summary>
         <div id="tab-panel-model">
           <!-- Design critique task 05: the plain-language explanation
                moved ABOVE the table it explains, not below -- a reader
@@ -3014,7 +3014,7 @@ function renderDistribution() {
   // instantly. Session 71: "Dock Fill Distribution" gets the same trim --
   // "distribution" is redundant with the card's own stacked bar right
   // underneath the title.
-  document.getElementById('distribution-title').textContent = live ? 'Dock fill' : 'Station balance';
+  document.getElementById('distribution-title').textContent = live ? 'Dock Fill' : 'Station balance';
   document.getElementById('distribution-total').textContent = `${total.toLocaleString()} stations`;
 
   // Both the bar segments and the key entries are clickable (delegated
@@ -4728,18 +4728,29 @@ function positionFloatingMapControls() {
   // `width: fit-content`.
   const liveWidth = state.mode === 'live';
 
-  if (availableForTimebar >= TIMEBAR_MIN_SAME_ROW_WIDTH_PX) {
+  const timebarW = liveWidth ? 0 : Math.min(TIMEBAR_MAX_WIDTH_PX, mapWidth - 32);
+  // Center the timebar on the map when there is enough clearance from the
+  // corner stack (gap >= MAP_CORNER_ROW_GAP_PX). When the map is too narrow
+  // to center without overlapping, fall back to the same-row layout, and
+  // when there is no room for same-row either, move the stack up above.
+  const stackActualRight = 16 + stack.getBoundingClientRect().width;
+  const centeredLeft = mapWidth / 2 - (liveWidth ? timebar.getBoundingClientRect().width / 2 : timebarW / 2);
+  const canCenter = centeredLeft >= stackActualRight + MAP_CORNER_ROW_GAP_PX;
+
+  if (canCenter) {
+    stack.style.maxWidth = '';
+    stack.style.bottom = `${MAP_CORNER_ROW_GAP_PX}px`;
+    timebar.style.left = `${mapWidth / 2}px`;
+    timebar.style.transform = 'translateX(-50%)';
+    timebar.style.width = liveWidth ? '' : `${timebarW}px`;
+  } else if (availableForTimebar >= TIMEBAR_MIN_SAME_ROW_WIDTH_PX) {
     stack.style.maxWidth = '';
     stack.style.bottom = `${MAP_CORNER_ROW_GAP_PX}px`;
     timebar.style.left = `${timebarLeftIfSameRow}px`;
     timebar.style.width = liveWidth ? '' : `${Math.min(TIMEBAR_MAX_WIDTH_PX, availableForTimebar)}px`;
     timebar.style.transform = '';
   } else {
-    // Not enough combined room: the timebar takes the full row, centered
-    // on the map (unambiguous once it's alone there), and the stack moves
-    // up above it. That bottom offset is measured from the timebar's own
-    // real rendered height, not a hardcoded guess -- can't go stale if
-    // that height ever changes (it has, before).
+    // Not enough room: center the timebar and move the stack above it.
     stack.style.maxWidth = '';
     timebar.style.width = liveWidth ? '' : `${Math.min(TIMEBAR_MAX_WIDTH_PX, mapWidth - 32)}px`;
     timebar.style.left = `${mapWidth / 2}px`;

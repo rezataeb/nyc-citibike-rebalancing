@@ -3233,12 +3233,10 @@ function renderProjectionStrip() {
   const { nProjectedEmpty, nProjectedFull, withProjection } = projection;
   let title = `Projects today's live fill through each station's own weekday/weekend rhythm — not a separate forecast model, and not the walk-forward model reported under Model performance.`;
   let line = `Next 2 hours (projected): <b>${nProjectedEmpty.toLocaleString()}</b> of ${withProjection.toLocaleString()} may run empty, <b>${nProjectedFull.toLocaleString()}</b> may fill up.`;
-  if (!isBaselineWeatherScenario()) {
-    const preset = matchingWeatherPreset();
-    const label = preset ? preset.label : 'Custom scenario';
-    line += ` &middot; ${label} scenario active in Historical Flow (no effect on these live numbers)`;
-    title += ` A weather scenario is dialed in in Historical Flow, shown here for awareness — it has no effect on this live projection, which is never weather-adjusted.`;
-  }
+  // Weather scenario note deliberately omitted: the note belongs in the
+  // Historical Flow view (where the scenario controls live), not here --
+  // keeping this strip to one fact (the projection itself) keeps the live
+  // card a stable, predictable size regardless of scenario state.
   // Session 70: a visible marker, not just cursor:help -- a cursor-shape
   // change is too easy to miss as a signal that there's more to read here.
   strip.innerHTML = line + ' <span class="info-affordance" aria-hidden="true">&#9432;</span>';
@@ -4732,6 +4730,7 @@ function positionFloatingMapControls() {
     stack.style.bottom = '';
     timebar.style.left = '';
     timebar.style.width = '';
+    timebar.style.maxWidth = '';
     timebar.style.transform = '';
     return;
   }
@@ -4740,19 +4739,21 @@ function positionFloatingMapControls() {
   const stackWidth = Math.min(MAP_CORNER_STACK_NATURAL_WIDTH_PX, mapWidth - 32);
   const timebarLeftIfSameRow = 16 + stackWidth + MAP_CORNER_ROW_GAP_PX;
   const availableForTimebar = mapWidth - timebarLeftIfSameRow - 16;
-  // Live mode's dock is one line of text, not three rows of controls, so it
-  // sizes to its content instead of being stretched to the timebar's usual
-  // width. Clearing the inline width hands it back to the stylesheet's
-  // `width: fit-content`.
   const liveWidth = state.mode === 'live';
-
-  const timebarW = liveWidth ? 0 : Math.min(TIMEBAR_MAX_WIDTH_PX, mapWidth - 32);
+  // Cap the timebar at TIMEBAR_MAX_WIDTH_PX or mapWidth-32, whichever is
+  // smaller -- applied in ALL modes so a long projection-strip line in live
+  // mode can never make the card wider than the map (and center-aligned
+  // translateX(-50%) can never push its left edge off-screen).
+  const timebarW = Math.min(TIMEBAR_MAX_WIDTH_PX, mapWidth - 32);
+  // Always cap with max-width so the CSS fit-content fallback also respects
+  // the map boundary even before positionFloatingMapControls() runs.
+  timebar.style.maxWidth = `${timebarW}px`;
   // Center the timebar on the map when there is enough clearance from the
   // corner stack (gap >= MAP_CORNER_ROW_GAP_PX). When the map is too narrow
   // to center without overlapping, fall back to the same-row layout, and
   // when there is no room for same-row either, move the stack up above.
   const stackActualRight = 16 + stack.getBoundingClientRect().width;
-  const centeredLeft = mapWidth / 2 - (liveWidth ? timebar.getBoundingClientRect().width / 2 : timebarW / 2);
+  const centeredLeft = mapWidth / 2 - timebarW / 2;
   const canCenter = centeredLeft >= stackActualRight + MAP_CORNER_ROW_GAP_PX;
 
   if (canCenter) {

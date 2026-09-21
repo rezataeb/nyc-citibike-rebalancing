@@ -781,9 +781,13 @@
      the design critique. Accent color reuses the existing
      .scenario-planner-badge orange, tying it visually to "Scenario Planner"
      itself rather than reading as another muted caption. */
-  .map-tie-in-cue { margin: 8px 0; padding: 6px 10px; border-left: 2px solid #c9832b; background: #fdf6e8; color: #7a5b1e; font-size: 11px; line-height: 1.4; border-radius: 0 4px 4px 0; }
-  #weather-preset-select { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 12px; }
-  #weather-scenario-status { margin-top: 6px; color: #52514e; line-height: 1.6; font-size: 12px; }
+  #weather-preset-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .weather-preset-pill { font-size: 12px; padding: 4px 11px; border-radius: 20px; border: 1px solid #d8d7d3; background: #fff; color: #52514e; cursor: pointer; }
+  .weather-preset-pill:hover { border-color: #a3a09a; background: #f7f6f3; }
+  .weather-preset-pill.active { background: #185FA5; color: #fff; border-color: #185FA5; }
+  .equity-count-big { font-size: 19px; font-weight: 700; color: #0b0b0b; line-height: 1.1; margin: 8px 0 2px; }
+  .equity-count-big-label { font-size: 11px; color: #666057; margin-bottom: 6px; }
+  #equity-breakdown-toggle { font-size: 11px; color: #8a5a1f; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
 
   /* Equity thresholds / Fleet simulator / Weather scenario / Save-load-reset
      are now four independently collapsible accordions (matching the
@@ -1559,20 +1563,11 @@
                fleet sizing is the operator's call, not DOT's (see this
                section's own reframe note below). Named as included, not
                as something to simulate. -->
-          <span id="scenario-planner-teaser">Simulate weather and equity thresholds against real data &mdash; fleet sizing included for completeness.</span>
-          <!-- Session 69: was describing the amber "Currently showing"
-               banner (Session 66), removed in Session 68 and replaced by
-               per-tile PROJECTED tags -- nobody swept this one reference
-               to it when the banner went.
-               Session 73: fleet's clause reworded from "stays separate"
-               (mechanical -- true of equity too, said nothing about WHY)
-               to "operator-side context" -- names whose decision it is,
-               not just that it doesn't touch the real numbers. Equity and
-               weather's own roles are unchanged. -->
-          <span id="scenario-planner-subtitle">Fleet sizing is operator-side context; equity stays a separate lens too &mdash; neither changes Live Docks or Historical Flow's real numbers. Weather is the one control that projects new numbers &mdash; every Historical Flow number it touches carries its own PROJECTED tag. (No effect in Live Docks mode.)</span>
+          <span id="scenario-planner-teaser">Adjust weather or equity thresholds — the map updates live.</span>
+          <span id="scenario-planner-subtitle">Weather projections carry a PROJECTED tag. No effect in Live Docks mode.</span>
         </summary>
         <div id="tab-panel-scenario-planner">
-        <div id="scenario-planner-diff-bar" class="hidden">
+        <div id="scenario-planner-diff-bar">
           <div class="scenario-card-head">
             <span class="scenario-card-title">Scenario vs. baseline</span>
             <div class="scenario-card-head-actions">
@@ -1662,9 +1657,8 @@
              still reads (same visual neighborhood) without depending on
              the Session 71 condition that broke it. -->
         <div id="preset-load-row">
-          <label for="preset-load-input">Load a shared scenario:</label>
-          <input type="text" id="preset-load-input" placeholder="Paste a shared link here">
-          <button id="load-preset-btn" class="day-btn">Load preset</button>
+          <input type="text" id="preset-load-input" placeholder="Paste a shared scenario link">
+          <button id="load-preset-btn" class="day-btn">Load</button>
           <div id="preset-load-error" class="hidden" role="alert">That link didn&rsquo;t parse as a scenario.</div>
         </div>
 
@@ -1707,22 +1701,18 @@
               <input type="range" id="subway-gap-slider" min="0" max="3000" step="50" value="800">
             </div>
             <div id="scenario-planner-counts">
-              <!-- Combined (union) is the primary, most-asked number --
-                   promoted to its own bold line. NYCHA/school/overlap are
-                   the derived breakdown underneath it, indented and
-                   de-emphasized so the relationship reads visually, not
-                   just five same-weight lines in a row. Subway gap is a
-                   genuinely separate criterion (its own threshold, no
-                   relation to NYCHA/school), so it's set apart below a
-                   divider rather than folded into the same group. -->
-              <div id="count-nycha-or-school" class="equity-count-primary"></div>
-              <div id="equity-vintage-note">School locations: NYC DOE 2019&ndash;2020 (latest edition with coordinates on NYC Open Data) &mdash; <a href="docs_v2/Dashboard_v2_Redesign_Working_Notes.md#11-school-location-dataset-vintage--full-provenance" target="_blank" rel="noopener">full provenance</a></div>
-              <div class="equity-count-breakdown">
-                <div id="count-nycha"></div>
-                <div id="count-school"></div>
-                <div id="count-nycha-and-school"></div>
+              <div class="equity-count-big" id="count-nycha-or-school"></div>
+              <div class="equity-count-big-label">stations within your equity thresholds</div>
+              <button id="equity-breakdown-toggle" aria-expanded="false" aria-controls="equity-breakdown-collapse">▶ View breakdown</button>
+              <div id="equity-breakdown-collapse" class="hidden">
+                <div id="equity-vintage-note">School locations: NYC DOE 2019&ndash;2020 (latest edition with coordinates on NYC Open Data) &mdash; <a href="docs_v2/Dashboard_v2_Redesign_Working_Notes.md#11-school-location-dataset-vintage--full-provenance" target="_blank" rel="noopener">full provenance</a></div>
+                <div class="equity-count-breakdown">
+                  <div id="count-nycha"></div>
+                  <div id="count-school"></div>
+                  <div id="count-nycha-and-school"></div>
+                </div>
+                <div id="count-subway-gap" class="equity-count-separate"></div>
               </div>
-              <div id="count-subway-gap" class="equity-count-separate"></div>
             </div>
           </div>
         </details>
@@ -1759,7 +1749,7 @@
              path, which this dashboard treats as "don't show it," not
              "show it anyway." -->
         <details id="reliability-capacity-accordion">
-          <summary class="planner-section-title accordion-toggle" id="reliability-capacity-toggle">What predicts reliability (patterns, not proof)</summary>
+          <summary class="planner-section-title accordion-toggle" id="reliability-capacity-toggle">Reliability patterns</summary>
           <div class="planner-section-body" id="reliability-capacity-content">
             <div id="reliability-capacity-sentences"></div>
             <table>
@@ -1773,8 +1763,7 @@
         <section class="planner-section" id="weather-accordion">
           <h3 class="planner-section-title">Weather scenario</h3>
           <div class="planner-section-body" id="weather-scenario-wrap">
-            <select id="weather-preset-select"></select>
-            <div class="map-tie-in-cue">In Historical mode: the map recolors live as you adjust these &mdash; no separate toggle needed.</div>
+            <div id="weather-preset-pills"></div>
             <div class="scenario-planner-slider">
               <label for="weather-temp-slider">Temperature: <span id="weather-temp-value">72</span>&deg;F</label>
               <input type="range" id="weather-temp-slider" min="0" max="90" step="1" value="72">
@@ -1783,7 +1772,6 @@
               <label for="weather-precip-slider">Precipitation: <span id="weather-precip-value">0.0</span> in</label>
               <input type="range" id="weather-precip-slider" min="0" max="1" step="0.05" value="0">
             </div>
-            <div id="weather-scenario-status"></div>
             <!-- Session 70: was a permanent 4-sentence paragraph in prime,
                  always-visible space -- the same shape of problem as Dock
                  Fill's old caption. Kept the one sentence that matters most
@@ -2616,7 +2604,7 @@ function renderEquityCounts() {
   document.getElementById('count-school').textContent =
     `Within school threshold: ${counts.schoolCount.toLocaleString()} of ${total} stations`;
   document.getElementById('count-nycha-or-school').textContent =
-    `NYCHA or school (combined): ${counts.nychaOrSchoolCount.toLocaleString()} of ${total} stations`;
+    `${counts.nychaOrSchoolCount.toLocaleString()} of ${total}`;
   document.getElementById('count-nycha-and-school').textContent =
     `NYCHA and school (overlap): ${counts.nychaAndSchoolCount.toLocaleString()} of ${total} stations`;
   document.getElementById('count-subway-gap').textContent =
@@ -3006,11 +2994,11 @@ function distributionKeyLabels(live) {
   const [t0, t1, t2, t3] = distributionHistoricalThresholds();
   const mag = v => Math.abs(v).toFixed(1);
   return [
-    `big deficit — heading toward empty fastest (${mag(t0)}+/day)`,
-    `deficit — heading toward empty (${mag(t1)}–${mag(t0)}/day)`,
-    `near balanced (within ${mag(t2)}/day)`,
-    `surplus — heading toward full (${mag(t2)}–${mag(t3)}/day)`,
-    `big surplus — heading toward full fastest (${mag(t3)}+/day)`,
+    `Big deficit — heading toward empty fastest (${mag(t0)}+/day)`,
+    `Deficit — heading toward empty (${mag(t1)}–${mag(t0)}/day)`,
+    `Near balanced (within ${mag(t2)}/day)`,
+    `Surplus — heading toward full (${mag(t2)}–${mag(t3)}/day)`,
+    `Big surplus — heading toward full fastest (${mag(t3)}+/day)`,
   ];
 }
 
@@ -3997,23 +3985,6 @@ function renderDiffBar() {
   const differs = scenarioStateDiffersFromDefault();
   badge.classList.toggle('hidden', !differs);
 
-  // Session 70: this used to ALSO show whenever the panel was merely
-  // expanded, even with nothing changed from baseline -- since the panel
-  // is expanded by default, every fresh page load showed three "No
-  // change" pills plus Reset/Share buttons before a reviewer had touched
-  // anything, exactly the kind of front-loaded noise this project keeps
-  // finding and trimming elsewhere (Dock Fill's old 3-sentence caption,
-  // the amber banner). The bar's real job -- a persistent cue that
-  // survives collapsing the panel after making a change -- only needs
-  // "differs from baseline"; open/closed was never actually load-bearing
-  // for that job, just an extra condition that added noise on the common
-  // (untouched) path.
-  if (!differs) {
-    bar.classList.add('hidden');
-    return;
-  }
-  bar.classList.remove('hidden');
-
   // Plain-English synthesis (template-built, not an LLM call) -- one
   // clause per section that actually differs from baseline, collected
   // here as each section below computes its own numbers, then joined at
@@ -4196,7 +4167,9 @@ function applyScenarioState(loaded) {
     };
     const tempF = Math.round(loaded.weatherScenario.temp_c * 9 / 5 + 32);
     const precipIn = mmToInches(loaded.weatherScenario.precip_mm);
-    document.getElementById('weather-preset-select').value = knownPresetId || '';
+    document.querySelectorAll('.weather-preset-pill').forEach(b => {
+      b.classList.toggle('active', b.dataset.presetId === knownPresetId);
+    });
     document.getElementById('weather-temp-slider').value = String(tempF);
     document.getElementById('weather-temp-value').textContent = String(tempF);
     document.getElementById('weather-precip-slider').value = precipIn.toFixed(2);
@@ -4416,14 +4389,15 @@ function matchingWeatherPreset() {
 // number is projected -- that job now belongs to the tiles themselves,
 // site-wide, not just here.
 function renderWeatherScenarioStatus() {
-  const statusEl = document.getElementById('weather-scenario-status');
+  const noteEl = document.getElementById('weather-scenario-note');
+  if (!noteEl) return;
   if (isBaselineWeatherScenario()) {
-    statusEl.textContent = 'Currently showing: baseline (no adjustment).';
+    noteEl.textContent = 'Estimated from historical elasticity, not a weather-specific model.';
     return;
   }
   const preset = matchingWeatherPreset();
-  const label = preset ? preset.label : 'Custom scenario';
-  statusEl.textContent = `Currently showing: ${label} (projected, not baseline).`;
+  const label = preset ? preset.label : 'Custom';
+  noteEl.textContent = `${label} — projected via historical elasticity.`;
 }
 
 // The single source of truth for one marker's full visual style, given the
@@ -5096,13 +5070,13 @@ function renderLegendScale() {
 
   if (state.mode === 'live') {
     title.textContent = 'Dock Fill';
-    low.textContent = '0% full';
+    low.textContent = '0% Full';
     // Session 61: the middle tick was the literal string "0" hardcoded in the
     // markup and never touched by this function, so live mode read
     // "0% full / 0 / 100% full" -- a zero sitting between two percentages,
     // meaning nothing. The midpoint of a fill scale is 50%.
     mid.textContent = '50%';
-    high.textContent = '100% full';
+    high.textContent = '100% Full';
     caption.textContent = 'Click a station for its live status';
     // Session 66: this early return skipped the historical branch's own
     // title update below entirely, so #legend-card's title attribute kept
@@ -5683,36 +5657,36 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     state.scenarioPresets = scenarioPresetsPayload;
     if (state.elasticities && state.scenarioPresets) {
       document.getElementById('weather-accordion').classList.remove('hidden');
-      const presetSelect = document.getElementById('weather-preset-select');
+      const pillsContainer = document.getElementById('weather-preset-pills');
       const tempSlider = document.getElementById('weather-temp-slider');
       const tempValueEl = document.getElementById('weather-temp-value');
       const precipSlider = document.getElementById('weather-precip-slider');
       const precipValueEl = document.getElementById('weather-precip-value');
 
-      // Options built from scenario_presets.json's own preset list, never a
-      // hardcoded static markup list -- the exact same fix applied to the
-      // period selector (see periodSelect below) applied here after a real
-      // gap was found: the static HTML only ever had ideal/rain_day/snow_day,
-      // so hot_day (Session 43) would have been silently unreachable in the
-      // dropdown despite existing in the real data file.
-      presetSelect.innerHTML = '';
+      pillsContainer.innerHTML = '';
       for (const preset of state.scenarioPresets.presets) {
-        const opt = document.createElement('option');
-        opt.value = preset.id;
-        opt.textContent = preset.id === state.scenarioPresets.reference_preset_id
-          ? `${preset.label} (baseline)`
-          : preset.label;
-        presetSelect.appendChild(opt);
+        const btn = document.createElement('button');
+        btn.className = 'weather-preset-pill';
+        btn.dataset.presetId = preset.id;
+        btn.textContent = preset.label;
+        pillsContainer.appendChild(btn);
+      }
+
+      function syncWeatherPills() {
+        const activeId = state.scenarioState.weatherScenario.presetId;
+        pillsContainer.querySelectorAll('.weather-preset-pill').forEach(b => {
+          b.classList.toggle('active', b.dataset.presetId === activeId);
+        });
       }
 
       const initialScenario = state.scenarioState.weatherScenario;
-      presetSelect.value = initialScenario.presetId;
       const initialTempF = Math.round(initialScenario.temp_c * 9 / 5 + 32);
       tempSlider.value = String(initialTempF);
       tempValueEl.textContent = String(initialTempF);
       const initialPrecipIn = mmToInches(initialScenario.precip_mm);
       precipSlider.value = initialPrecipIn.toFixed(2);
       precipValueEl.textContent = initialPrecipIn.toFixed(1);
+      syncWeatherPills();
       renderWeatherScenarioStatus();
 
       let weatherRafScheduled = false;
@@ -5721,7 +5695,8 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
           weatherRafScheduled = true;
           requestAnimationFrame(() => {
             renderHour(state.currentHour);
-            updateStatusMessage(); // keeps live-mode coverage in sync; harmless in historical mode
+            updateStatusMessage();
+            syncWeatherPills();
             renderWeatherScenarioStatus();
             renderDiffBar();
             weatherRafScheduled = false;
@@ -5729,8 +5704,10 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
         }
       }
 
-      presetSelect.addEventListener('change', event => {
-        const preset = state.scenarioPresets.presets.find(p => p.id === event.target.value);
+      pillsContainer.addEventListener('click', event => {
+        const btn = event.target.closest('.weather-preset-pill');
+        if (!btn) return;
+        const preset = state.scenarioPresets.presets.find(p => p.id === btn.dataset.presetId);
         if (!preset) return;
         state.scenarioState.weatherScenario = {
           temp_c: preset.temp_c, precip_mm: preset.precip_mm, presetId: preset.id,
@@ -5748,6 +5725,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
         const f = Number(event.target.value);
         tempValueEl.textContent = String(f);
         state.scenarioState.weatherScenario.temp_c = fahrenheitToCelsius(f);
+        state.scenarioState.weatherScenario.presetId = null;
         scheduleWeatherRerender();
       });
 
@@ -5755,6 +5733,7 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
         const inches = Number(event.target.value);
         precipValueEl.textContent = inches.toFixed(1);
         state.scenarioState.weatherScenario.precip_mm = inchesToMm(inches);
+        state.scenarioState.weatherScenario.presetId = null;
         scheduleWeatherRerender();
       });
     } else {
@@ -6027,6 +6006,17 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     }
     wireEquitySlider('nycha-school-slider', 'nycha-school-value', 'nycha_school_m');
     wireEquitySlider('subway-gap-slider', 'subway-gap-value', 'subway_gap_m');
+
+    const breakdownToggle = document.getElementById('equity-breakdown-toggle');
+    const breakdownCollapse = document.getElementById('equity-breakdown-collapse');
+    if (breakdownToggle && breakdownCollapse) {
+      breakdownToggle.addEventListener('click', () => {
+        const open = !breakdownCollapse.classList.contains('hidden');
+        breakdownCollapse.classList.toggle('hidden', open);
+        breakdownToggle.textContent = open ? '▶ View breakdown' : '▼ Hide breakdown';
+        breakdownToggle.setAttribute('aria-expanded', String(!open));
+      });
+    }
 
     // Attached once, directly on the (never-replaced) <svg> element -- its
     // children get rebuilt by updateStationDetail()'s innerHTML assignment,

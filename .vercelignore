@@ -25,6 +25,6 @@ notebooks/
 # "compare to reference" work -- not linked from dashboard.html.
 reference/
 
-# README screenshot and working notes -- GitHub-facing only.
+# README screenshot -- GitHub-facing only. (docs_v2/ is NOT excluded:
+# dashboard.html links to its working notes as the "full provenance" page.)
 docs/
-docs_v2/

@@ -2,25 +2,25 @@
   "presets": [
     {
       "id": "rain_day",
-      "label": "Steady rain",
+      "label": "Steady Rain",
       "temp_c": 15.6,
       "precip_mm": 10.2
     },
     {
       "id": "snow_day",
-      "label": "Snow event",
+      "label": "Snow Event",
       "temp_c": -2.2,
       "precip_mm": 7.6
     },
     {
       "id": "ideal",
-      "label": "Ideal riding weather",
+      "label": "Ideal Riding Weather",
       "temp_c": 22.2,
       "precip_mm": 0.0
     },
     {
       "id": "hot_day",
-      "label": "Hot day",
+      "label": "Hot Day",
       "temp_c": 31.0,
       "precip_mm": 0.0
     }

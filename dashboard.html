@@ -261,6 +261,22 @@
   #map-col { flex: 1; min-width: 0; position: relative; background: #f9f9f7; }
   #map { position: absolute; inset: 0; }
 
+  /* Loading skeleton shown while flows.json fetches */
+  #map-skeleton {
+    position: absolute; inset: 0; z-index: 400;
+    background: #f9f9f7;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; pointer-events: none;
+  }
+  #map-skeleton-spinner {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 3px solid #e6e5e1; border-top-color: #c9832b;
+    animation: map-spin 0.8s linear infinite;
+  }
+  #map-skeleton-text { font-size: 13px; color: #666057; }
+  @keyframes map-spin { to { transform: rotate(360deg); } }
+
+
   /* Map controls, floating top-left on the map itself -- reuses the same
      compact classes (.segmented.compact, .hour-control.compact)
      built for the sidebar toolbar version, so this is
@@ -517,11 +533,11 @@
   .priority-stop-rank { font: 700 11px ui-monospace, "SF Mono", Menlo, monospace; color: #898781; align-self: center; }
   .priority-stop-name-wrap { display: flex; align-items: center; gap: 5px; min-width: 0; }
   .priority-stop-name-wrap .worst-name { min-width: 0; }
-  .priority-stop-equity-badge { flex: none; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 7px; background: #f0dfc0; color: #8a5a1f; text-transform: uppercase; letter-spacing: 0.02em; }
+  .priority-stop-equity-badge { flex: none; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 7px; background: #dff0e8; color: #1a5c2e; text-transform: uppercase; letter-spacing: 0.02em; }
   /* Session 72: neutral gray, not the amber pill every other badge here
      uses -- reuses #f3f2f0/#666057, this file's existing muted-chip
      tones (see .worst button:hover), not a new color. */
-  .priority-stop-revisit-badge { flex: none; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 7px; background: #f3f2f0; color: #666057; text-transform: uppercase; letter-spacing: 0.02em; }
+  .priority-stop-revisit-badge { flex: none; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 7px; background: #f3f2f0; color: #666057; text-transform: uppercase; letter-spacing: 0.02em; }
   .priority-stop-trail { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
   .priority-stop-action { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px; background: #f0dfc0; color: #8a5a1f; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
   .priority-stops-caption { padding: 10px 14px; font-size: 11px; color: #666057; line-height: 1.4; border-bottom: 1px solid #f0ede7; }
@@ -531,7 +547,7 @@
     font-size: 12px; font-weight: 600; color: #0b0b0b; cursor: pointer;
     border-top: 1px solid #ece9e3; margin-top: 8px;
   }
-  #priority-equity-toggle { margin: 0; accent-color: #c9832b; }
+  #priority-equity-toggle { margin: 0; accent-color: #1a5c2e; }
   #priority-equity-note { padding: 3px 14px 10px; font-size: 10.5px; color: #898781; line-height: 1.4; border-bottom: 1px solid #f0ede7; }
 
   #equity-gap-body { padding: 12px 14px 4px; font-size: 12px; color: #0b0b0b; line-height: 1.6; }
@@ -749,7 +765,7 @@
   .equity-count-breakdown { padding-left: 12px; color: #666057; font-size: 11px; line-height: 1.6; }
   .equity-count-separate { margin-top: 8px; padding-top: 8px; border-top: 1px solid #f3f2f0; }
   #equity-vintage-note { margin: 4px 0 8px; color: #898781; font-size: 10.5px; font-style: italic; }
-  #equity-vintage-note a { color: #8a5a1f; font-style: normal; }
+  #equity-vintage-note a { color: #1a5c2e; font-style: normal; }
   #fleet-stats { margin-top: 6px; color: #52514e; line-height: 1.6; font-size: 12px; }
   /* #detail-context-note is a genuine short caption (one real sentence) --
      italic still reads fine there. #fleet-sim-note is a real multi-sentence
@@ -787,7 +803,7 @@
   .weather-preset-pill.active { background: #185FA5; color: #fff; border-color: #185FA5; }
   .equity-count-big { font-size: 19px; font-weight: 700; color: #0b0b0b; line-height: 1.1; margin: 8px 0 2px; }
   .equity-count-big-label { font-size: 11px; color: #666057; margin-bottom: 6px; }
-  #equity-breakdown-toggle { font-size: 11px; color: #8a5a1f; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+  #equity-breakdown-toggle { font-size: 11px; color: #1a5c2e; cursor: pointer; background: none; border: none; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
 
   /* Equity thresholds / Fleet simulator / Weather scenario / Save-load-reset
      are now four independently collapsible accordions (matching the
@@ -839,7 +855,7 @@
      sits inside a plain .planner-section, not an .accordion. */
   #equity-accordion-toggle { padding: 0; background: none; font-size: 12px; }
   #equity-accordion-toggle:hover { background: none; color: #0b0b0b; }
-  .accordion-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; background: #f0dfc0; color: #8a5a1f; margin-left: 8px; }
+  .accordion-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 10px; background: #dff0e8; color: #1a5c2e; margin-left: 8px; }
   .accordion-content { padding: 0 14px 14px; }
 
   /* Scenario-vs-baseline card: replaces the old plain-text diff bar with
@@ -855,7 +871,10 @@
   .scenario-card-head-actions { display: flex; gap: 6px; }
   .scenario-card-title { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #52514e; }
   .share-btn { font: inherit; font-size: 12px; font-weight: 700; padding: 7px 14px; border-radius: 16px; border: 1px solid #d8d7d3; background: #f3f2ee; color: #0b0b0b; cursor: pointer; }
-  #preset-url-output { width: 100%; box-sizing: border-box; font: inherit; font-size: 11px; padding: 6px 8px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; margin-bottom: 12px; }
+  #preset-url-wrap { display: flex; gap: 6px; align-items: center; margin-bottom: 12px; }
+  #preset-url-output { flex: 1; box-sizing: border-box; font: inherit; font-size: 11px; padding: 6px 8px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; min-width: 0; }
+  #copy-preset-url-btn { flex: none; }
+  #copy-preset-url-btn:disabled { opacity: 0.45; cursor: default; }
 
   .scenario-row { margin-bottom: 16px; }
   .scenario-row:last-child { margin-bottom: 0; }
@@ -1266,6 +1285,10 @@
 
   <div id="map-col">
     <div id="map"></div>
+    <div id="map-skeleton" aria-hidden="true">
+      <div id="map-skeleton-spinner"></div>
+      <div id="map-skeleton-text">Loading stations…</div>
+    </div>
   </div>
 
   <!-- Map controls, Legend, and Station detail are now direct children of
@@ -1585,7 +1608,7 @@
               <button id="save-preset-btn" class="share-btn">Share</button>
             </div>
           </div>
-          <input type="text" id="preset-url-output" readonly placeholder="Shareable link appears here after Share">
+          <div id="preset-url-wrap"><input type="text" id="preset-url-output" readonly placeholder="Shareable link appears here after Share"><button id="copy-preset-url-btn" class="share-btn" disabled>Copy</button></div>
 
           <!-- Design critique task 04: bars now encode the DELTA from
                baseline, zero-centered on a real per-row domain -- not an
@@ -1922,15 +1945,15 @@
           <dl>
             <dt>Double-outage</dt>
             <dd>A station with 0 bikes or 0 docks that also has another empty/full station within 500 m &mdash; a compounding failure, not just one broken station.</dd>
-            <dt>Net daily flow</dt>
+            <dt>Net Daily Flow</dt>
             <dd>A station's average net arrivals minus departures at a given hour, in bikes/day &mdash; averaged across the days observed, not a 24-hour total.</dd>
             <dt>Elasticity</dt>
             <dd>How much a station's bike flow shifts with temperature and precipitation, fit from a real regression against a full year of historical weather and ridership.</dd>
-            <dt>Equity gap</dt>
+            <dt>Equity Gap</dt>
             <dd>How much worse live service is at stations near NYCHA housing, schools, or far from a subway, compared with other stations right now.</dd>
             <dt>Typology</dt>
             <dd>A station's behavioral archetype &mdash; e.g. &ldquo;Commuter core&rdquo; or &ldquo;Residential feeder&rdquo; &mdash; from clustering real hourly flow patterns, not from neighborhood or borough.</dd>
-            <dt>Service availability (now)</dt>
+            <dt>Service Availability (Now)</dt>
             <dd>The share of stations not currently in double-outage &mdash; an instant reading, not the 60-minute measurement the underlying contract actually defines.</dd>
           </dl>
         </div>
@@ -4202,10 +4225,30 @@ function resetToBaseline() {
 
 const PRESET_QUERY_PARAM = 'scenario';
 
+const VIEW_QUERY_PARAM = 'view';
+
 function buildShareableUrl() {
   const encoded = encodeURIComponent(JSON.stringify(state.scenarioState));
+  const view = encodeURIComponent(JSON.stringify({
+    mode: state.mode,
+    hour: state.currentHour,
+    dayType: state.dayType,
+    period: state.period,
+    selectedId: state.selectedId || undefined,
+  }));
   const base = (typeof location !== 'undefined' && location.origin) ? `${location.origin}${location.pathname}` : '';
-  return `${base}?${PRESET_QUERY_PARAM}=${encoded}`;
+  return `${base}?${PRESET_QUERY_PARAM}=${encoded}&${VIEW_QUERY_PARAM}=${view}`;
+}
+
+function parseViewParam(search) {
+  if (!search) return null;
+  const marker = `${VIEW_QUERY_PARAM}=`;
+  const idx = search.indexOf(marker);
+  if (idx === -1) return null;
+  let raw = search.slice(idx + marker.length);
+  const amp = raw.indexOf('&');
+  if (amp !== -1) raw = raw.slice(0, amp);
+  try { return JSON.parse(decodeURIComponent(raw)); } catch (e) { return null; }
 }
 
 // Accepts either a full shared URL (extracts the ?scenario= param) or a
@@ -5777,6 +5820,20 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     // itself already guards each section independently.
     document.getElementById('save-preset-btn').addEventListener('click', () => {
       document.getElementById('preset-url-output').value = buildShareableUrl();
+      document.getElementById('copy-preset-url-btn').disabled = false;
+    });
+    document.getElementById('copy-preset-url-btn').addEventListener('click', () => {
+      const url = document.getElementById('preset-url-output').value;
+      if (!url) return;
+      const btn = document.getElementById('copy-preset-url-btn');
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => {
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        }).catch(() => { document.getElementById('preset-url-output').select(); });
+      } else {
+        document.getElementById('preset-url-output').select();
+      }
     });
     document.getElementById('load-preset-btn').addEventListener('click', () => {
       const loaded = parsePresetInput(document.getElementById('preset-load-input').value);
@@ -5852,7 +5909,8 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
 
     drawLegendGradient(state.domainMax);
     renderHour(state.currentHour); // sets initial title/legend/slider text consistently with the markers just drawn
-    if (flowsResult.isDemo) showDemoBanner(describeFetchError(flowsResult.error)); // must run before updateStatusMessage() so the banner isn't hidden immediately after being shown
+    document.getElementById('map-skeleton').style.display = 'none';
+        if (flowsResult.isDemo) showDemoBanner(describeFetchError(flowsResult.error)); // must run before updateStatusMessage() so the banner isn't hidden immediately after being shown
     updateStatusMessage();
     setDetailVisible(false); // explicit, not just relying on the static HTML markup's class="hidden" to already match -- same standing fix as Sessions 19/20A/20B/21
     setDetailMoreInfoExpanded(false);
@@ -5910,6 +5968,24 @@ const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticit
     setMode('historical');
     wireRadiogroup(document.getElementById('mode-toggle'), ['mode-historical', 'mode-live']);
     positionFloatingMapControls(); // real map width wasn't known until layout settled just above
+
+    // Restore view state from a shareable URL (?view= param) after all
+    // init is complete so setMode/setDayType/setPeriod run in the right order.
+    if (typeof location !== 'undefined' && location.search) {
+      const viewState = parseViewParam(location.search);
+      if (viewState) {
+        if (viewState.mode === 'live' && state.liveAvailable) setMode('live');
+        if (typeof viewState.hour === 'number' && viewState.hour >= 0 && viewState.hour <= 23) {
+          document.getElementById('hour-slider').value = String(viewState.hour);
+          renderHour(viewState.hour);
+        }
+        if (viewState.dayType === 'weekday' || viewState.dayType === 'weekend') setDayType(viewState.dayType);
+        if (typeof viewState.period === 'string') setPeriod(viewState.period);
+        if (typeof viewState.selectedId === 'string' && state.stations && state.stations[viewState.selectedId]) {
+          selectStation(viewState.selectedId);
+        }
+      }
+    }
 
     // Session 68: delegated on the parent, not the (re-rendered-from-scratch
     // every renderDistribution() call) [data-bin] children themselves -- a

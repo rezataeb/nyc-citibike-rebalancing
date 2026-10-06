@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="data:," />
+  <title>Citi Bike Dashboard Redesign Mockup</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap');
+    :root{
+      color-scheme:light dark;
+      --bg:#f2f3ef;--panel:#ffffff;--panel-2:#f7f8f5;--ink:#142019;--muted:#59645d;--line:#d8ded8;
+      --green:#08783e;--green-soft:#e4f4ea;--lime:#b8dd2a;--amber:#d17705;--red:#b9332a;--blue:#176eb5;
+      --shadow:0 12px 30px rgba(16,34,24,.08);--radius:14px;
+    }
+    @media(prefers-color-scheme:dark){:root{
+      --bg:#0d130f;--panel:#151c17;--panel-2:#1b231d;--ink:#edf4ee;--muted:#aeb9b1;--line:#344039;
+      --green:#62d68f;--green-soft:#193526;--lime:#c6e85a;--amber:#f0ab45;--red:#ef766d;--blue:#71b8ec;
+      --shadow:0 14px 36px rgba(0,0,0,.26)
+    }}
+    *{box-sizing:border-box}html{background:var(--bg)}body{margin:0;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;font-size:14px;line-height:1.45}
+    button,input{font:inherit}button{color:inherit}.shell{max-width:1580px;margin:auto;padding:20px}.topline{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:16px}.topline h1{font-size:26px;line-height:1.1;margin:0 0 6px;letter-spacing:-.04em}.subline{display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:12px}.demo-tag{font:500 10px/1 DM Mono,monospace;letter-spacing:.08em;text-transform:uppercase;padding:6px 8px;border:1px solid var(--line);border-radius:4px}.fresh{display:inline-flex;gap:6px;align-items:center}.fresh:before{content:"";width:7px;height:7px;background:var(--green);border-radius:50%;box-shadow:0 0 0 3px var(--green-soft)}
+    .mode{display:flex;background:var(--panel);padding:4px;border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow)}.mode button{border:0;background:transparent;padding:9px 13px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}.mode button.active{background:var(--ink);color:var(--panel)}
+    .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}.tile{position:relative;background:var(--panel);border:1px solid var(--line);padding:15px 16px 13px;border-radius:10px;min-height:116px}.tile-label{font:500 10px/1.2 DM Mono,monospace;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:flex;align-items:center;gap:7px}.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}.tile:nth-child(3) .dot{background:var(--amber)}.tile:nth-child(4) .dot{background:var(--red)}.tile-value{font-size:32px;font-weight:700;letter-spacing:-.05em;line-height:1;margin:13px 0 8px}.tile-note{color:var(--muted);font-size:11px;padding-right:58px}.projection{position:absolute;right:10px;bottom:10px;font:500 9px/1 DM Mono,monospace;letter-spacing:.05em;text-transform:uppercase;padding:5px 6px;border-radius:4px;color:var(--green);background:var(--green-soft);display:none}.projected .projection{display:block}
+    .layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(350px,.75fr);gap:12px;align-items:start}.maincol,.sidecol{display:grid;gap:12px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--line)}.panel-head h2{font-size:14px;margin:0;letter-spacing:-.015em}.panel-head p{margin:2px 0 0;color:var(--muted);font-size:11px}.pill{font:500 9px/1 DM Mono,monospace;text-transform:uppercase;letter-spacing:.05em;padding:6px 7px;border:1px solid var(--line);border-radius:999px;white-space:nowrap}.pill.live{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,var(--line));background:var(--green-soft)}
+    .network-wrap{position:relative;min-height:520px;background:var(--panel-2);overflow:hidden}.network{display:grid;grid-template-columns:repeat(10,1fr);grid-template-rows:repeat(8,1fr);gap:8px;padding:34px;min-height:520px;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:68px 68px;background-position:8px 8px}.station{width:24px;height:24px;border-radius:50%;border:3px solid var(--panel);box-shadow:0 2px 8px rgba(0,0,0,.22);cursor:pointer;position:relative;z-index:2;transition:transform .15s,opacity .15s}.station:hover,.station:focus-visible{transform:scale(1.28);outline:2px solid var(--ink);outline-offset:2px}.station.low{background:var(--red)}.station.watch{background:var(--amber)}.station.good{background:var(--green)}.station.full{background:var(--blue)}.station.dim{opacity:.14}.station::after{content:"";position:absolute;width:26px;height:3px;background:color-mix(in srgb,var(--ink) 16%,transparent);left:18px;top:9px;z-index:-1}.s1{grid-area:1/2}.s2{grid-area:1/5}.s3{grid-area:1/8}.s4{grid-area:2/3}.s5{grid-area:2/6}.s6{grid-area:2/9}.s7{grid-area:3/1}.s8{grid-area:3/4}.s9{grid-area:3/7}.s10{grid-area:3/10}.s11{grid-area:4/2}.s12{grid-area:4/5}.s13{grid-area:4/8}.s14{grid-area:5/3}.s15{grid-area:5/6}.s16{grid-area:5/9}.s17{grid-area:6/1}.s18{grid-area:6/4}.s19{grid-area:6/7}.s20{grid-area:6/10}.s21{grid-area:7/2}.s22{grid-area:7/5}.s23{grid-area:7/8}.s24{grid-area:8/4}.s25{grid-area:8/7}.map-veil{position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,rgba(255,255,255,.04),transparent)}.geo-note{position:absolute;left:14px;bottom:14px;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:8px 10px;color:var(--muted);font-size:10px;max-width:280px}.tip{position:absolute;z-index:4;width:215px;background:var(--ink);color:var(--panel);padding:12px;border-radius:8px;box-shadow:var(--shadow);display:none}.tip.show{display:block}.tip strong{display:block;margin-bottom:4px}.tip span{font-size:11px;opacity:.8}.tip-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:9px}.tip-grid b{font:500 12px DM Mono,monospace}
+    .legend{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}.band{border:0;background:var(--panel);padding:12px 10px;text-align:left;cursor:pointer;border-right:1px solid var(--line)}.band:last-child{border-right:0}.band.active{background:var(--panel-2)}.band-k{font:500 9px DM Mono,monospace;text-transform:uppercase;color:var(--muted)}.band-v{font-size:16px;font-weight:700;margin:4px 0}.band-desc{font-size:10px;color:var(--muted)}
+    .micro-explain{padding:10px 16px;border-top:1px solid var(--line);font-size:10px;color:var(--muted)}
+    .planner{padding:16px}.planner-intro{font-size:12px;color:var(--muted);margin:0 0 13px}.presets{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.preset{border:1px solid var(--line);background:var(--panel-2);border-radius:7px;padding:9px 6px;cursor:pointer;font-weight:700;font-size:11px}.preset.active{background:var(--ink);color:var(--panel);border-color:var(--ink)}.control{margin-top:16px}.control-line{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}.control label{font-weight:700;font-size:11px}.mono{font:500 11px DM Mono,monospace}.control input[type=range]{width:100%;accent-color:var(--green)}.scale{display:flex;justify-content:space-between;color:var(--muted);font-size:9px}.checkline{margin-top:14px;background:var(--panel-2);padding:10px;border-radius:7px;display:flex;gap:9px;align-items:flex-start}.checkline input{margin-top:3px;accent-color:var(--green)}.checkline strong{font-size:11px;display:block}.checkline span{font-size:9px;color:var(--muted);display:block;margin-top:2px}.impact{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:7px;overflow:hidden;margin-top:14px}.impact>div{background:var(--panel-2);padding:9px}.impact small{display:block;color:var(--muted);font-size:9px}.impact b{font:500 13px DM Mono,monospace}.reset{width:100%;border:1px solid var(--line);background:transparent;border-radius:7px;padding:9px;margin-top:12px;cursor:pointer;color:var(--muted);font-weight:700;font-size:11px}
+    .tabs{display:flex;gap:5px}.tabs button{border:1px solid var(--line);background:transparent;border-radius:6px;padding:5px 8px;font-size:10px;font-weight:700;cursor:pointer}.tabs button.active{background:var(--ink);color:var(--panel);border-color:var(--ink)}.stops{padding:5px 15px 13px}.stop{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:9px;padding:11px 0;border-bottom:1px solid var(--line)}.stop:last-child{border:0}.rank{width:24px;height:24px;border-radius:50%;background:var(--panel-2);display:grid;place-items:center;font:500 10px DM Mono,monospace}.stop strong{font-size:11px;display:block}.stop span{font-size:9px;color:var(--muted)}.move{text-align:right}.move b{font:500 11px DM Mono,monospace;color:var(--green);display:block}.move span{font-size:9px}.fleet{padding:11px 15px 14px;border-top:1px solid var(--line)}.fleet .control{margin-top:0}
+    details{border-top:1px solid var(--line)}summary{list-style:none;cursor:pointer;padding:14px 16px;font-weight:700;font-size:11px;display:flex;justify-content:space-between}summary::-webkit-details-marker{display:none}summary:after{content:"+";font:500 14px DM Mono,monospace}details[open] summary:after{content:"−"}.details-body{padding:0 16px 16px;color:var(--muted);font-size:11px}.details-body code{font-family:DM Mono,monospace;color:var(--ink)}
+    .tech{padding:16px 17px;display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.flow{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.node{border:1px solid var(--line);border-radius:6px;padding:8px 9px;font:500 10px DM Mono,monospace;background:var(--panel-2)}.arrow{color:var(--muted)}.tech ul{margin:0;padding-left:17px;color:var(--muted);font-size:11px}.tech li+li{margin-top:5px}
+    .mobile-nav{display:none}.footer-note{padding:16px 0 0;color:var(--muted);font-size:10px;text-align:center}
+    @media(max-width:980px){.layout{grid-template-columns:1fr}.sidecol{grid-row:1}.network-wrap,.network{min-height:480px}.tiles{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:620px){.shell{padding:12px}.topline{align-items:stretch;flex-direction:column}.mode{width:100%}.mode button{flex:1}.tiles{grid-template-columns:1fr 1fr;gap:7px}.tile{min-height:110px;padding:12px}.tile-value{font-size:27px}.tile-note{padding-right:0}.projection{position:static;display:none;width:max-content;margin-top:7px}.projected .projection{display:block}.layout{display:block}.maincol,.sidecol{display:block}.panel{margin-bottom:10px}.network-wrap,.network{min-height:390px}.network{grid-template-columns:repeat(7,1fr);grid-template-rows:repeat(8,1fr);padding:24px 20px;gap:5px;background-size:52px 52px}.station:nth-of-type(n+19){display:none}.legend{grid-template-columns:1fr 1fr}.band:nth-child(2){border-right:0}.band:nth-child(-n+2){border-bottom:1px solid var(--line)}.presets{grid-template-columns:1fr}.tech{grid-template-columns:1fr}.panel-head{padding:13px}.geo-note{right:12px;max-width:none}.tip{width:190px}.footer-note{padding-bottom:10px}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="topline">
+    <div>
+      <h1>Operations snapshot</h1>
+      <div class="subline"><span class="demo-tag">Interactive prototype</span><span class="fresh">Sample station data · 8:42 AM</span></div>
+    </div>
+    <div class="mode" role="group" aria-label="Data mode">
+      <button type="button" data-mode="live" class="active" aria-pressed="true">Live docks</button>
+      <button type="button" data-mode="history" aria-pressed="false">Historical flow</button>
+    </div>
+  </header>
+
+  <section class="tiles" aria-label="Network overview">
+    <article class="tile"><div class="tile-label"><i class="dot"></i>Stations online</div><div class="tile-value" data-metric="online">1,978</div><div class="tile-note">of 2,041 reporting</div><span class="projection">Projected</span></article>
+    <article class="tile"><div class="tile-label"><i class="dot"></i>Bikes available</div><div class="tile-value" data-metric="bikes">22.4k</div><div class="tile-note">across reporting stations</div><span class="projection">Projected</span></article>
+    <article class="tile"><div class="tile-label"><i class="dot"></i>May run empty</div><div class="tile-value" data-metric="empty">102</div><div class="tile-note">within the next 2 hours</div><span class="projection">Projected</span></article>
+    <article class="tile"><div class="tile-label"><i class="dot"></i>May fill up</div><div class="tile-value" data-metric="full">35</div><div class="tile-note">within the next 2 hours</div><span class="projection">Projected</span></article>
+  </section>
+
+  <section class="layout">
+    <div class="maincol">
+      <section class="panel" aria-labelledby="field-title">
+        <div class="panel-head"><div><h2 id="field-title">Network pressure</h2><p id="field-sub">Current dock fill, with a 2-hour projection</p></div><span class="pill live" id="field-pill">Live + projected</span></div>
+        <div class="network-wrap">
+          <div class="network" id="network" aria-label="Abstract sample station network; select a point for details"></div>
+          <div class="map-veil"></div>
+          <div class="tip" id="tip" role="status" aria-live="polite"></div>
+          <div class="geo-note">Schematic station field for this prototype — the production build keeps the verified geographic map.</div>
+        </div>
+        <div class="legend" id="legend">
+          <button class="band" data-filter="low"><div class="band-k">0–10% full</div><div class="band-v"><span data-band="low">31</span> stations</div><div class="band-desc">Bike shortage</div></button>
+          <button class="band" data-filter="watch"><div class="band-k">11–30% full</div><div class="band-v"><span data-band="watch">71</span> stations</div><div class="band-desc">Watch</div></button>
+          <button class="band" data-filter="good"><div class="band-k">31–80% full</div><div class="band-v"><span data-band="good">1,623</span> stations</div><div class="band-desc">Balanced</div></button>
+          <button class="band" data-filter="full"><div class="band-k">81–100% full</div><div class="band-v"><span data-band="full">253</span> stations</div><div class="band-desc">Dock shortage</div></button>
+        </div>
+        <div class="micro-explain">The overview’s “may fill up” is a 2-hour forecast; these bands show current fill. They are related, not expected to match.</div>
+      </section>
+
+      <section class="panel" aria-labelledby="tech-title">
+        <div class="panel-head"><div><h2 id="tech-title">How the final build stays coherent</h2><p>One calculation path, many views — not separate panel logic.</p></div><span class="pill">Technical plan</span></div>
+        <div class="tech">
+          <div class="flow" aria-label="State flow diagram"><span class="node">snapshot</span><span class="arrow">→</span><span class="node">scenarioState</span><span class="arrow">→</span><span class="node">recompute()</span><span class="arrow">→</span><span class="node">tiles · field · stops</span></div>
+          <ul><li>Every changed value receives the same scenario ID and PROJECTED label.</li><li>Tile numbers remain text in the accessibility tree.</li><li>Mode and planner state are URL-safe inputs, not hidden component state.</li></ul>
+        </div>
+      </section>
+    </div>
+
+    <aside class="sidecol">
+      <section class="panel" aria-labelledby="planner-title">
+        <div class="panel-head"><div><h2 id="planner-title">Scenario planner</h2><p>Adjust the whole operating picture.</p></div><span class="pill live" id="scenario-label">Baseline</span></div>
+        <div class="planner">
+          <p class="planner-intro">Weather and fleet choices recompute the overview, station field, and route together in both modes.</p>
+          <div class="presets" role="group" aria-label="Weather presets">
+            <button class="preset active" data-preset="baseline">Baseline</button><button class="preset" data-preset="hot">Hot day</button><button class="preset" data-preset="rain">Rain</button>
+          </div>
+          <div class="control"><div class="control-line"><label for="temp">Temperature adjustment</label><output id="tempOut" class="mono">0°F</output></div><input id="temp" type="range" min="-15" max="15" value="0" step="1"><div class="scale"><span>−15°F</span><span>+15°F</span></div></div>
+          <div class="control"><div class="control-line"><label for="rain">Precipitation</label><output id="rainOut" class="mono">0.00 in</output></div><input id="rain" type="range" min="0" max="100" value="0" step="5"><div class="scale"><span>Dry</span><span>1.00 in</span></div></div>
+          <label class="checkline"><input id="equity" type="checkbox"><span><strong>Equity-weighted ranking</strong><span>Changes which stations enter the route — not only their order.</span></span></label>
+          <div class="impact"><div><small>Projected rides</small><b id="rides">98.2k</b></div><div><small>At-risk stations</small><b id="risk">137</b></div><div><small>Preventable misses</small><b id="miss">218</b></div></div>
+          <button class="reset" type="button" id="reset">Reset scenario</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="stops-title">
+        <div class="panel-head"><div><h2 id="stops-title">Priority truck stops</h2><p id="route-caption">Live route · current snapshot</p></div><div class="tabs" role="group" aria-label="Truck route"><button class="active" data-truck="1">Truck 1</button><button data-truck="2">Truck 2</button></div></div>
+        <div class="stops" id="stops"></div>
+        <div class="fleet"><div class="control"><div class="control-line"><label for="fleet">Fleet available</label><output id="fleetOut" class="mono">2 trucks</output></div><input id="fleet" type="range" min="1" max="4" value="2" step="1"><div class="scale"><span>1 truck</span><span>4 trucks</span></div></div></div>
+        <details><summary>Routing notes</summary><div class="details-body">Stops update from the same <code>recompute(mode, scenario)</code> result as the overview. The production version would use verified station records and travel-time constraints.</div></details>
+      </section>
+
+      <section class="panel"><details><summary>Data & caveats</summary><div class="details-body">This page is an interactive design prototype with sample values, not a live operations feed. It demonstrates the intended information architecture and cross-panel behavior before implementation against the real Citi Bike pipeline.</div></details></section>
+    </aside>
+  </section>
+  <div class="footer-note">Select a band to isolate stations. Select any station point for its projected pressure.</div>
+</main>
+<script>
+(() => {
+  const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+  const state = {mode:'live', preset:'baseline', temp:0, rain:0, equity:false, fleet:2, truck:1, filter:null};
+  const stations = Array.from({length:25}, (_,i)=>({
+    id:i+1, base:[8,24,48,86,65,19,92,38,13,74,29,57,83,6,43,78,21,96,34,69,15,54,88,27,61][i]
+  }));
+  function band(fill){return fill<=10?'low':fill<=30?'watch':fill<=80?'good':'full'}
+  function scenarioName(){return state.preset==='baseline'?'Baseline':state.preset==='hot'?'Hot day':'Rain'}
+  function delta(){return Math.round(state.temp*.55 - state.rain*.12 + (state.mode==='history'?3:0))}
+  function fillFor(s){return Math.max(1,Math.min(99,s.base+delta()+((s.id%4)-2)*Math.round(state.rain/28)))}
+  function metric(selector,value){document.querySelector(`[data-metric="${selector}"]`).textContent=value}
+  function renderStations(){
+    const net=$('#network'); net.innerHTML='';
+    stations.forEach((s,i)=>{const fill=fillFor(s), b=band(fill), btn=document.createElement('button');btn.className=`station ${b} s${i+1}${state.filter&&state.filter!==b?' dim':''}`;btn.setAttribute('aria-label',`Sample station ${String(s.id).padStart(3,'0')}, ${fill}% full`);btn.addEventListener('click',e=>showTip(e,s,fill,b));net.append(btn)})
+  }
+  function showTip(e,s,fill,b){const t=$('#tip');t.innerHTML=`<strong>Sample station ${String(s.id).padStart(3,'0')}</strong><span>${state.mode==='live'?'Current fill + two-hour pressure':'Typical AM flow'} · ${scenarioName()}</span><div class="tip-grid"><div><span>Dock fill</span><br><b>${fill}%</b></div><div><span>Status</span><br><b>${b==='low'?'Bike need':b==='full'?'Dock need':'Balanced'}</b></div></div>`;const rect=$('.network-wrap').getBoundingClientRect(), r=e.currentTarget.getBoundingClientRect();t.style.left=Math.min(rect.width-225,Math.max(8,r.left-rect.left+28))+'px';t.style.top=Math.min(rect.height-120,Math.max(8,r.top-rect.top-20))+'px';t.classList.add('show')}
+  function routeData(){
+    const hot=state.temp>5, wet=state.rain>30, eq=state.equity;
+    const a=state.truck===1?[
+      ['Sample 014 · East grid','Pick up',hot?'+11':'+8'],['Sample 007 · North grid','Drop off',wet?'−9':'−12'],[eq?'Sample 021 · Access zone':'Sample 019 · Central grid','Drop off','−7']
+    ]:[
+      ['Sample 004 · West grid','Drop off',hot?'−10':'−6'],['Sample 023 · South grid','Pick up',wet?'+12':'+9'],[eq?'Sample 011 · Access zone':'Sample 016 · East grid','Pick up','+6']
+    ]; return a;
+  }
+  function renderStops(){
+    $('#stops').innerHTML=routeData().map((x,i)=>`<div class="stop"><span class="rank">${i+1}</span><div><strong>${x[0]}</strong><span>${x[1]} bikes · ${6+i*3} min</span></div><div class="move"><b>${x[2]} bikes</b><span>${state.mode==='live'?'live need':'typical need'}</span></div></div>`).join('');
+  }
+  function render(){
+    const applied=state.preset!=='baseline'||state.temp!==0||state.rain!==0;
+    const d=delta(), rides=Math.max(61,98.2+state.temp*.62-state.rain*.21), risk=Math.max(58,137+Math.abs(d)*3+Math.round(state.rain*.18)), misses=Math.max(70,218+Math.abs(d)*6-state.fleet*9);
+    metric('online',state.mode==='live'?'1,978':'1,941'); metric('bikes',(22.4+d*.08).toFixed(1)+'k'); metric('empty',String(Math.max(38,102-d*2+Math.round(state.rain*.22)))); metric('full',String(Math.max(18,35+d+Math.round(state.rain*.08))));
+    $$('.tile').forEach((el,i)=>el.classList.toggle('projected',applied&&i>0));
+    const bands={low:31,watch:71,good:1623,full:253}; if(applied){bands.low+=Math.max(0,-d)+Math.round(state.rain/12);bands.watch+=Math.abs(d)*2;bands.good-=Math.abs(d)*4+Math.round(state.rain/10);bands.full+=Math.max(0,d)+Math.round(state.rain/20)}
+    Object.entries(bands).forEach(([k,v])=>$(`[data-band="${k}"]`).textContent=v.toLocaleString());
+    $('#rides').textContent=rides.toFixed(1)+'k';$('#risk').textContent=risk;$('#miss').textContent=misses;
+    $('#scenario-label').textContent=scenarioName();$('#route-caption').textContent=`${state.mode==='live'?'Live route · current snapshot':'Historical route · AM window'}${applied?' + '+scenarioName():''}`;
+    $('#field-sub').textContent=state.mode==='live'?'Current dock fill, with a 2-hour projection':'Typical AM flow, by station pressure';$('#field-pill').textContent=state.mode==='live'?'Live + projected':'Historical AM';
+    $('#tempOut').textContent=(state.temp>0?'+':'')+state.temp+'°F';$('#rainOut').textContent=(state.rain/100).toFixed(2)+' in';$('#fleetOut').textContent=state.fleet+' truck'+(state.fleet>1?'s':'');
+    renderStations();renderStops();
+  }
+  $$('.mode button').forEach(b=>b.onclick=()=>{state.mode=b.dataset.mode;$$('.mode button').forEach(x=>{x.classList.toggle('active',x===b);x.setAttribute('aria-pressed',x===b)});render()});
+  $$('.preset').forEach(b=>b.onclick=()=>{state.preset=b.dataset.preset;if(state.preset==='baseline'){state.temp=0;state.rain=0}else if(state.preset==='hot'){state.temp=12;state.rain=0}else{state.temp=-4;state.rain=65}$('#temp').value=state.temp;$('#rain').value=state.rain;$$('.preset').forEach(x=>x.classList.toggle('active',x===b));render()});
+  $('#temp').oninput=e=>{state.temp=+e.target.value;state.preset='custom';$$('.preset').forEach(x=>x.classList.remove('active'));render()};$('#rain').oninput=e=>{state.rain=+e.target.value;state.preset='custom';$$('.preset').forEach(x=>x.classList.remove('active'));render()};
+  $('#equity').onchange=e=>{state.equity=e.target.checked;render()};$('#fleet').oninput=e=>{state.fleet=+e.target.value;render()};
+  $$('.tabs button').forEach(b=>b.onclick=()=>{state.truck=+b.dataset.truck;$$('.tabs button').forEach(x=>x.classList.toggle('active',x===b));renderStops()});
+  $$('.band').forEach(b=>b.onclick=()=>{state.filter=state.filter===b.dataset.filter?null:b.dataset.filter;$$('.band').forEach(x=>x.classList.toggle('active',state.filter===x.dataset.filter));renderStations()});
+  $('#reset').onclick=()=>{Object.assign(state,{preset:'baseline',temp:0,rain:0,equity:false,fleet:2,filter:null});$('#temp').value=0;$('#rain').value=0;$('#equity').checked=false;$('#fleet').value=2;$$('.preset').forEach(x=>x.classList.toggle('active',x.dataset.preset==='baseline'));$$('.band').forEach(x=>x.classList.remove('active'));render()};
+  document.addEventListener('click',e=>{if(!e.target.classList.contains('station'))$('#tip').classList.remove('show')}); render();
+})();
+</script>
+</body>
+</html>

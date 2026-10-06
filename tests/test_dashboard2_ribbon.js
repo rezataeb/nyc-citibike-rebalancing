@@ -222,7 +222,7 @@ async function testDistributionBinsEveryStationTheMapDraws() {
   assert.strictEqual(historical.excluded, 0, 'no station lacks all-period data');
 
   const key = sandbox._elements['distribution-key'].innerHTML;
-  assert.ok(/near balanced/.test(key), 'historical buckets are net-flow buckets');
+  assert.ok(/near balanced/i.test(key), 'historical buckets are net-flow buckets (redesign Title-Cases the key)');
   assert.strictEqual(sandbox._elements['distribution-total'].textContent, '3 stations');
 
   console.log('  distribution bins every station, historical mode');
@@ -236,7 +236,7 @@ async function testDistributionSwitchesQuantityWithMode() {
   dash.setMode('live');
   const after = sandbox._elements['distribution-title'].textContent;
   assert.notStrictEqual(before, after, 'the distributed quantity changes with mode');
-  assert.strictEqual(after, 'Dock fill'); // Session 71: trimmed the redundant "distribution"
+  assert.strictEqual(after, 'Dock Fill'); // Session 71: trimmed the redundant "distribution"
 
   // A empty (0/30), B full (25/25), C mid (10/20) -> one in each end bucket
   // and one in the middle.
@@ -369,8 +369,8 @@ async function testHistoricalSharesUseTheCoverageDenominator() {
   assert.ok(!/%/.test(label(sandbox, 4)), 'no share on the bikes-to-move tile');
   assert.ok(!/%/.test(label(sandbox, 2)), 'tile 2\'s visible label is plain English, not a database column');
   assert.ok(!/%/.test(label(sandbox, 3)), 'tile 3\'s visible label is plain English, not a database column');
-  assert.strictEqual(label(sandbox, 2), 'stations heading toward empty', 'tile 2 reads as a plain sentence with the number above it');
-  assert.strictEqual(label(sandbox, 3), 'stations heading toward full', 'tile 3 reads as a plain sentence with the number above it');
+  assert.strictEqual(label(sandbox, 2), 'Fastest-Draining Stations', 'tile 2 label is the redesign\'s Title Case wording');
+  assert.strictEqual(label(sandbox, 3), 'Fastest-Filling Stations', 'tile 3 label is the redesign\'s Title Case wording');
 
   assert.strictEqual(dash.computeSliceTotals().withData, 3, 'denominator is the covered set');
 
@@ -393,8 +393,11 @@ async function testStatusLivesInADotNotInColouredNumerals() {
   // the map uses, so the strip and the dots on the map agree.
   assert.strictEqual(dot(2).style.background, 'rgba(227, 73, 72, 1)', 'empty = deficit red');
   assert.strictEqual(dot(3).style.background, 'rgba(42, 120, 214, 1)', 'full = surplus blue');
-  assert.strictEqual(dot(1).style.background, dot(4).style.background,
-    'compliance and double-outage share a dark dot -- the dot marks status, not identity');
+  // Redesign: compliance is green and double-outage is amber (matching the
+  // amber ring drawn around double-outage stations on the map), no longer
+  // one shared dark dot.
+  assert.strictEqual(dot(1).style.background, '#2a7a4b', 'service availability = green');
+  assert.strictEqual(dot(4).style.background, '#c9832b', 'double-outage = amber');
 
   // The numbers themselves carry no colour at all.
   for (const i of [1, 2, 3, 4]) {

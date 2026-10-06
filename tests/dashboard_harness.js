@@ -322,6 +322,10 @@ function buildSandbox(options = {}) {
     getBoundsZoom() { return 10; },
     setMinZoom(zoom) { mapStub._minZoom = zoom; return mapStub; },
     getZoom() { return mapStub._zoom; },
+    // Added with click-to-reset-zoom: dashboard reads map.getCenter() once at
+    // load to remember the home view, and flyTo() to return to it.
+    getCenter() { return { lat: 40.73, lng: -73.99 }; },
+    flyTo() { return mapStub; },
     // Deterministic stand-in for Leaflet's projection, enough for the
     // click-tolerance search to measure real screen distances that shrink
     // and grow with zoom the way the browser's do. Uses one scale for both

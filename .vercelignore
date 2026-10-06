@@ -24,3 +24,7 @@ notebooks/
 # The pre-rewrite v2 implementation CLAUDE.md keeps around for local
 # "compare to reference" work -- not linked from dashboard.html.
 reference/
+
+# README screenshot and working notes -- GitHub-facing only.
+docs/
+docs_v2/

@@ -1,5 +1,70 @@
 # Citi Bike Rebalancing Explorer
 
+**Live demo: https://nyc-citibike-rebalancing.vercel.app**
+
+![Dashboard: historical station balance map, KPI ribbon and priority truck stops](docs/dashboard-screenshot.png)
+
+An interactive map of where Citi Bike stations run out of bikes or fill up
+with them, and where a rebalancing truck would do the most good. It frames
+station imbalance as a **barrier to mode choice**: a rider who finds an
+empty or full station may not take a bike at all. Built as a portfolio
+project for NYC DOT Bike Share & Shared Mobility reviewers, using public
+data only and a $0 stack (static HTML plus precomputed JSON, no backend).
+
+## What it does
+
+- **Historical Flow** -- per-station net flow (bikes/day) by hour, weekday or
+  weekend, and season, from the Citi Bike trip archives.
+- **Live Docks** -- current bike and dock availability from the public GBFS feed.
+- **Priority Truck Stops** -- a baseline AM route ranked by deficit, with an
+  optional equity-weighted ranking.
+- **Scenario Planner** -- equity thresholds, a fleet-size simulator and a
+  weather scenario, each reading precomputed files rather than running a
+  model in the browser.
+- **Reliability** -- how often each station was empty, full or offline in the
+  GBFS log, and what station capacity predicts about it.
+
+## What the data shows (and does not)
+
+- Across **451,111 station observations** (Jul 13 -- Sep 13, 2026), stations
+  were unusable (empty or full) **12.2%** of the time. Offline stations are
+  excluded from that denominator.
+- After accounting for demand, stations with 40+ docks are associated with
+  unusable rates about **2.1 percentage points lower** than stations with
+  under 20 docks (2,317 stations; a plain OLS fit). This is a pattern in
+  observational data, not proof that adding docks causes better reliability.
+
+## Limitations
+
+- The reliability log is **irregularly sampled**: 191 snapshots over 61 days,
+  with a median gap of about 87 minutes and one gap of several weeks. Rates
+  are estimates from that sample, not continuous measurements.
+- Borough and zone are not available in the pipeline, so the capacity
+  analysis controls for demand only.
+- The weather scenario projects from historical elasticities, not a
+  weather-specific model. A heat-wave preset was left out on purpose because
+  the fit does not support extrapolating that far.
+- A dock-capacity "what if" sandbox was investigated and closed as not
+  viable: public data only records momentary availability, never true
+  capacity over time. See [`docs_v2/phase5-closeout.md`](docs_v2/phase5-closeout.md).
+
+## Data sources
+
+Citi Bike S3 trip archives, the Citi Bike GBFS feed, NYC Open Data (NYCHA
+developments, school locations) and NY State Open Data (subway stations),
+and Open-Meteo for weather. Quality rules: trips under 60 seconds or over 4
+hours are dropped; low-volume stations are excluded from forecasting;
+offline stations are excluded from failure denominators.
+
+## Snapshot data
+
+An hourly GitHub Actions job logs the GBFS feed. Those commits go to the
+**`data-snapshots`** branch, not `master`, to keep this history readable.
+`master` holds the snapshot files up to the switch-over; to re-run
+`pipeline/reliability.py` on the full log, copy
+`data/gbfs_log/snapshots_*.csv` from `data-snapshots` into your checkout
+first.
+
 ## Reproducing the pipeline
 
 Every number in `data/*.json` and `data/*.parquet` is derived from public

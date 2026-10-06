@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **Live app:** https://nyc-citibike-rebalancing.vercel.app  
-**Demo:** _coming soon_  
+**Demo:** https://nyc-citibike-rebalancing.netlify.app  
 **Repo:** https://github.com/rezataeb/nyc-citibike-rebalancing
 
 ![Dashboard: historical station balance map, KPI ribbon and priority truck stops](docs/dashboard-screenshot.png)
@@ -157,6 +157,7 @@ local, on-disk viewing.
 │                         #   elasticities, fleet simulator, reliability
 ├── tests/                # pytest + dashboard JS test suites
 ├── notebooks/            # exploratory data analysis report
+├── demo/                 # source for the Netlify launch-clip demo
 ├── docs/                 # screenshots and design mockup
 ├── docs_v2/              # working notes and the Phase 5 closeout
 ├── .github/workflows/    # hourly GBFS snapshot job

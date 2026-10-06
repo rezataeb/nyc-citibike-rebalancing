@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Citi Bike Rebalancing Explorer — Launch Clip</title>
+<meta name="description" content="A one-minute walkthrough of the NYC Citi Bike Rebalancing Explorer, built from the live app's real screens and data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+  :root {
+    --ink: #0b1020;
+    --panel: #131b33;
+    --line: #26304f;
+    --text: #f2f4fa;
+    --mute: #a9b2cb;
+    --blue: #5aa2ff;
+    --red: #ef5a5f;
+    --amber: #e8a838;
+    --display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+    --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--ink); color: var(--text); font-family: var(--body); overflow: hidden; }
+  #viewport { position: fixed; inset: 0; overflow: hidden; background: #05070f; }
+  #stage { position: absolute; left: 50%; top: 50%; width: 1280px; height: 720px; background: var(--ink); overflow: hidden; transform-origin: center center; }
+
+  .scene { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity .6s ease, visibility 0s linear .6s; }
+  .scene.on { opacity: 1; visibility: visible; transition: opacity .6s ease, visibility 0s; }
+
+  /* screenshot scenes */
+  .shot { position: absolute; inset: 0; overflow: hidden; background: #fff; }
+  .shot img { width: 1280px; height: 720px; display: block; will-change: transform; }
+  .shot::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 120px; background: linear-gradient(to top, rgba(5,7,15,.75), rgba(5,7,15,0)); }
+  .caption { position: absolute; left: 40px; right: 40px; bottom: 62px; z-index: 2; display: grid; grid-template-columns: 1fr auto; column-gap: 36px; align-items: end; background: rgba(11,16,32,.95); border: 1px solid var(--line); border-radius: 14px; padding: 22px 28px 24px; box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+  .caption h2 { font-family: var(--display); font-weight: 700; font-size: 32px; line-height: 1.05; letter-spacing: -.01em; text-wrap: balance; }
+  .caption p { margin-top: 8px; font-size: 17px; line-height: 1.42; color: var(--mute); max-width: 760px; text-wrap: pretty; }
+  .caption p b { color: var(--text); font-weight: 600; }
+  .stats { display: flex; gap: 12px; }
+  .stat { background: rgba(19,27,51,.92); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; min-width: 128px; }
+  .stat .n { font-family: var(--display); font-size: 30px; font-weight: 700; letter-spacing: -.01em; line-height: 1.1; display: flex; align-items: center; gap: 8px; }
+  .stat .l { margin-top: 4px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--mute); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .dot.red { background: var(--red); } .dot.blue { background: var(--blue); } .dot.amber { background: var(--amber); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink); background: var(--amber); border-radius: 4px; padding: 3px 7px; margin-bottom: 10px; }
+
+  .scene.top .caption { top: 28px; bottom: auto; align-items: start; }
+  .caption > *, .textscene .rise { opacity: 0; transform: translateY(14px); transition: opacity .6s ease .35s, transform .6s ease .35s; }
+  .on .caption > *, .on .textscene .rise, .textscene.on .rise { opacity: 1; transform: none; }
+  .caption .stats { transition-delay: .6s; }
+
+  /* text scenes */
+  .textscene { padding: 84px 96px 96px; display: flex; flex-direction: column; justify-content: center; background:
+      radial-gradient(900px 500px at 88% 8%, rgba(90,162,255,.16), transparent 60%), var(--ink); }
+  .eyebrow { font-family: var(--mono); font-size: 14px; letter-spacing: .14em; text-transform: uppercase; color: var(--blue); margin-bottom: 22px; }
+  .textscene h1 { font-family: var(--display); font-weight: 700; font-size: 84px; line-height: .98; letter-spacing: -.02em; text-wrap: balance; max-width: 980px; }
+  .textscene h2 { font-family: var(--display); font-weight: 700; font-size: 56px; line-height: 1.04; letter-spacing: -.015em; text-wrap: balance; max-width: 1000px; }
+  .lede { margin-top: 26px; font-size: 24px; line-height: 1.45; color: var(--mute); max-width: 860px; text-wrap: pretty; }
+  .lede b { color: var(--text); font-weight: 600; }
+  .chips { margin-top: 34px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .chip { font-size: 16px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--mute); background: var(--panel); }
+  .big { margin-top: 34px; display: flex; gap: 56px; align-items: flex-end; }
+  .big .n { font-family: var(--display); font-size: 104px; font-weight: 700; letter-spacing: -.02em; line-height: 1; color: var(--text); }
+  .big .n small { font-size: 44px; color: var(--red); }
+  .big .l { margin-top: 10px; font-size: 18px; color: var(--mute); max-width: 340px; line-height: 1.35; }
+  .limits { margin-top: 28px; display: grid; gap: 14px; max-width: 900px; }
+  .limits li { list-style: none; font-size: 21px; line-height: 1.4; color: var(--mute); padding-left: 26px; position: relative; }
+  .limits li::before { content: ""; position: absolute; left: 0; top: .6em; width: 10px; height: 10px; border-radius: 50%; background: var(--amber); }
+  .limits li b { color: var(--text); font-weight: 600; }
+  .links { margin-top: 30px; display: grid; gap: 12px; }
+  .links a { display: grid; grid-template-columns: 130px 1fr; align-items: baseline; color: var(--text); text-decoration: none; font-size: 26px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .links a span { font-family: var(--mono); font-size: 14px; letter-spacing: .12em; text-transform: uppercase; color: var(--blue); }
+  .links a:hover, .links a:focus-visible { color: var(--blue); outline: none; }
+  .disclaimer { margin-top: 26px; font-size: 14px; color: var(--mute); }
+
+  /* controls */
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 10; height: 54px; display: flex; align-items: center; gap: 14px; padding: 0 22px; background: linear-gradient(to top, rgba(5,7,15,.9), rgba(5,7,15,0)); }
+  #bar button { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: rgba(19,27,51,.9); color: var(--text); cursor: pointer; display: grid; place-items: center; font: 500 14px var(--body); }
+  #bar button:hover { border-color: var(--blue); }
+  #bar button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  #segs { flex: 1; display: flex; gap: 6px; }
+  #bar .seg { flex: 1; width: auto; height: 22px; border-radius: 0; display: flex; align-items: center; cursor: pointer; background: none; border: 0; padding: 0; }
+  .seg i { display: block; width: 100%; height: 4px; border-radius: 2px; background: rgba(255,255,255,.22); overflow: hidden; }
+  .seg i b { display: block; height: 100%; width: 0; background: var(--blue); }
+  .seg:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  #count { font-family: var(--mono); font-size: 13px; color: var(--mute); min-width: 52px; text-align: right; }
+  svg { display: block; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scene, .scene.on, .scene.top .caption { top: 28px; bottom: auto; align-items: start; }
+  .caption > *, .textscene .rise { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div id="viewport">
+<div id="stage" role="region" aria-label="Citi Bike Rebalancing Explorer launch clip">
+
+  <!-- 1 title -->
+  <section class="scene textscene" data-dur="6500">
+    <div class="eyebrow rise">NYC DOT Bike Share &amp; Shared Mobility · portfolio project</div>
+    <h1 class="rise">Citi Bike Rebalancing Explorer</h1>
+    <p class="lede rise">Where stations run out of bikes or fill up, who that affects, and where a truck does the most good.</p>
+    <div class="chips rise"><span class="chip">Public data only</span><span class="chip">$0 stack</span><span class="chip">Static page, no backend</span></div>
+  </section>
+
+  <!-- 2 problem -->
+  <section class="scene textscene" data-dur="8000">
+    <div class="eyebrow rise">The problem</div>
+    <h2 class="rise">An empty or full station is a barrier to choosing a bike.</h2>
+    <div class="big rise">
+      <div><div class="n">12.2<small>%</small></div><div class="l">of 451,111 station observations were empty or full (Jul 13 – Sep 13, 2026)</div></div>
+    </div>
+    <p class="lede rise">The City's Citi Bike contract, as summarized by the NYC Comptroller, requires stations not to sit completely full or empty, with a penalty only when adjacent stations are also out. This tool turns that rule into something a planner can see.</p>
+  </section>
+
+  <!-- 3 historical -->
+  <section class="scene" data-dur="8000" data-focus="48% 50%" data-zoom="1.18">
+    <div class="shot"><img alt="Historical Flow view: map of 2,592 stations colored by net bikes per day" src="{{IMG_1}}"></div>
+    <div class="caption">
+      <div><h2>Historical Flow: every station, every hour</h2>
+      <p>2,592 stations colored by average net bikes/day at <b>8:00 AM on a weekday</b>. Red stations are heading toward empty, blue toward full.</p></div>
+      <div class="stats"><div class="stat"><div class="n"><i class="dot red"></i>551</div><div class="l">Big deficit</div></div><div class="stat"><div class="n">3,212</div><div class="l">Bikes to deliver</div></div></div>
+    </div>
+  </section>
+
+  <!-- 4 station detail -->
+  <section class="scene top" data-dur="6500" data-focus="12% 68%" data-zoom="1.25">
+    <div class="shot"><img alt="Station detail card for W 36 St and 9 Ave showing a 24-hour flow rhythm" src="{{IMG_2}}"></div>
+    <div class="caption">
+      <div><h2>Click any station for its 24-hour flow</h2>
+      <p>Here, W 36 St &amp; 9 Ave: average net bikes per hour on a weekday. <b>More Info</b> adds the station's nearest subway stop and its NYCHA and school proximity.</p></div>
+    </div>
+  </section>
+
+  <!-- 5 live -->
+  <section class="scene" data-dur="9000" data-focus="50% 14%" data-zoom="1.12">
+    <div class="shot"><img alt="Live Docks view with empty, full and double-outage counts" src="{{IMG_3}}"></div>
+    <div class="caption">
+      <div><span class="tag">Live capture · Oct 6, 2026, 12:25 PM EDT</span><h2>Live Docks: the contract's rule, as it stands right now</h2>
+      <p>From the public GBFS feed, refreshed every 60 s. A <b>double-outage</b> is an empty or full station with another within 500 m, shown as an amber ring. The 500 m is this project's own definition, and the tile says it's an instant reading, not the contract's 60-minute measurement.</p></div>
+      <div class="stats"><div class="stat"><div class="n">87.1%</div><div class="l">Available now</div></div><div class="stat"><div class="n"><i class="dot amber"></i>306</div><div class="l">Double-outage</div></div></div>
+    </div>
+  </section>
+
+  <!-- 6 weather -->
+  <section class="scene" data-dur="8500" data-focus="86% 40%" data-zoom="1.2">
+    <div class="shot"><img alt="Scenario Planner with the Steady Rain weather scenario applied" src="{{IMG_5}}"></div>
+    <div class="caption">
+      <div><h2>Scenario Planner: what if it rains?</h2>
+      <p>A steady-rain day (60°F, 0.4 in) cuts the 8 AM imbalance from 6,070 to <b>3,788 bikes</b>. Marked <b>PROJECTED</b>: it is estimated from historical elasticity, not a weather-specific forecast model.</p></div>
+      <div class="stats"><div class="stat"><div class="n">6,070<span style="color:var(--mute)"> →</span></div><div class="l">Baseline</div></div><div class="stat"><div class="n">3,788</div><div class="l">Steady rain</div></div></div>
+    </div>
+  </section>
+
+  <!-- 7 reliability -->
+  <section class="scene" data-dur="9000" data-focus="86% 45%" data-zoom="1.18">
+    <div class="shot"><img alt="Reliability Patterns panel: unusable rate by station capacity band" src="{{IMG_6}}"></div>
+    <div class="caption">
+      <div><h2>Larger stations are associated with lower unusable rates, after accounting for demand</h2>
+      <p>Stations with 40+ docks sit about <b>2.1 points lower</b> than those under 20 (2,317 stations). A pattern in observational data, not proof that adding docks causes the improvement.</p></div>
+      <div class="stats"><div class="stat"><div class="n">13.1%</div><div class="l">&lt; 20 docks</div></div><div class="stat"><div class="n">9.9%</div><div class="l">40+ docks</div></div></div>
+    </div>
+  </section>
+
+  <!-- 8 limits + links -->
+  <section class="scene textscene" data-dur="0">
+    <div class="eyebrow rise">Limits, stated plainly</div>
+    <ul class="limits rise">
+      <li><b>Irregular sampling:</b> 191 snapshots over 61 days, median gap about 87 minutes.</li>
+      <li><b>No borough controls:</b> the capacity finding adjusts for demand only.</li>
+      <li><b>Weather is a projection</b> from historical elasticity, not a forecast model.</li>
+    </ul>
+    <div class="links rise">
+      <a href="https://nyc-citibike-rebalancing.vercel.app" target="_blank" rel="noopener"><span>Live app</span>nyc-citibike-rebalancing.vercel.app</a>
+      <a href="https://github.com/rezataeb/nyc-citibike-rebalancing" target="_blank" rel="noopener"><span>Repo</span>github.com/rezataeb/nyc-citibike-rebalancing</a>
+    </div>
+    <p class="disclaimer rise">Independent analytical project. Not an official product of NYC DOT, the NYC Comptroller, or Lyft/Citi Bike. Built by Reza Taeb.</p>
+  </section>
+
+  <div id="bar">
+    <button id="prev" aria-label="Previous scene">&#9664;</button>
+    <button id="play" aria-label="Pause">&#10074;&#10074;</button>
+    <button id="next" aria-label="Next scene">&#9654;</button>
+    <div id="segs" role="tablist" aria-label="Scenes"></div>
+    <div id="count">1 / 8</div>
+  </div>
+</div>
+</div>
+
+<script>
+(function () {
+  var stage = document.getElementById('stage');
+  var scenes = Array.prototype.slice.call(stage.querySelectorAll('.scene'));
+  var segsEl = document.getElementById('segs');
+  var playBtn = document.getElementById('play');
+  var countEl = document.getElementById('count');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var cur = 0, elapsed = 0, playing = true, last = null, fills = [], segs = [];
+
+  function fit() {
+    var s = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    stage.style.transform = 'translate(-50%, -50%) scale(' + s + ')';
+  }
+  window.addEventListener('resize', fit); fit();
+
+  scenes.forEach(function (sc, i) {
+    var b = document.createElement('button');
+    b.className = 'seg'; b.setAttribute('role', 'tab'); b.setAttribute('aria-label', 'Go to scene ' + (i + 1));
+    b.innerHTML = '<i><b></b></i>';
+    b.addEventListener('click', function () { go(i); });
+    segsEl.appendChild(b); segs.push(b); fills.push(b.querySelector('b'));
+  });
+
+  function dur(i) { return parseInt(scenes[i].getAttribute('data-dur'), 10); }
+
+  function setPlaying(p) {
+    playing = p; last = null;
+    playBtn.innerHTML = p ? '&#10074;&#10074;' : '&#9654;';
+    playBtn.setAttribute('aria-label', p ? 'Pause' : 'Play');
+  }
+
+  function go(i) {
+    cur = Math.max(0, Math.min(scenes.length - 1, i)); elapsed = 0; last = null;
+    scenes.forEach(function (sc, k) { sc.classList.toggle('on', k === cur); sc.setAttribute('aria-hidden', k === cur ? 'false' : 'true'); });
+    countEl.textContent = (cur + 1) + ' / ' + scenes.length;
+    fills.forEach(function (f, k) { f.style.width = k < cur ? '100%' : '0'; });
+    if (dur(cur) === 0) { fills[cur].style.width = '100%'; setPlaying(false); }
+    else if (!playing && cur < scenes.length - 1) { /* stay paused if user paused */ }
+    paint();
+  }
+
+  function paint() {
+    var d = dur(cur), p = d ? Math.min(1, elapsed / d) : 1;
+    if (d) fills[cur].style.width = (p * 100) + '%';
+    var img = scenes[cur].querySelector('.shot img');
+    if (img && !reduce) {
+      var z = parseFloat(scenes[cur].getAttribute('data-zoom') || '1.1');
+      var s = 1 + (z - 1) * p;
+      img.style.transformOrigin = scenes[cur].getAttribute('data-focus') || '50% 50%';
+      img.style.transform = 'scale(' + s + ')';
+    }
+  }
+
+  function tick(t) {
+    if (playing && dur(cur) > 0) {
+      if (last !== null) elapsed += t - last;
+      last = t;
+      if (elapsed >= dur(cur)) { go(cur + 1); }
+      else paint();
+    } else { last = null; }
+    requestAnimationFrame(tick);
+  }
+
+  playBtn.addEventListener('click', function () {
+    if (!playing && cur === scenes.length - 1) { setPlaying(true); go(0); } else setPlaying(!playing);
+  });
+  document.getElementById('prev').addEventListener('click', function () { go(cur - 1); });
+  document.getElementById('next').addEventListener('click', function () { go(cur + 1); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight') go(cur + 1);
+    else if (e.key === 'ArrowLeft') go(cur - 1);
+    else if (e.key === ' ' && e.target.tagName !== 'A') { e.preventDefault(); playBtn.click(); }
+  });
+  document.addEventListener('visibilitychange', function () { last = null; });
+
+  go(0);
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

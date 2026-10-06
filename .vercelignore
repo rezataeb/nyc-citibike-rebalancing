@@ -28,3 +28,4 @@ reference/
 # README screenshot -- GitHub-facing only. (docs_v2/ is NOT excluded:
 # dashboard.html links to its working notes as the "full provenance" page.)
 docs/
+demo/

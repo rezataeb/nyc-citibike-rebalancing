@@ -1,15 +1,35 @@
-# Citi Bike Rebalancing Explorer
+# NYC Citi Bike Rebalancing Explorer
 
-**Live demo: https://nyc-citibike-rebalancing.vercel.app**
+[![Live app](https://img.shields.io/badge/Live_app-Vercel-black?logo=vercel)](https://nyc-citibike-rebalancing.vercel.app)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**Live app:** https://nyc-citibike-rebalancing.vercel.app  
+**Demo:** _coming soon_  
+**Repo:** https://github.com/rezataeb/nyc-citibike-rebalancing
 
 ![Dashboard: historical station balance map, KPI ribbon and priority truck stops](docs/dashboard-screenshot.png)
 
 An interactive map of where Citi Bike stations run out of bikes or fill up
-with them, and where a rebalancing truck would do the most good. It frames
-station imbalance as a **barrier to mode choice**: a rider who finds an
-empty or full station may not take a bike at all. Built as a portfolio
-project for NYC DOT Bike Share & Shared Mobility reviewers, using public
-data only and a $0 stack (static HTML plus precomputed JSON, no backend).
+with them, and where a rebalancing truck would do the most good. Built as a
+portfolio project for NYC DOT Bike Share & Shared Mobility reviewers, using
+public data only and a $0 stack (static HTML plus precomputed JSON, no backend).
+
+## Why this exists
+
+A rider who finds an empty or full station may not take a bike at all, so
+station imbalance is a barrier to mode choice, not just an operations
+problem. The City's Citi Bike contract, as summarized in the NYC
+Comptroller's review (*Riding Forward*), requires stations not to sit
+completely full or empty, with the penalty applying only when adjacent
+stations are also unavailable. This tool is a planning and oversight view
+of that problem: where imbalance concentrates, how reliable stations have
+actually been, who is affected (NYCHA, schools, subway gaps), and what a
+fixed truck fleet could realistically cover.
+
+The live "double-outage" indicator (an amber ring on the map) is a
+point-in-time approximation of that adjacency rule. The 500 m definition of
+"adjacent" is this project's own choice, not the contract's, and the
+dashboard says so. It is not a penalty calculation.
 
 ## What it does
 
@@ -48,13 +68,100 @@ data only and a $0 stack (static HTML plus precomputed JSON, no backend).
   viable: public data only records momentary availability, never true
   capacity over time. See [`docs_v2/phase5-closeout.md`](docs_v2/phase5-closeout.md).
 
-## Data sources
+## System architecture
 
-Citi Bike S3 trip archives, the Citi Bike GBFS feed, NYC Open Data (NYCHA
-developments, school locations) and NY State Open Data (subway stations),
-and Open-Meteo for weather. Quality rules: trips under 60 seconds or over 4
-hours are dropped; low-volume stations are excluded from forecasting;
-offline stations are excluded from failure denominators.
+```mermaid
+flowchart LR
+  A[Citi Bike trip archives<br/>S3, monthly] --> P
+  B[NYC / NY State Open Data<br/>NYCHA, schools, subway] --> P
+  C[Open-Meteo weather] --> P
+  G[GBFS station feed] -->|hourly GitHub Action| L[(data-snapshots branch<br/>daily logs)]
+  L --> P
+  P[Python pipeline<br/>pipeline/] --> J[Precomputed JSON<br/>data/*.json, committed]
+  J --> W[Static dashboard<br/>dashboard.html + Leaflet]
+  G -->|live fetch, 60 s refresh| W
+```
+
+The dashboard runs entirely in the browser. Historical views, the Scenario
+Planner and the reliability findings read precomputed files; nothing
+re-runs a model live. Only **Live Docks** mode calls the public GBFS feed,
+directly from the browser.
+
+## Data provenance
+
+| Layer | Source | Vintage / cadence | Used for |
+|---|---|---|---|
+| Station status | Citi Bike GBFS feed | Live, refreshed every 60 s in Live mode; logged hourly | Live Docks, reliability log |
+| Trips | Citi Bike S3 trip archives | Monthly files: Sep 2025 -- Aug 2026, plus Jun 2025 | Net flow by hour, season, month |
+| NYCHA developments | NYC Open Data `phvi-damg` (216 records) | Static snapshot | 300 m equity proximity |
+| Schools | NYC Open Data `wg9x-4ke6` (1,899 records) | 2019--2020 locations; the only coordinate-bearing school dataset on NYC Open Data when checked | 300 m equity proximity |
+| Subway stations | NY State Open Data `i9wp-a4ja` (2,120 records) | Static snapshot | 800 m subway-gap distance |
+| Weather | Open-Meteo | Historical | Temperature and precipitation elasticities |
+
+Quality rules: trips under 60 seconds or over 4 hours are dropped;
+low-volume stations are excluded from forecasting; offline stations are
+excluded from failure denominators. Full school-dataset provenance:
+[`docs_v2/Dashboard_v2_Redesign_Working_Notes.md`](docs_v2/Dashboard_v2_Redesign_Working_Notes.md).
+
+## Tech stack
+
+| Layer | Tech |
+|---|---|
+| Frontend | Single `dashboard.html`, vanilla JS, Leaflet, no build step |
+| Data pipeline | Python 3, pandas, scikit-learn, scipy, shapely, pyarrow |
+| Tests | pytest (Python), Node `vm`-based harness (dashboard JS) |
+| Data collection | GitHub Actions, hourly GBFS snapshot |
+| Hosting | Vercel (static), deployed manually |
+| Backend / DB / auth | None |
+
+## Run locally
+
+```bash
+git clone https://github.com/rezataeb/nyc-citibike-rebalancing
+cd nyc-citibike-rebalancing
+python3 -m http.server 8000
+```
+
+Open **http://localhost:8000/dashboard.html**. No install step is needed to
+view the dashboard. To run the Python pipeline or tests, first
+`pip install -r requirements.txt`.
+
+`dashboard.html` fetches its data files (`data/flows.json`,
+`data/live_status.json`) with `fetch()`, which browsers block when a page is
+opened directly from disk (`file://...`) for security reasons -- the fetch
+rejects before a response ever comes back. **Double-clicking `dashboard.html`
+will not work.**
+
+Serve this directory over plain HTTP instead:
+
+```
+python3 -m http.server 8000
+```
+
+then open **http://localhost:8000/dashboard.html** in a browser.
+
+The canonical, deployed copy is **https://nyc-citibike-rebalancing.vercel.app/**
+(a static Vercel deployment of this same directory, `dashboard.html` served
+at the root, `data/*.json` alongside it) -- opening that URL directly works
+with no extra steps, since the `file://` restriction above only affects
+local, on-disk viewing.
+
+## Project structure
+
+```
+.
+├── dashboard.html        # the whole frontend: HTML, CSS, vanilla JS
+├── data/                 # precomputed JSON/parquet the dashboard reads
+│   └── gbfs_log/         # GBFS snapshots up to the switch-over (see below)
+├── pipeline/             # Python: download, QC, flows, equity join,
+│                         #   elasticities, fleet simulator, reliability
+├── tests/                # pytest + dashboard JS test suites
+├── notebooks/            # exploratory data analysis report
+├── docs/                 # screenshots and design mockup
+├── docs_v2/              # working notes and the Phase 5 closeout
+├── .github/workflows/    # hourly GBFS snapshot job
+└── vercel.json           # static deploy config
+```
 
 ## Snapshot data
 
@@ -126,28 +233,6 @@ file in the directory together, so that gap is the only real loss.
 See `pipeline/reproduce_all.py`'s own module docstring for the full,
 ordered step list and each step's real cost.
 
-## Running the dashboard
-
-`dashboard.html` fetches its data files (`data/flows.json`,
-`data/live_status.json`) with `fetch()`, which browsers block when a page is
-opened directly from disk (`file://...`) for security reasons -- the fetch
-rejects before a response ever comes back. **Double-clicking `dashboard.html`
-will not work.**
-
-Serve this directory over plain HTTP instead:
-
-```
-python3 -m http.server 8000
-```
-
-then open **http://localhost:8000/dashboard.html** in a browser.
-
-The canonical, deployed copy is **https://nyc-citibike-rebalancing.vercel.app/**
-(a static Vercel deployment of this same directory, `dashboard.html` served
-at the root, `data/*.json` alongside it) -- opening that URL directly works
-with no extra steps, since the `file://` restriction above only affects
-local, on-disk viewing.
-
 ## Scenario Planner
 
 (Named "Investigator Mode" through early development -- renamed in the
@@ -212,3 +297,15 @@ field (`dockOverrides`) isn't part of the current schema, and existing
 graceful degradation means a future addition won't break anything saved
 today -- a preset saved now simply has no `dockOverrides` key, which loads
 as "no overrides" once that field exists.
+
+## License and disclaimer
+
+Released under the [MIT License](LICENSE). Citi Bike, NYC Open Data and
+Open-Meteo data remain subject to their own terms.
+
+This is an independent analytical project. It is not an official product of
+the NYC Department of Transportation, the NYC Comptroller, or Lyft/Citi Bike.
+
+## Contact
+
+Reza Taeb -- [taeb.reza@gmail.com](mailto:taeb.reza@gmail.com)

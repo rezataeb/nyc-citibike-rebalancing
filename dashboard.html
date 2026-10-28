@@ -3118,7 +3118,16 @@ function renderDistribution() {
     let body = `Live dock fill across stations with usable GBFS data. ${excluded.toLocaleString()} of ${(total + excluded).toLocaleString()} excluded (no live match, capacity 0, or offline).${overlap}`;
     if (state.reliability) {
       const w = state.reliability.window;
-      body += ` ${state.reliability.system.n_unusable.toLocaleString()} of ${state.reliability.system.n_observations.toLocaleString()} observations across ${w.n_snapshots} snapshots had 0 bikes or 0 docks. `
+      // Fix (2026-10-28): start-end alone hid a 49-day hole in an earlier
+      // build ("Jul 13-Sep 13" held ~2 weeks of data). State how many days
+      // actually have snapshots, and name the longest gap once it spans
+      // more than a day. Both fields are optional: an older payload without
+      // them simply omits the clause.
+      const coverage = w.n_days_with_snapshots != null ? ` on ${w.n_days_with_snapshots} days` : '';
+      const longGap = w.max_gap_start && w.max_gap_minutes > 24 * 60
+        ? `The log's longest gap is ${(w.max_gap_minutes / (24 * 60)).toFixed(1)} days (${formatWindowRange({ start: w.max_gap_start, end: w.max_gap_end })}), with no snapshots. `
+        : '';
+      body += ` ${state.reliability.system.n_unusable.toLocaleString()} of ${state.reliability.system.n_observations.toLocaleString()} observations across ${w.n_snapshots} snapshots${coverage} had 0 bikes or 0 docks. ${longGap}`
         + `Offline observations excluded. A frequency, not outage hours: the log's median gap is ${w.median_gap_minutes} min, which cannot resolve the contract's 60/120-minute thresholds. `
         // Session 72: the one finding from the Phase 5 investigation
         // (docs_v2/phase5-closeout.md) worth surfacing -- rounded and

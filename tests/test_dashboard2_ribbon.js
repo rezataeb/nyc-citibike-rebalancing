@@ -177,6 +177,43 @@ async function testHistoricalRateIsLabelledAsAWindow() {
   console.log('  observed-rate line carries its window and refuses the $ claim');
 }
 
+async function testDataNotesStateCoverageAndTheLongestGap() {
+  // The window's start-end once hid a 49-day hole ("Jul 13-Sep 13" held
+  // ~2 weeks of data). The notes must say how many days have snapshots,
+  // and name the longest gap when it spans days -- but not for an
+  // ordinary sub-day gap, and not crash on an older payload without the fields.
+  const holey = {
+    ...FAKE_RELIABILITY,
+    window: {
+      ...FAKE_RELIABILITY.window,
+      end: '2026-09-13T17:52:39+00:00',
+      max_gap_minutes: 70725.2,
+      max_gap_start: '2026-07-26T15:07:26+00:00',
+      max_gap_end: '2026-09-13T17:52:39+00:00',
+      n_days_with_snapshots: 15,
+    },
+  };
+  let { dash, sandbox } = await loadDashboard2({ reliability: holey });
+  dash.setMode('live');
+  let notes = sandbox._elements['distribution-notes-body'].textContent;
+  assert.ok(/190 snapshots on 15 days/.test(notes), 'states the days that actually have data');
+  assert.ok(/longest gap is 49\.1 days \(Jul 26–Sep 13\)/.test(notes), 'names the multi-day hole');
+
+  ({ dash, sandbox } = await loadDashboard2({ reliability: FAKE_RELIABILITY }));
+  dash.setMode('live');
+  notes = sandbox._elements['distribution-notes-body'].textContent;
+  assert.ok(/on 12 days/.test(notes), 'coverage shown for the ordinary fixture too');
+  assert.ok(!/longest gap/.test(notes), 'a sub-day gap is not called out');
+
+  const { n_days_with_snapshots, max_gap_start, max_gap_end, ...oldWindow } = FAKE_RELIABILITY.window;
+  ({ dash, sandbox } = await loadDashboard2({ reliability: { ...FAKE_RELIABILITY, window: oldWindow } }));
+  dash.setMode('live');
+  notes = sandbox._elements['distribution-notes-body'].textContent;
+  assert.ok(/across 190 snapshots had 0 bikes/.test(notes), 'an older payload still renders, minus the clause');
+
+  console.log('  data notes state days with data and the longest multi-day gap');
+}
+
 function testTheOldReadoutIsGoneFromTheMarkup() {
   // Asserted against the raw HTML, not the DOM stub: the stub auto-creates
   // whatever id is asked of it, so it can never prove an element's absence
@@ -555,6 +592,7 @@ async function testHoverSaysRENTABLEBikesNotJustBikes() {
   await testOfflineStationsLeaveBothSides();
   await testMissingReliabilityDegradesGracefully();
   await testHistoricalRateIsLabelledAsAWindow();
+  await testDataNotesStateCoverageAndTheLongestGap();
   testTheOldReadoutIsGoneFromTheMarkup();
   await testRibbonTilesAreNotHardcodedInMarkup();
   console.log('dashboard2 ribbon test passed (Session 50: mode-aware, slice-aware metric ribbon).');

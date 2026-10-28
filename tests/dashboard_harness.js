@@ -160,6 +160,9 @@ const FAKE_RELIABILITY = {
     n_snapshots: 190,
     median_gap_minutes: 85.3,
     max_gap_minutes: 236.0,
+    max_gap_start: '2026-07-20T09:00:00+00:00',
+    max_gap_end: '2026-07-20T12:56:00+00:00',
+    n_days_with_snapshots: 12,
   },
   system: {
     unusable_rate: 0.25,

@@ -47,19 +47,21 @@ dashboard says so. It is not a penalty calculation.
 
 ## What the data shows (and does not)
 
-- Across **451,111 station observations** (Jul 13 -- Sep 13, 2026), stations
-  were unusable (empty or full) **12.2%** of the time. Offline stations are
-  excluded from that denominator.
+- Across **2,889,257 station observations** (Jul 13 -- Oct 27, 2026),
+  stations were unusable (empty or full) **13.0%** of the time. Offline
+  stations are excluded from that denominator.
 - After accounting for demand, stations with 40+ docks are associated with
   unusable rates about **2.1 percentage points lower** than stations with
-  under 20 docks (2,317 stations; a plain OLS fit). This is a pattern in
+  under 20 docks (2,400 stations; a plain OLS fit). This is a pattern in
   observational data, not proof that adding docks causes better reliability.
 
 ## Limitations
 
-- The reliability log is **irregularly sampled**: 191 snapshots over 61 days,
-  with a median gap of about 87 minutes and one gap of several weeks. Rates
-  are estimates from that sample, not continuous measurements.
+- The reliability log is **irregularly sampled**: 1,208 snapshots over 106
+  days, 94 of which have data, with a median gap of 64 minutes. The longest
+  gap is 14.5 days (Aug 30 -- Sep 13, 2026), when the log hit GitHub's 100 MB
+  file limit. Rates are estimates from that sample, not continuous
+  measurements.
 - Borough and zone are not available in the pipeline, so the capacity
   analysis controls for demand only.
 - The weather scenario projects from historical elasticities, not a
@@ -171,10 +173,12 @@ local, on-disk viewing.
 
 An hourly GitHub Actions job logs the GBFS feed. Those commits go to the
 **`data-snapshots`** branch, not `master`, to keep this history readable.
-`master` holds the snapshot files up to the switch-over; to re-run
-`pipeline/reliability.py` on the full log, copy
-`data/gbfs_log/snapshots_*.csv` from `data-snapshots` into your checkout
-first.
+`master` holds the snapshot files up to the switch-over. To re-run
+`pipeline/reliability.py` on the full log, put `master`'s frozen
+`data/gbfs_log/snapshots.csv` and the `data-snapshots` branch's
+`snapshots_*.csv` files in one folder and pass it with `--log-dir <folder>`.
+The committed `reliability.json` was built that way from complete UTC days
+through Oct 27, 2026; then run `pipeline/reliability_capacity.py`.
 
 ## Reproducing the pipeline
 

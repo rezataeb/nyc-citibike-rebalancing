@@ -123,6 +123,37 @@ def test_window_records_span_and_sampling_gaps(tmp_path):
     assert window["max_gap_minutes"] == pytest.approx(120.0)
 
 
+def test_window_exposes_holes_that_start_and_end_hide(tmp_path):
+    """Two snapshots on Jul 13, one on Jul 20: the span is 7 days, but only
+    2 days have data, and the longest gap is located, not just measured."""
+    log = _write_log(
+        tmp_path,
+        [
+            "A,2026-07-13 18:00:00+00:00,5,5,1,1",
+            "A,2026-07-13 19:00:00+00:00,5,5,1,1",
+            "A,2026-07-20 19:00:00+00:00,5,5,1,1",
+        ],
+    )
+    window = compute_reliability(log)["window"]
+
+    assert window["days"] == 7
+    assert window["n_days_with_snapshots"] == 2
+    assert window["max_gap_start"].startswith("2026-07-13T19:00")
+    assert window["max_gap_end"].startswith("2026-07-20T19:00")
+
+
+def test_days_with_snapshots_counts_utc_dates(tmp_path):
+    # 23:30 at -05:00 is 04:30 UTC the next day: one UTC date, not two.
+    log = _write_log(
+        tmp_path,
+        [
+            "A,2026-07-14 04:00:00+00:00,5,5,1,1",
+            "A,2026-07-13 23:30:00-05:00,5,5,1,1",
+        ],
+    )
+    assert compute_reliability(log)["window"]["n_days_with_snapshots"] == 1
+
+
 def test_rankable_excludes_thin_stations_without_dropping_their_observations(tmp_path):
     """Thin stations are excluded from per-station ranking, not from the system rate."""
     rows = [f"A,2026-07-13 {h:02d}:00:00+00:00,0,30,1,1" for h in range(MIN_OBSERVATIONS)]

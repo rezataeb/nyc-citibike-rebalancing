@@ -46,10 +46,11 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import statistics
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "gbfs_log"
@@ -66,7 +67,7 @@ CAVEAT = (
     "Observed unusable RATE over a closed historical window -- the share of "
     "station-observations in which the station had 0 bikes or 0 docks. This is "
     "NOT outage hours and NOT a penalty figure: the snapshot log is ~hourly "
-    "(median gap 85 min), which cannot resolve the contract's 60/120-minute "
+    "(see window.median_gap_minutes), which cannot resolve the contract's 60/120-minute "
     "breach thresholds. Offline observations are excluded from both numerator "
     "and denominator. Not a live reading."
 )
@@ -143,6 +144,12 @@ def compute_reliability(log_path: Path = LOG_DIR) -> dict:
         (moments[i + 1] - moments[i]).total_seconds() / 60
         for i in range(len(moments) - 1)
     ]
+    # start/end alone can hide a long hole in the log (the Sep 2026 build
+    # spanned "61 days" but held ~2 weeks of data), so the window also
+    # records how many UTC days actually have a snapshot, and where the
+    # single longest gap falls.
+    longest = max(range(len(gaps)), key=gaps.__getitem__) if gaps else None
+    days_with_snapshots = {m.astimezone(timezone.utc).date() for m in moments}
 
     stations = {
         station_id: {
@@ -166,6 +173,9 @@ def compute_reliability(log_path: Path = LOG_DIR) -> dict:
             "n_snapshots": len(moments),
             "median_gap_minutes": round(statistics.median(gaps), 1) if gaps else None,
             "max_gap_minutes": round(max(gaps), 1) if gaps else None,
+            "max_gap_start": moments[longest].isoformat() if gaps else None,
+            "max_gap_end": moments[longest + 1].isoformat() if gaps else None,
+            "n_days_with_snapshots": len(days_with_snapshots),
         },
         "system": {
             "unusable_rate": n_unusable / n_online,
@@ -188,7 +198,14 @@ def compute_reliability(log_path: Path = LOG_DIR) -> dict:
 
 
 if __name__ == "__main__":
-    payload = compute_reliability()
+    parser = argparse.ArgumentParser(description="Compute data/reliability.json from the GBFS snapshot log.")
+    parser.add_argument(
+        "--log-dir", type=Path, default=LOG_DIR,
+        help="directory of snapshots*.csv files (default: data/gbfs_log). Point it at a "
+             "folder that also holds the data-snapshots branch's daily files to use the full log.",
+    )
+    args = parser.parse_args()
+    payload = compute_reliability(args.log_dir)
 
     RELIABILITY_PATH.parent.mkdir(parents=True, exist_ok=True)
     RELIABILITY_PATH.write_text(json.dumps(payload, indent=2))
@@ -196,7 +213,9 @@ if __name__ == "__main__":
     window = payload["window"]
     system = payload["system"]
     summary = payload["per_station_summary"]
-    print(f"  window       {window['start']} -> {window['end']} ({window['days']} days)")
+    print(f"  window       {window['start']} -> {window['end']} ({window['days']} days, "
+          f"{window['n_days_with_snapshots']} with snapshots)")
+    print(f"  longest gap  {window['max_gap_start']} -> {window['max_gap_end']}")
     print(f"  snapshots    {window['n_snapshots']} (median gap {window['median_gap_minutes']} min)")
     print(f"  observations {system['n_observations']:,} online, {system['n_offline_excluded']:,} offline excluded")
     print(f"  unusable     {system['n_unusable']:,} = {system['unusable_rate'] * 100:.1f}%")

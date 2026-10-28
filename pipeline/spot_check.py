@@ -67,7 +67,7 @@ KNOWN_STATION_FACTS = [
     },
 ]
 
-# A real major US holiday inside the full-year window (Jul 2025-Jun 2026)
+# A real major US holiday inside the full-year window (Sep 2025-Aug 2026)
 # with a low-friction comparison: two flanking Thursdays, same day-of-week,
 # same season, no other confound.
 HOLIDAY_CHECK = {

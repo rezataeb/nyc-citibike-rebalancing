@@ -9,10 +9,11 @@ key) and can always be re-downloaded; nothing here is the only copy of
 anything, so deleting them is safe (see PROGRESS.md's full-year data
 expansion entry for the disk-budget reasoning).
 
-Target window is the rolling most-recent full year (Jul 2025-Jun 2026),
-not calendar-year 2026, because 2026-07's archive does not exist yet as of
-this build (Citi Bike publishes with a lag) -- verified against the real
-S3 bucket, not assumed.
+Target window is the rolling most-recent full year, not a calendar year.
+It was Jul 2025-Jun 2026 when first built (2026-07's archive did not exist
+yet -- Citi Bike publishes with a lag, verified against the real S3
+bucket), and was rolled forward to Sep 2025-Aug 2026 by
+pipeline/update_window.py: TARGET_MONTHS below is the current window.
 
 Only the small aggregated outputs (flows.json, the daily parquet, the
 manifest) are kept on disk. This module deliberately does not touch

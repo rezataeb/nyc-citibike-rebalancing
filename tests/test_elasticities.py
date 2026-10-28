@@ -1,5 +1,7 @@
 """Tests for pipeline/elasticities.py."""
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -438,3 +440,15 @@ def test_build_elasticities_skips_capacity_for_station_with_zero_capacity():
     assert "capacity_elasticity" not in payload["by_station"]["F"]
     # F's temp/precip must still be computed independently of its missing capacity.
     assert payload["by_station"]["F"]["temp_elasticity"] is not None
+
+
+def test_committed_json_carries_the_current_method_text():
+    # elasticities.json's method/notes are generated text. They went stale
+    # once already (an old data window, a pre-zone "city-wide" weather
+    # claim) while the code moved on. Guard the two fixed strings.
+    import json
+    from pipeline.elasticities import DAILY_REGRESSION_CAVEAT, METHOD_NOTE
+
+    committed = json.loads((Path(__file__).resolve().parent.parent / "data" / "elasticities.json").read_text())
+    assert committed["method"] == METHOD_NOTE
+    assert DAILY_REGRESSION_CAVEAT in committed["notes"]

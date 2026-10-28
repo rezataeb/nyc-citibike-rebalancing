@@ -40,8 +40,8 @@ def test_snow_day_is_colder_than_rain_day():
 
 
 def test_all_preset_temps_are_within_the_real_observed_range():
-    # OBSERVED_TEMP_RANGE_C is a dated fact (-14.3C to 32.3C, verified
-    # 2026-07-24 against the real full-year daily weather panel), not a
+    # OBSERVED_TEMP_RANGE_C is a dated fact (-14.3C to 34.1C, re-verified
+    # 2026-10-28 against the real Sep 2025-Aug 2026 daily weather panel), not a
     # permanent guarantee -- this must fail loudly if a future data refresh
     # ever narrows the real range back below hot_day's configured value,
     # not silently keep shipping a preset that's become an extrapolation.
@@ -53,3 +53,13 @@ def test_all_preset_temps_are_within_the_real_observed_range():
             f"observed range {OBSERVED_TEMP_RANGE_C} -- re-verify against real data "
             "before trusting this preset is still within range, not just historically"
         )
+
+
+def test_committed_json_matches_what_the_source_builds():
+    # The redesign retitled the preset labels in data/scenario_presets.json
+    # but not here, so re-running this module would have silently reverted
+    # the live labels. Source and committed output must agree exactly.
+    import json
+    from pipeline.scenario_presets import SCENARIO_PRESETS_PATH
+
+    assert build_scenario_presets() == json.loads(SCENARIO_PRESETS_PATH.read_text())

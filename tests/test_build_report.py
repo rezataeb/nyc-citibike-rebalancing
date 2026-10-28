@@ -175,14 +175,17 @@ def test_reliability_facts():
     facts = reliability_facts({
         "window": {"start": "2026-07-13T18:22:42+00:00", "end": "2026-09-13T17:52:39+00:00",
                    "days": 61, "n_snapshots": 191, "median_gap_minutes": 86.7,
-                   "max_gap_minutes": 70725.2},
+                   "max_gap_minutes": 70725.2, "max_gap_start": "2026-07-26T15:07:26+00:00",
+                   "max_gap_end": "2026-09-13T17:52:39+00:00", "n_days_with_snapshots": 15},
         "system": {"unusable_rate": 0.1222, "n_observations": 451111, "n_unusable": 55120,
                    "n_empty": 13507, "n_full": 42082, "n_offline_excluded": 18962},
         "per_station_summary": {"n_stations": 2480, "n_rankable": 2385, "min_observations": 20,
                                 "median_rate": 0.0942, "max_rate": 0.7696},
     })
     assert facts["rel_unusable_rate"] == "12.2%"
-    assert facts["rel_max_gap_days"] == "49"
+    assert facts["rel_max_gap_days"] == "49.1"
+    assert facts["rel_gap_start"] == "Jul 26, 2026"
+    assert facts["rel_days_with_data"] == "15"
     assert facts["rel_full_to_empty"] == "3.1"
     assert facts["rel_median_gap_min"] == "87"
 
@@ -242,14 +245,14 @@ def test_real_report_fills_with_no_placeholder_left():
     assert "{{" not in filled
 
 
-def test_reliability_window_paragraph_matches_reliability_json():
-    # Section 5.1 states in words which snapshots reliability.json was built
-    # from (190 in July 13-26 plus one on September 13, verified against the
-    # log at commit d657b3c). That can't be derived from the JSON alone, so
-    # this pins it: when reliability.json is rebuilt, this fails, and 5.1
-    # must be rewritten for the new window.
+def test_longest_gap_explanation_matches_reliability_json():
+    # Section 5.1 explains the longest gap in words (the log hitting GitHub's
+    # 100 MB limit, Aug 30 - Sep 13, 2026). The dates are filled from the
+    # data, but the reason can't be, so this pins it: if a rebuild finds a
+    # different longest gap, this fails and 5.1's explanation must be rewritten.
     window = json.loads((DATA_DIR / "reliability.json").read_text())["window"]
-    assert (window["n_snapshots"], window["max_gap_minutes"]) == (191, 70725.2)
+    assert window["max_gap_start"][:10] == "2026-08-30"
+    assert window["max_gap_end"][:10] == "2026-09-13"
 
 
 # ---------------------------------------------------------------- build

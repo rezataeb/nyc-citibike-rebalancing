@@ -30,8 +30,8 @@
     could realistically fix.</p>
   <ul>
     <li><strong>Stations were unusable {{rel_unusable_rate}} of the time.</strong> That is the share of
-      {{rel_n_obs}} station observations with 0 bikes or 0 docks, almost all from two weeks in late July 2026
-      (Section 5.1). Full stations outnumbered empty ones about {{rel_full_to_empty}} to 1.</li>
+      {{rel_n_obs}} station observations with 0 bikes or 0 docks, from {{rel_start}} to {{rel_end}}.
+      Full stations outnumbered empty ones about {{rel_full_to_empty}} to 1.</li>
     <li><strong>Bigger stations are associated with better reliability.</strong> After accounting for demand,
       stations with 40+ docks were unusable about {{cap_gap_points}} percentage points less often than
       stations with under 20 docks. This is a pattern in observational data, not proof of cause.</li>
@@ -77,8 +77,8 @@
       <td>{{trip_n_months}} months, {{trip_first_month}} – {{trip_last_month}};
         {{n_stations}} stations ({{n_stations_full}} with every month covered)</td></tr>
     <tr><td>Station status</td><td>Citi Bike GBFS feed</td>
-      <td>Logged by a scheduled GitHub Action; {{rel_snapshots}} snapshots used
-        (mostly July 13–26, 2026; see 5.1). Also read live by the dashboard.</td></tr>
+      <td>Logged by a scheduled GitHub Action; {{rel_snapshots}} snapshots,
+        {{rel_start}} – {{rel_end}}, on {{rel_days_with_data}} days. Also read live by the dashboard.</td></tr>
     <tr><td>NYCHA developments</td><td>NYC Open Data <code>phvi-damg</code></td>
       <td>{{nycha_records}} records; {{nycha_threshold_m}} m proximity</td></tr>
     <tr><td>Schools</td><td>NYC Open Data <code>wg9x-4ke6</code></td>
@@ -133,8 +133,8 @@
   <h3>4.1 How often stations were unusable</h3>
   <p>Across {{rel_n_obs}} online station observations, stations had 0 bikes or 0 docks
     <strong>{{rel_unusable_rate}}</strong> of the time ({{rel_n_unusable}} observations).
-    {{rel_n_offline}} offline observations were excluded. Nearly all observations come from July 13–26, 2026,
-    so this is a midsummer rate (Section 5.1).</p>
+    {{rel_n_offline}} offline observations were excluded. The window runs from {{rel_start}} to {{rel_end}}:
+    midsummer into fall (Section 5.1).</p>
   <ul>
     <li><strong>Full is the bigger problem.</strong> {{rel_n_full}} observations were full and {{rel_n_empty}}
       were empty, about {{rel_full_to_empty}} to 1. A full station blocks the end of a trip, which is
@@ -194,26 +194,26 @@
 <section id="limitations">
   <h2>5. Limitations</h2>
   <p class="lead">These are the real limits of what this tool can claim. Most are also stated in the
-    dashboard or the repository, near the number they affect. The window problem in 5.1 was found while
-    writing this report and is not yet reflected in the dashboard's labels.</p>
+    dashboard or the repository, near the number they affect.</p>
 
   <section id="gbfs-sampling">
     <h3>5.1 GBFS sampling resolution</h3>
-    <p>The reliability numbers come from {{rel_snapshots}} snapshots. Their first and last timestamps are
-      {{rel_days}} days apart ({{rel_start}} – {{rel_end}}), but that span is misleading: the file was last
-      built from a copy of the log holding 190 snapshots from July 13–26, 2026, plus one from
-      September 13. The single longest gap, about {{rel_max_gap_days}} days, is that hole. Within the
-      July stretch, the median gap between snapshots is about {{rel_median_gap_min}} minutes.
-      The logger itself kept running; the fuller log has not been analyzed yet (Section 6, step 1).</p>
+    <p>The reliability numbers come from {{rel_snapshots}} snapshots taken over {{rel_days}} days
+      ({{rel_start}} – {{rel_end}}). {{rel_days_with_data}} of those days have data. The median gap between
+      snapshots is {{rel_median_gap_min}} minutes. The longest gap, {{rel_max_gap_days}} days
+      ({{rel_gap_start}} – {{rel_gap_end}}), is when the log file hit GitHub's 100 MB limit and the scheduled
+      job could not save new snapshots until it was fixed.</p>
+    <p>A correction: an earlier build of these numbers covered only July 13–26 but was labeled
+      "July 13 – September 13". It was found while writing this report and rebuilt from the full log on
+      October 28, 2026. The dashboard now states how many days have data and names the longest gap.</p>
     <ul>
       <li><strong>A rate, not a duration.</strong> We can say how often a station was found unusable. We
         cannot say for how many minutes. A 15-minute outage can start and end between two snapshots and
         never be seen.</li>
       <li><strong>Not the contract measure.</strong> The contract's 60- and 120-minute thresholds cannot be
         resolved from snapshots this far apart. Nothing here is a penalty calculation.</li>
-      <li><strong>Two weeks of midsummer.</strong> In practice the rates describe late July. Seasonal
-        differences in reliability are not measured yet, and the capacity result in 4.2 rests on the same
-        window.</li>
+      <li><strong>Summer and fall only.</strong> Winter and spring reliability are not measured yet, and
+        the capacity result in 4.2 rests on the same window.</li>
     </ul>
   </section>
 
@@ -292,11 +292,10 @@
   <h2>6. Future steps</h2>
   <p class="lead">Ordered by value to a DOT reviewer per unit of effort. None of these is built yet.</p>
   <ol class="steps">
-    <li><strong>Re-run reliability on the full log.</strong> The committed rates use about two weeks of
-      snapshots (5.1). The log in the repository now runs to early October, and the logger continues on the
-      <code>data-snapshots</code> branch. Re-running <code>pipeline/reliability.py</code> and
-      <code>pipeline/reliability_capacity.py</code> on all of it would replace a two-week sample with
-      months of data and allow a first seasonal comparison. Low effort, highest value.</li>
+    <li><strong>Refresh reliability on a schedule.</strong> The logger keeps adding snapshots on the
+      <code>data-snapshots</code> branch, but <code>pipeline/reliability.py</code> only runs by hand. A weekly
+      job that re-runs it and <code>pipeline/reliability_capacity.py</code> would keep the dashboard's window
+      current, and by spring would allow a first seasonal comparison. Low effort, high value.</li>
     <li><strong>Log the full <code>station_information</code> response on every poll.</strong> This is what
       the Comptroller's project does. It would start a real capacity history going forward, so the gap in 5.2
       cannot happen again for any other field.</li>

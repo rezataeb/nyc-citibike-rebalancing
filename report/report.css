@@ -185,7 +185,8 @@ td {
   vertical-align: top;
 }
 tr { page-break-inside: avoid; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 8.8pt; }
+th.num { text-align: right; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 8.8pt; }
 .deficit-txt { color: var(--deficit); font-weight: 700; }
 .surplus-txt { color: var(--surplus); font-weight: 700; }
 
@@ -251,5 +252,12 @@ hr {
 .tocnum { color: var(--accent); font-weight: 700; }
 .avoid-break { page-break-inside: avoid; }
 
-/* Placeholder for a section not yet written; removed as each section is filled. */
-.todo { color: var(--ink-faint); font-style: italic; }
+/* ---- Figures (matplotlib SVGs from build_report.py) ---- */
+figure { margin: 3mm 0 5mm 0; page-break-inside: avoid; }
+figure img { display: block; width: 100%; }
+figcaption {
+  font-size: 8.5pt;
+  color: var(--ink-faint);
+  font-style: italic;
+  padding-top: 1.5mm;
+}

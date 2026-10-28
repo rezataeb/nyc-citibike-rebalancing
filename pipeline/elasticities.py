@@ -25,7 +25,8 @@ rather than implying one unified model produced everything:
   the dashboard's model-eval footer), just not what temp/precip
   elasticity is computed from anymore. Session 31 extended this further:
   pipeline/build_full_year.py (Session 29) now persists this same daily
-  grain for a full real contiguous year (Jul 2025-Jun 2026), and this
+  grain for a full real contiguous year (Jul 2025-Jun 2026 at the time;
+  rolled forward to Sep 2025-Aug 2026 by pipeline/update_window.py), and this
   module reads that persisted table directly instead of re-downloading
   raw trips at all -- roughly 4x the real days this regression fits on,
   and every reported coefficient now carries a 95% confidence interval
@@ -143,7 +144,7 @@ METHOD_NOTE = (
     "temp_elasticity/precip_elasticity: a direct joint linear regression "
     "of real per-(station, date) daily flow magnitude against real daily "
     "temp_c/precip_mm (Open-Meteo), fit once per typology group (pooling "
-    "every station's every real day across the full Jul 2025-Jun 2026 "
+    "every station's every real day across the full Sep 2025-Aug 2026 "
     "year) for by_typology, or per-station (that station's own real days "
     "only) for by_station when there are enough of them "
     "(MIN_DAILY_OBSERVATIONS). Reads pipeline/build_full_year.py's "
@@ -189,12 +190,12 @@ DAILY_REGRESSION_CAVEAT = (
     "artifactual jump at the top one. Session 27 fixed the underlying "
     "data granularity (real daily observations instead of monthly "
     "aggregates); Session 31 extended the window from 90 non-contiguous "
-    "days (Feb/April/June 2026 only) to the full real Jul 2025-Jun 2026 "
-    "year -- real limitations remain, stated plainly rather than implied "
-    "resolved: temp_c/precip_mm are each ONE city-wide daily value "
-    "(Open-Meteo's Central Park reference point, per pipeline/weather.py), "
-    "not per-station, so real local weather variation across NYC's "
-    "boroughs is not captured. A joint fit (temp and precip together, not "
+    "days (Feb/April/June 2026 only) to a full real year (now Sep 2025-"
+    "Aug 2026) -- real limitations remain, stated plainly rather than "
+    "implied resolved: temp/precip are daily values per weather zone (18 "
+    "fixed ~6 km grid cells, one Open-Meteo point each; Sessions 36/38), "
+    "not per-station, so weather variation within a zone is not "
+    "captured. A joint fit (temp and precip together, not "
     "two separate univariate fits) controls for the two being correlated "
     "with each other (a rainy day is often also cooler), but not for "
     "anything else true of those specific calendar days that isn't "

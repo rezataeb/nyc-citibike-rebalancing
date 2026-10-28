@@ -16,7 +16,7 @@ trained on, falling back to the GAM (which degrades more gracefully) or,
 past a wider margin, to the naive baseline.
 
 Validation is a 12-fold walk-forward (leave-one-month-out) over the full
-Jul 2025-Jun 2026 window, not a single train/test split -- see
+12-month window (TARGET_MONTHS: Sep 2025-Aug 2026), not a single train/test split -- see
 PROGRESS.md's Session 5 entry for why a single split couldn't tell
 "extrapolation failure" apart from "the model is generally worse."
 Station typology is refit independently within each fold's training data

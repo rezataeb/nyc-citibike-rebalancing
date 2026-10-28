@@ -3108,7 +3108,7 @@ function renderDistribution() {
   // disclosure now, always reachable regardless of mode -- its CONTENT
   // still varies, since the dock-fill/reliability paragraph only makes
   // sense in live mode.
-  const weatherMethodNote = `A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Jul 2025-Jun 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading — each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.`;
+  const weatherMethodNote = `A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Sep 2025–Aug 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading — each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.`;
   if (live) {
     note.textContent = '';
     const fill = computeFillDistribution();

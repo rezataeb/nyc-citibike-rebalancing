@@ -316,4 +316,4 @@ the NYC Department of Transportation, the NYC Comptroller, or Lyft/Citi Bike.
 
 ## Contact
 
-Reza Taeb -- [taeb.reza@gmail.com](mailto:taeb.reza@gmail.com)
+Reza Taeb -- [taeb.reza@gmail.com](mailto:taeb.reza@gmail.com) -- [LinkedIn](https://www.linkedin.com/in/reza-taeb/)

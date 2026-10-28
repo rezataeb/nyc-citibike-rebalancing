@@ -13,59 +13,360 @@
   <div class="subtitle">What the tool shows, what the data can and cannot support,
     and where it could go next.</div>
   <div class="meta">
-    <div><b>Prepared:</b> October 2026 · Independent portfolio project · public data only.</div>
+    <div><b>Live app:</b> nyc-citibike-rebalancing.vercel.app</div>
+    <div><b>Code and data:</b> github.com/rezataeb/nyc-citibike-rebalancing</div>
+    <div><b>Prepared:</b> October 2026 · Independent portfolio project · public data only.
+      Not an official NYC DOT or Lyft product.</div>
+    <div><b>About the numbers:</b> every figure in this report is read from the project's
+      committed data files at build time (<code>report/build_report.py</code>), not typed in by hand.</div>
   </div>
 </section>
 
 <section id="summary">
   <h2>1. Summary</h2>
-  <p class="todo">To be written in step 3.</p>
+  <p class="lead">An empty or full bike-share station is more than an operations nuisance. A rider who
+    finds no bike, or no dock, may stop treating bike share as a real option. This tool shows where
+    and when that happens, how reliable stations have actually been, and what a fixed truck fleet
+    could realistically fix.</p>
+  <ul>
+    <li><strong>Stations were unusable {{rel_unusable_rate}} of the time.</strong> That is the share of
+      {{rel_n_obs}} station observations with 0 bikes or 0 docks, almost all from two weeks in late July 2026
+      (Section 5.1). Full stations outnumbered empty ones about {{rel_full_to_empty}} to 1.</li>
+    <li><strong>Bigger stations are associated with better reliability.</strong> After accounting for demand,
+      stations with 40+ docks were unusable about {{cap_gap_points}} percentage points less often than
+      stations with under 20 docks. This is a pattern in observational data, not proof of cause.</li>
+    <li><strong>A simple baseline beat the machine-learning models.</strong> Over {{n_folds}} walk-forward
+      test months, a seasonal-naive forecast had the lowest error (MAE {{mae_naive}} bikes/day, vs.
+      {{mae_guarded}} for the guarded model). The dashboard is honest about this rather than
+      presenting the more complex model as better.</li>
+    <li><strong>Trucks alone cannot close the gap.</strong> In the fleet simulator, {{fleet_max_trucks}} trucks
+      fully rebalanced {{fleet_max_serviced}} of {{fleet_n_deficit_flagged}} deficit stations ({{fleet_max_share}})
+      under a fixed morning baseline.</li>
+    <li><strong>Some questions cannot be answered with public data.</strong> A dock-capacity
+      "what if" sandbox was investigated and closed, because station capacity over time was never
+      recorded (Section 5.2).</li>
+  </ul>
 </section>
 
 <section id="problem">
   <h2>2. The problem</h2>
-  <p class="todo">To be written in step 3.</p>
+  <p>Bike share only works as a transportation mode if it is reliably there. When a station is
+    empty, a rider cannot start a trip. When it is full, a rider cannot end one, and has to ride on
+    to find a dock. Both failures push people toward other modes. If they happen often at the stations
+    serving a neighborhood, bike share stops being a real choice for the people who live there.
+    That makes station imbalance an access question, not only a logistics one.</p>
+  <p>The City's Citi Bike contract, as summarized in the NYC Comptroller's review
+    <em>Riding Forward</em>, requires stations not to sit completely full or empty, with the penalty
+    applying only when adjacent stations are also unavailable. The tool is built for the oversight and
+    planning side of that relationship. Lyft, the operator, decides how its own trucks run; this tool
+    helps a reviewer at NYC DOT see where imbalance concentrates, how reliable stations have been, who is
+    affected, and what a given fleet could realistically cover.</p>
+  <div class="box note">
+    <span class="box-label">Who it is for</span>
+    NYC DOT Bike Share &amp; Shared Mobility reviewers, and anyone checking reliability claims against
+    public data. It is a static web page with precomputed data: no account, no backend, and a $0 stack.
+  </div>
 </section>
 
 <section id="data-methods">
   <h2>3. Data and methods</h2>
-  <p class="todo">To be written in step 3.</p>
+  <h3>3.1 Sources</h3>
+  <table>
+    <tr><th>Layer</th><th>Source</th><th>Coverage used here</th></tr>
+    <tr><td>Trips</td><td>Citi Bike S3 trip archives</td>
+      <td>{{trip_n_months}} months, {{trip_first_month}} – {{trip_last_month}};
+        {{n_stations}} stations ({{n_stations_full}} with every month covered)</td></tr>
+    <tr><td>Station status</td><td>Citi Bike GBFS feed</td>
+      <td>Logged by a scheduled GitHub Action; {{rel_snapshots}} snapshots used
+        (mostly July 13–26, 2026; see 5.1). Also read live by the dashboard.</td></tr>
+    <tr><td>NYCHA developments</td><td>NYC Open Data <code>phvi-damg</code></td>
+      <td>{{nycha_records}} records; {{nycha_threshold_m}} m proximity</td></tr>
+    <tr><td>Schools</td><td>NYC Open Data <code>wg9x-4ke6</code></td>
+      <td>{{school_records}} records (2019–2020 locations); {{school_threshold_m}} m proximity</td></tr>
+    <tr><td>Subway stations</td><td>NY State Open Data <code>i9wp-a4ja</code></td>
+      <td>{{subway_records}} records; {{subway_threshold_m}} m subway-gap distance</td></tr>
+    <tr><td>Weather</td><td>Open-Meteo historical archive</td>
+      <td>Daily temperature and precipitation for 18 fixed zones (a 6 km grid)</td></tr>
+  </table>
+
+  <h3>3.2 Quality rules (fixed)</h3>
+  <ul>
+    <li>Trips under 60 seconds or over 4 hours are dropped.</li>
+    <li>Low-volume stations are excluded from forecasting and typology clustering.</li>
+    <li>Offline stations are excluded from failure denominators: a station that is switched off is
+      not counted as "empty" or "full".</li>
+  </ul>
+
+  <h3>3.3 Methods, plainly</h3>
+  <dl>
+    <dt>Net flow</dt>
+    <dd>Arrivals minus departures per station, by hour, for weekdays and weekends, by season and month.
+      Negative means the station drains; positive means it fills.</dd>
+    <dt>Station typology</dt>
+    <dd>K-means clustering of each station's weekday hourly shape. k = {{typology_k}} had the best
+      silhouette score ({{typology_silhouette}}): {{n_commuter_core}} "commuter core" stations (fill in the
+      morning, drain in the evening) and {{n_residential_feeder}} "residential feeder" stations (the reverse).
+      {{n_low_signal}} stations had too little traffic to cluster.</dd>
+    <dt>Demand forecast</dt>
+    <dd>Three tiers compared honestly: a seasonal-naive baseline, a spline-based GAM, and a gradient-boosted
+      model with an extrapolation guard that falls back to simpler tiers outside the training temperature range.
+      Validated by {{n_folds}}-fold walk-forward testing (each month held out in turn), not a single split.</dd>
+    <dt>Reliability rate</dt>
+    <dd>Share of online station observations in the GBFS log with 0 bikes or 0 docks. A frequency, not
+      outage hours (see Section 5.1).</dd>
+    <dt>Capacity vs. reliability</dt>
+    <dd>Ordinary least squares: unusable rate ~ capacity + log(1 + demand), across stations.</dd>
+    <dt>Fleet simulator</dt>
+    <dd>Greedy truck routing over the morning deficit/surplus baseline. Each truck carries
+      {{fleet_capacity}} bikes and makes at most {{fleet_max_stops}} stops. Ten scenarios, 1 to 10 trucks.</dd>
+    <dt>Equity context</dt>
+    <dd>Distance from each station to the nearest NYCHA development, school, and subway station. Of
+      {{n_stations}} stations, {{n_near_nycha}} are within {{nycha_threshold_m}} m of NYCHA,
+      {{n_near_school}} within {{school_threshold_m}} m of a school, and {{n_transit_gap}} are
+      {{subway_threshold_m}} m or more from a subway station.</dd>
+  </dl>
 </section>
 
 <section id="findings">
   <h2>4. Findings</h2>
-  <p class="todo">To be written in step 4.</p>
+
+  <h3>4.1 How often stations were unusable</h3>
+  <p>Across {{rel_n_obs}} online station observations, stations had 0 bikes or 0 docks
+    <strong>{{rel_unusable_rate}}</strong> of the time ({{rel_n_unusable}} observations).
+    {{rel_n_offline}} offline observations were excluded. Nearly all observations come from July 13–26, 2026,
+    so this is a midsummer rate (Section 5.1).</p>
+  <ul>
+    <li><strong>Full is the bigger problem.</strong> {{rel_n_full}} observations were full and {{rel_n_empty}}
+      were empty, about {{rel_full_to_empty}} to 1. A full station blocks the end of a trip, which is
+      arguably worse for a rider than an empty one: they are already on a bike with nowhere to leave it.</li>
+    <li><strong>The burden is uneven.</strong> Among {{rel_n_rankable}} stations with at least {{rel_min_obs}}
+      observations, the median station was unusable {{rel_median_station_rate}} of the time; the worst was
+      unusable {{rel_max_station_rate}} of the time.</li>
+  </ul>
+
+  <h3>4.2 Capacity and reliability</h3>
+  <p>Across {{cap_n_stations}} stations, after controlling for demand, each extra dock is associated with an unusable rate about
+    {{cap_coef_points_per_dock}} percentage points {{cap_direction}} (standard error
+    {{cap_se_points_per_dock}}). Over a {{cap_gap_docks}}-dock difference, that is about
+    {{cap_gap_points}} points.</p>
+  <table>
+    <tr><th>Station size</th><th class="num">Stations</th><th class="num">Mean unusable rate</th></tr>
+    <tr><td>{{cap_band1_label}}</td><td class="num">{{cap_band1_n}}</td><td class="num">{{cap_band1_rate}}</td></tr>
+    <tr><td>{{cap_band2_label}}</td><td class="num">{{cap_band2_n}}</td><td class="num">{{cap_band2_rate}}</td></tr>
+    <tr><td>{{cap_band3_label}}</td><td class="num">{{cap_band3_n}}</td><td class="num">{{cap_band3_rate}}</td></tr>
+    <caption>Raw band means, before the demand control. The regression above is the adjusted result.</caption>
+  </table>
+  <div class="box caveat">
+    <span class="box-label">Pattern, not proof</span>
+    This compares different stations at one point in time. It does not show that adding docks to a
+    given station would make it more reliable. Borough and zone are not in the pipeline, so location is
+    not controlled for.
+  </div>
+
+  <h3>4.3 Forecasting: the simple baseline won</h3>
+  <p>Mean absolute error across {{n_folds}} walk-forward folds: seasonal naive <strong>{{mae_naive}}</strong>,
+    guarded model {{mae_guarded}}, GAM {{mae_gam}} bikes/day. Naive's advantage is statistically significant
+    (Wilcoxon signed-rank, p = {{p_guarded_vs_naive}} vs. guarded and p = {{p_gam_vs_naive}} vs. GAM).
+    The guarded model did win {{guarded_win_months}}; naive won the other {{n_naive_wins}} months.</p>
+  <figure class="avoid-break">
+    <img src="figures/fold_mae.svg" alt="Line chart of monthly forecast error for three models; seasonal naive is lowest in 9 of 12 months, the guarded model is lowest in December through February." style="width:100%">
+    <figcaption>Forecast error by held-out month. Lower is better.</figcaption>
+  </figure>
+  <p>The practical reading: for a station's typical flow at a given hour, its own historical average
+    for that hour and day type is hard to beat. The models only pulled ahead in the coldest months. The dashboard therefore shows historical patterns as the main view and labels the
+    model comparison openly, instead of presenting a model forecast as the answer.</p>
+
+  <h3>4.4 What a truck fleet can cover</h3>
+  <p>The morning baseline flags {{fleet_n_deficit_flagged}} deficit stations and
+    {{fleet_n_surplus_flagged}} surplus stations. One truck fully rebalances {{fleet_one_truck}} deficit
+    stations; {{fleet_max_trucks}} trucks rebalance {{fleet_max_serviced}} ({{fleet_max_share}}).
+    Every truck in every scenario hits the {{fleet_max_stops}}-stop cap, so the binding limit is stops per
+    shift, not a lack of stations needing work.</p>
+  <figure class="avoid-break">
+    <img src="figures/fleet_coverage.svg" alt="Bar chart: deficit stations fully rebalanced rises roughly linearly from 15 with one truck to 142 with ten trucks." style="width:100%">
+    <figcaption>Deficit stations fully rebalanced, by fleet size (cumulative).</figcaption>
+  </figure>
+  <p>For a planner this points beyond trucks: where imbalance is structural and recurs every day,
+    station size and placement may matter as much as rebalancing, which is why the capacity result (4.2)
+    is worth testing further.</p>
 </section>
 
 <section id="limitations">
   <h2>5. Limitations</h2>
+  <p class="lead">These are the real limits of what this tool can claim. Most are also stated in the
+    dashboard or the repository, near the number they affect. The window problem in 5.1 was found while
+    writing this report and is not yet reflected in the dashboard's labels.</p>
+
   <section id="gbfs-sampling">
     <h3>5.1 GBFS sampling resolution</h3>
-    <p class="todo">To be written in step 5.</p>
+    <p>The reliability numbers come from {{rel_snapshots}} snapshots. Their first and last timestamps are
+      {{rel_days}} days apart ({{rel_start}} – {{rel_end}}), but that span is misleading: the file was last
+      built from a copy of the log holding 190 snapshots from July 13–26, 2026, plus one from
+      September 13. The single longest gap, about {{rel_max_gap_days}} days, is that hole. Within the
+      July stretch, the median gap between snapshots is about {{rel_median_gap_min}} minutes.
+      The logger itself kept running; the fuller log has not been analyzed yet (Section 6, step 1).</p>
+    <ul>
+      <li><strong>A rate, not a duration.</strong> We can say how often a station was found unusable. We
+        cannot say for how many minutes. A 15-minute outage can start and end between two snapshots and
+        never be seen.</li>
+      <li><strong>Not the contract measure.</strong> The contract's 60- and 120-minute thresholds cannot be
+        resolved from snapshots this far apart. Nothing here is a penalty calculation.</li>
+      <li><strong>Two weeks of midsummer.</strong> In practice the rates describe late July. Seasonal
+        differences in reliability are not measured yet, and the capacity result in 4.2 rests on the same
+        window.</li>
+    </ul>
   </section>
+
   <section id="phase5-closeout">
     <h3>5.2 Dock capacity sandbox (Phase 5): closed, not viable</h3>
-    <p class="todo">To be written in step 5.</p>
+    <p><strong>What it was.</strong> The original plan named a "dock capacity sandbox": pick a station,
+      change how many docks it has, and see how its risk of running empty or full would change. A
+      planning tool for real capacity decisions.</p>
+    <p><strong>What was investigated.</strong> Two things, against the real snapshot log
+      (2,440,748 rows, 2,481 stations, as of September 13, 2026):</p>
+    <ol>
+      <li><em>Can the log measure outage duration?</em> Partly. When a station was caught unusable and had
+        another reading within 70 minutes, it was still unusable <strong>67.9%</strong> of the time
+        (135,563 of 199,552). Outages tend to persist. But short outages are missed between polls, so any
+        minutes-based estimate would be biased long.</li>
+      <li><em>Is there any record of a station's capacity changing?</em> No. The logger recorded bikes and
+        docks available, but never the <code>capacity</code> field itself. The obvious proxy, bikes + docks,
+        appears to vary at 92% of stations, but that is docks going temporarily out of service, not stations
+        being resized. One checked station's proxy moved between 16 and 20 across 981 snapshots while its
+        true capacity stayed 19. No public third-party archive of capacity history was found either; the
+        Comptroller's own GBFS project has the same gap.</li>
+    </ol>
+    <p><strong>Decision.</strong> Closed as not viable, not deferred. The input the feature needs, capacity
+      changing at the same station over time, was never collected, and real resizing is too rare to collect
+      enough of in any realistic timeframe. The persistence finding (about 2 in 3 outages still present an
+      hour later) is kept and shown in the dashboard's Live Docks data notes.</p>
+    <p><strong>The alternative.</strong> The closeout named a different question that public data
+      <em>can</em> answer: do stations that already differ in capacity differ in reliability, network-wide,
+      once demand is held constant? That cross-sectional comparison was later built, and it is the result
+      in Section 4.2. It answers "what is associated with reliability," not "what would happen if this
+      station were resized."</p>
+    <p>Full write-up: <code>docs_v2/phase5-closeout.md</code>.</p>
   </section>
+
   <section id="live-mode-caveats">
     <h3>5.3 Live mode caveats</h3>
-    <p class="todo">To be written in step 5.</p>
+    <ul>
+      <li><strong>An instant reading.</strong> Live Docks shows the GBFS feed at the moment the page loads
+        (refreshed every 60 seconds). "Service availability" and "double-outage" are point-in-time
+        approximations, not the contract's 60-minute measurement.</li>
+      <li><strong>"Adjacent" is this project's definition.</strong> A double-outage is a station with 0 bikes
+        or 0 docks that has another such station within 500 m. The 500 m radius is a project choice, not the
+        contract's, and the dashboard says so.</li>
+      <li><strong>Some stations drop out.</strong> Stations with no live match, a capacity of 0, or not both
+        renting and returning are excluded from live counts, and the excluded count is shown.</li>
+      <li><strong>Capacity exists only in live mode.</strong> Per-station capacity comes from the live
+        <code>station_information</code> feed. The capacity analysis in 4.2 therefore pairs today's capacity
+        with a past reliability window. Capacity rarely changes (5.2), so the risk is small but real.</li>
+      <li><strong>The truck list is a fixed baseline.</strong> Priority truck stops come from the historical
+        morning baseline and do not change with live conditions.</li>
+    </ul>
   </section>
+
   <section id="other-limitations">
     <h3>5.4 Other limitations</h3>
-    <p class="todo">To be written in step 5.</p>
+    <ul>
+      <li><strong>No borough or zone control.</strong> The capacity analysis controls for demand only.</li>
+      <li><strong>Weather scenarios are elasticities, not a weather model.</strong> They scale historical flow
+        by fitted temperature and precipitation sensitivities. A heat-wave preset was left out because the fit
+        does not support extrapolating that far.</li>
+      <li><strong>School locations are from 2019–2020.</strong> It was the only coordinate-bearing school dataset
+        on NYC Open Data when checked.</li>
+      <li><strong>Truck routing is a sketch.</strong> No real depot locations are public, so each tour starts
+        at the largest surplus station. The {{fleet_max_stops}}-stop cap is a rough shift estimate, not a
+        time or distance model.</li>
+      <li><strong>Trips show demand that was served, not demand that was lost.</strong> A rider who gave up
+        at an empty station leaves no trip record, so the trip data undercounts demand exactly where
+        reliability is worst.</li>
+      <li><strong>Associations, not causes.</strong> Typology, equity proximity and the capacity result describe
+        patterns. None of them is a causal estimate.</li>
+    </ul>
   </section>
 </section>
 
 <section id="future-steps">
   <h2>6. Future steps</h2>
-  <p class="todo">To be written in step 6.</p>
+  <p class="lead">Ordered by value to a DOT reviewer per unit of effort. None of these is built yet.</p>
+  <ol class="steps">
+    <li><strong>Re-run reliability on the full log.</strong> The committed rates use about two weeks of
+      snapshots (5.1). The log in the repository now runs to early October, and the logger continues on the
+      <code>data-snapshots</code> branch. Re-running <code>pipeline/reliability.py</code> and
+      <code>pipeline/reliability_capacity.py</code> on all of it would replace a two-week sample with
+      months of data and allow a first seasonal comparison. Low effort, highest value.</li>
+    <li><strong>Log the full <code>station_information</code> response on every poll.</strong> This is what
+      the Comptroller's project does. It would start a real capacity history going forward, so the gap in 5.2
+      cannot happen again for any other field.</li>
+    <li><strong>Poll more often.</strong> Snapshots every 10–15 minutes would let the log approach the contract's
+      60-minute threshold and estimate outage durations, not only rates. This trades off against repository size
+      and GitHub Actions scheduling delays.</li>
+    <li><strong>Add borough and community district.</strong> Joining NYC Open Data boundary files would add the
+      missing location control to the capacity analysis and let results be reported by community district.</li>
+    <li><strong>Cross-check against operator reports.</strong> Compare the measured unusable rates with Citi Bike's
+      published monthly operating reports, to see whether the two tell the same story.</li>
+    <li><strong>Estimate lost demand.</strong> Combine reliability with trip data to estimate trips that did not
+      happen because a station was empty or full. This would turn reliability into riders affected, which is the
+      number a mode-choice argument needs.</li>
+    <li><strong>Revisit weather once summer data accumulates.</strong> More hot days in the training data would
+      make a moderate hot-day or heat-wave scenario defensible.</li>
+  </ol>
 </section>
 
 <section id="ai-llm">
   <h2>7. How AI and LLMs could improve the tool</h2>
-  <p class="todo">To be written in step 7.</p>
+  <p class="lead">The core rule would not change: the pipeline computes every number, and a language model
+    only explains, retrieves, or drafts around those numbers. Used that way, an LLM can make the tool
+    easier to use for people who will never open a JSON file. None of this is built yet.</p>
+
+  <h3>7.1 Useful applications</h3>
+  <dl>
+    <dt>Plain-language station briefings</dt>
+    <dd>For any station, generate a short summary from its own record: its flow pattern, typology,
+      reliability rate and rank, and nearby NYCHA, schools and subway. A council member's office or a
+      community board would read two or three plain sentences (for example, that a station fills up most
+      weekday mornings and how often it was found unusable) instead of a chart. Briefings would be generated once in the pipeline and saved as
+      JSON, so the site stays static and free to host.</dd>
+    <dt>Questions in plain English</dt>
+    <dd>A reviewer asks "Which commuter-core stations were full most often in August?" The model turns that
+      into a structured query (filters, sort, limit) that ordinary code runs against the existing data files.
+      The answer is a table, and the query is shown next to it, so the reviewer can check what was asked.</dd>
+    <dt>Draft oversight memos</dt>
+    <dd>Each time the data refreshes, draft a one-page memo on what changed: stations whose reliability
+      moved most, new worst-performing stations, and how the fleet picture shifted. A person reviews and
+      edits it before it goes anywhere.</dd>
+    <dt>Linking text feedback to measured reliability</dt>
+    <dd>If DOT has free-text rider feedback or community board testimony about bike share, an LLM could tag
+      each comment with a station and a problem type (empty, full, broken dock). Joining those tags to the
+      measured rates would show whether complaints track real outages or point to problems the data misses.
+      This depends on a text source that has not been identified yet.</dd>
+    <dt>Explaining changes</dt>
+    <dd>When a station's rate jumps between refreshes, an assistant could gather the context the pipeline
+      already has (weather, nearby stations, typology) and suggest likely reasons, clearly marked as
+      hypotheses for a person to check.</dd>
+  </dl>
+
+  <h3>7.2 Guardrails</h3>
+  <ul>
+    <li><strong>No invented numbers.</strong> Every number in generated text must appear in the input record.
+      An automated check would compare them and reject the text if any number is new, the same way this
+      report refuses to build with an unfilled placeholder.</li>
+    <li><strong>Show the source.</strong> Every generated answer names the data file and window it came from.</li>
+    <li><strong>Say "I don't know".</strong> When the data does not cover a question, for example outage
+      duration (5.1), the system says so instead of guessing.</li>
+    <li><strong>Test before trusting.</strong> A fixed set of questions with known answers, re-run whenever the
+      prompts or the model change.</li>
+    <li><strong>Keep the cost at zero for viewers.</strong> Run the model in the pipeline and publish its output
+      as static files. No API key in the browser, and no per-visit cost.</li>
+  </ul>
+  <p>How AI was used to build this project is a separate topic, covered in the project's
+    AI-collaboration retrospective.</p>
 </section>
+
+<div class="footnote">Public data: Citi Bike GBFS and trip data, NYC Open Data, NY State Open Data, Open-Meteo.
+  Rebuild this report with <code>python3 -m report.build_report</code>.</div>
 
 </body>
 </html>

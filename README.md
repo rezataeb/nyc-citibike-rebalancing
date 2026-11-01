@@ -6,6 +6,7 @@
 **Live app:** https://nyc-citibike-rebalancing.vercel.app  
 **Demo:** https://nyc-citibike-rebalancing.netlify.app  
 **Report (PDF):** [report/Citi_Bike_Rebalancing_Report.pdf](report/Citi_Bike_Rebalancing_Report.pdf)  
+**Early data exploration, Jul 2025–Jun 2026 window (PDF):** [notebooks/session_7_5_eda_report.pdf](notebooks/session_7_5_eda_report.pdf) ([notebook](notebooks/session_7_5_eda_report.ipynb)) -- predates the current Sep 2025–Aug 2026 window, so its numbers differ  
 **Repo:** https://github.com/rezataeb/nyc-citibike-rebalancing
 
 ![Dashboard: historical station balance map, KPI ribbon and priority truck stops](docs/dashboard-screenshot.png)
@@ -159,11 +160,11 @@ local, on-disk viewing.
 ├── pipeline/             # Python: download, QC, flows, equity join,
 │                         #   elasticities, fleet simulator, reliability
 ├── tests/                # pytest + dashboard JS test suites
-├── notebooks/            # exploratory data analysis report
+├── notebooks/            # early EDA report (Jul 2025–Jun 2026 window)
 ├── demo/                 # source for the Netlify launch-clip demo
 ├── report/               # project report: HTML source, build script, PDF
 │                         #   (rebuild: python3 -m report.build_report)
-├── docs/                 # screenshots and design mockup
+├── docs/                 # README screenshot
 ├── docs_v2/              # working notes and the Phase 5 closeout
 ├── .github/workflows/    # hourly GBFS snapshot job
 └── vercel.json           # static deploy config

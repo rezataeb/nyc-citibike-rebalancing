@@ -188,3 +188,29 @@ def test_threshold_distance_is_a_distance_fact():
 def test_percent_word_is_read_as_a_percentage():
     assert extract_numbers("13.0 percent") == [13.0]
     assert check_numbers("13.0 percent of observations", FACTS) == []
+
+
+# --- edge cases found by running the template over every real station ----------
+
+def test_comma_ordinal_is_one_number():
+    assert extract_numbers("ranked 1,174th") == [1174.0]
+
+
+def test_initials_and_street_abbreviations_do_not_split_sentences():
+    from pipeline.guardrails import split_sentences
+
+    assert len(split_sentences("It is near St. Nicholas Ave and Ralph A. Fabrizio School. It is busy.")) == 2
+
+
+def test_time_words_inside_other_words_are_not_time_claims():
+    assert check_day_type_scope("It is near P.S. 235 Janice Marie Knight School.") == []
+
+
+def test_time_words_inside_a_fact_name_are_not_time_claims():
+    facts = {**FACTS, "context": {**FACTS["context"], "school_name": "Manhattan Comprehensive Night and Day High School"}}
+    assert check_day_type_scope("It is near Manhattan Comprehensive Night and Day High School.", facts) == []
+
+
+def test_number_glued_to_m_inside_a_name_is_allowed_when_the_name_is_a_fact():
+    facts = {**FACTS, "context": {**FACTS["context"], "school_name": "P.S. 184m Shuang Wen"}}
+    assert check_numbers("It is near P.S. 184m Shuang Wen.", facts) == []

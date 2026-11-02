@@ -48,7 +48,7 @@ TYPOLOGY_SHORT_NAMES = ("commuter core", "residential feeder")
 
 _TIME = re.compile(r"\b(\d{1,2})(?::00)?\s*([ap])\.?\s*m\b\.?", re.IGNORECASE)
 _NOON_MIDNIGHT = re.compile(r"\b(noon|midnight)\b", re.IGNORECASE)
-_ORDINAL = re.compile(r"#?\b(\d+)(?:st|nd|rd|th)\b", re.IGNORECASE)
+_ORDINAL = re.compile(r"#?\b(\d{1,3}(?:,\d{3})+|\d+)(?:st|nd|rd|th)\b", re.IGNORECASE)
 _PERCENT = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*(?:%|percent\b)", re.IGNORECASE)
 _METERS = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+)\s*(?:m|meters|metres)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"(?<![\w.])-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|(?<![\w.])-?\d+(?:\.\d+)?")
@@ -91,7 +91,7 @@ def extract_numbers(text: str) -> list[str | float]:
         tokens.append(Meters(match.group(1).replace(",", "")))
     remaining = _METERS.sub(" ", remaining)
     for match in _ORDINAL.finditer(remaining):
-        tokens.append(float(match.group(1)))
+        tokens.append(float(match.group(1).replace(",", "")))
     remaining = _ORDINAL.sub(" ", remaining)
     for match in _NUMBER.finditer(remaining):
         tokens.append(float(match.group(0).replace(",", "")))
@@ -127,8 +127,17 @@ def allowed_values(facts: dict) -> dict[str, set]:
             if key.endswith("_m"):
                 allowed["meters"].add(float(leaf))
         elif isinstance(leaf, str):
+            # A name repeated verbatim yields the same tokens, so each counts as its own kind
+            # (e.g. the school "P.S. 184m Shuang Wen" yields Meters 184).
             for token in extract_numbers(leaf):
-                allowed["time" if isinstance(token, str) else "number"].add(token)
+                if isinstance(token, str):
+                    allowed["time"].add(token)
+                    continue
+                allowed["number"].add(float(token))
+                if isinstance(token, Percent):
+                    allowed["percent"].add(float(token))
+                elif isinstance(token, Meters):
+                    allowed["meters"].add(float(token))
     return allowed
 
 
@@ -157,19 +166,39 @@ def check_numbers(text: str, facts: dict) -> list[str]:
     return violations
 
 
+_NO_SPLIT_AFTER = r"(?<![ap]\.m\.)(?<!\b[A-Z]\.)(?<!\bSt\.)(?<!\bAv\.)(?<!\bAve\.)(?<!\bSq\.)(?<!\bDr\.)(?<!\bMt\.)(?<!\bJr\.)"
+
+
 def split_sentences(text: str) -> list[str]:
-    """Split on sentence-ending punctuation, keeping 'a.m.' / '13.0' intact."""
-    parts = re.split(r"(?<![ap]\.m\.)(?<=[.!?])\s+(?=[A-Z])", text.strip())
+    """Split on sentence-ending punctuation, keeping 'a.m.', initials ('Ralph A. Fabrizio',
+    'P.S.') and street abbreviations ('St. Nicholas') inside their sentence."""
+    parts = re.split(_NO_SPLIT_AFTER + r"(?<=[.!?])\s+(?=[A-Z])", text.strip())
     return [p for p in parts if p]
 
 
-def check_day_type_scope(text: str) -> list[str]:
-    """A sentence that names a time of day must also say weekday(s) or weekend(s)."""
+def _fact_names(facts: dict | None) -> list[str]:
+    """Text values in the facts (station, subway, school, housing names), longest first."""
+    if not facts:
+        return []
+    names = {leaf for _, leaf in _walk(facts) if isinstance(leaf, str) and len(leaf) > 3}
+    return sorted(names, key=len, reverse=True)
+
+
+def check_day_type_scope(text: str, facts: dict | None = None) -> list[str]:
+    """A sentence that names a time of day must also say weekday(s) or weekend(s).
+
+    Names from the facts are blanked out first, so "Night and Day High School"
+    is a name, not a time claim.
+    """
+    names = _fact_names(facts)
     violations = []
     for sentence in split_sentences(text):
-        lower = sentence.lower()
-        names_time = bool(_TIME.search(sentence) or _NOON_MIDNIGHT.search(sentence)) or any(
-            w in lower for w in TIME_OF_DAY_WORDS
+        scrubbed = sentence
+        for name in names:
+            scrubbed = re.sub(re.escape(name), " ", scrubbed, flags=re.IGNORECASE)
+        lower = scrubbed.lower()
+        names_time = bool(_TIME.search(scrubbed) or _NOON_MIDNIGHT.search(scrubbed)) or any(
+            re.search(rf"\b{w}s?\b", lower) for w in TIME_OF_DAY_WORDS  # whole words: not "Knight", "Morningside"
         )
         if names_time and not any(w in lower for w in DAY_TYPE_WORDS):
             violations.append(f"time claim without weekday/weekend: {sentence!r}")
@@ -201,4 +230,4 @@ def check_style(text: str) -> list[str]:
 
 def check_briefing(text: str, facts: dict) -> list[str]:
     """All violations for one briefing; an empty list means it passes."""
-    return check_numbers(text, facts) + check_day_type_scope(text) + check_typology_hedge(text, facts) + check_style(text)
+    return check_numbers(text, facts) + check_day_type_scope(text, facts) + check_typology_hedge(text, facts) + check_style(text)

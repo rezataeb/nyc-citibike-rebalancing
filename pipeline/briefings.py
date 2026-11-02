@@ -69,8 +69,110 @@ TYPOLOGY_PEAK_SIDES = {
 }
 
 # Stations that get no briefing, each with its reason. Explicit ids only --
-# never matched by name pattern. Contents need the user's approval.
-EXCLUDED_STATIONS: dict[str, str] = {}
+# never matched by name pattern (note 'Shop Morgan ' really has a trailing
+# space in the data). Every entry was approved by the user.
+OPERATOR_FACILITY = "operator facility, not a public station"
+NEW_JERSEY = "New Jersey station: NYC trip data sees only cross-river trips"
+EXCLUDED_STATIONS: dict[str, str] = {
+    # Operator facilities: not in the live public feed or reliability.json;
+    # names point to a depot, shop or charging site. (Approved 2026-11-02.)
+    '1234.56': OPERATOR_FACILITY,  # Morgan HCT Charging
+    '190 Morgan': OPERATOR_FACILITY,  # 190 Morgan
+    'MTL-LAB-BKN': OPERATOR_FACILITY,  # MTL-LAB-BKN
+    'SYS016': OPERATOR_FACILITY,  # Morgan Bike Mechanics
+    'SYS033': OPERATOR_FACILITY,  # Pier 40 X2
+    'SYS038': OPERATOR_FACILITY,  # Morgan Loading Docks
+    'Shop Morgan ': OPERATOR_FACILITY,  # Shop Morgan
+    # New Jersey (Jersey City / Hoboken): real public stations, but the NYC trip
+    # archive sees only their cross-river trips, so all are low-signal here.
+    # (Approved 2026-11-02.)
+    'HB101': NEW_JERSEY,  # Hoboken Terminal - Hudson St & Hudson Pl
+    'HB103': NEW_JERSEY,  # South Waterfront Walkway - Sinatra Dr & 1 St
+    'HB105': NEW_JERSEY,  # City Hall - Washington St & 1 St
+    'HB106': NEW_JERSEY,  # River St & Newark St
+    'HB107': NEW_JERSEY,  # Hudson Pl & Hoboken Terminal
+    'HB201': NEW_JERSEY,  # 12 St & Sinatra Dr N
+    'HB202': NEW_JERSEY,  # 14 St Ferry - 14 St & Shipyard Ln
+    'HB203': NEW_JERSEY,  # Bloomfield St & 15 St
+    'HB301': NEW_JERSEY,  # 4 St & Grand St
+    'HB302': NEW_JERSEY,  # 6 St & Grand St
+    'HB303': NEW_JERSEY,  # Clinton St & 7 St
+    'HB304': NEW_JERSEY,  # 7 St & Monroe St
+    'HB305': NEW_JERSEY,  # 9 St HBLR - Jackson St & 8 St
+    'HB401': NEW_JERSEY,  # Southwest Park - Jackson St & Observer Hwy
+    'HB402': NEW_JERSEY,  # Madison St & 1 St
+    'HB404': NEW_JERSEY,  # Mama Johnson Field - 4 St & Jackson St
+    'HB407': NEW_JERSEY,  # Adams St & 2 St
+    'HB408': NEW_JERSEY,  # Marshall St & 2 St
+    'HB409': NEW_JERSEY,  # Clinton St & Newark St
+    'HB501': NEW_JERSEY,  # Columbus Park - Clinton St & 9 St
+    'HB502': NEW_JERSEY,  # 11 St & Washington St
+    'HB503': NEW_JERSEY,  # Madison St & 10 St
+    'HB505': NEW_JERSEY,  # Willow Ave & 12 St
+    'HB506': NEW_JERSEY,  # Grand St & 14 St
+    'HB508': NEW_JERSEY,  # Monroe St & 11 St
+    'HB601': NEW_JERSEY,  # Church Sq Park - 5 St & Park Ave
+    'HB602': NEW_JERSEY,  # Stevens - River Ter & 6 St
+    'HB603': NEW_JERSEY,  # 8 St & Washington St
+    'HB608': NEW_JERSEY,  # 2 St & Park Ave
+    'HB609': NEW_JERSEY,  # River St & 1 St
+    'HB610': NEW_JERSEY,  # Adams St & 12 St
+    'HB611': NEW_JERSEY,  # 4 St & River St
+    'HB612': NEW_JERSEY,  # Newark St & Washington St
+    'JC002': NEW_JERSEY,  # Paulus Hook
+    'JC003': NEW_JERSEY,  # City Hall
+    'JC006': NEW_JERSEY,  # Warren St
+    'JC008': NEW_JERSEY,  # Newport Pkwy
+    'JC009': NEW_JERSEY,  # Hamilton Park
+    'JC013': NEW_JERSEY,  # Marin Light Rail
+    'JC014': NEW_JERSEY,  # Columbus Drive
+    'JC018': NEW_JERSEY,  # 5 Corners Library
+    'JC019': NEW_JERSEY,  # Hilltop
+    'JC020': NEW_JERSEY,  # Baldwin at Montgomery
+    'JC023': NEW_JERSEY,  # Brunswick St
+    'JC024': NEW_JERSEY,  # Pershing Field
+    'JC027': NEW_JERSEY,  # Jersey & 6th St
+    'JC032': NEW_JERSEY,  # Newark Ave
+    'JC034': NEW_JERSEY,  # Christ Hospital
+    'JC035': NEW_JERSEY,  # Van Vorst Park
+    'JC038': NEW_JERSEY,  # Essex Light Rail
+    'JC052': NEW_JERSEY,  # Liberty Light Rail
+    'JC053': NEW_JERSEY,  # Lincoln Park
+    'JC057': NEW_JERSEY,  # Riverview Park
+    'JC059': NEW_JERSEY,  # Heights Elevator
+    'JC065': NEW_JERSEY,  # Dey St
+    'JC066': NEW_JERSEY,  # Newport PATH
+    'JC072': NEW_JERSEY,  # Morris Canal
+    'JC074': NEW_JERSEY,  # Jersey & 3rd
+    'JC075': NEW_JERSEY,  # Monmouth & 6th
+    'JC076': NEW_JERSEY,  # Dixon Mills
+    'JC077': NEW_JERSEY,  # Astor Place
+    'JC078': NEW_JERSEY,  # Lafayette Park
+    'JC081': NEW_JERSEY,  # Brunswick & 6th
+    'JC082': NEW_JERSEY,  # Manila & 1st
+    'JC084': NEW_JERSEY,  # Communipaw & Berry Lane
+    'JC095': NEW_JERSEY,  # Bergen Ave
+    'JC097': NEW_JERSEY,  # York St & Marin Blvd
+    'JC098': NEW_JERSEY,  # Washington St
+    'JC099': NEW_JERSEY,  # Montgomery St
+    'JC102': NEW_JERSEY,  # Grand St
+    'JC103': NEW_JERSEY,  # Journal Square
+    'JC104': NEW_JERSEY,  # Harborside
+    'JC105': NEW_JERSEY,  # Hoboken Ave at Monmouth St
+    'JC109': NEW_JERSEY,  # Bergen Ave & Sip Ave
+    'JC110': NEW_JERSEY,  # JC Medical Center
+    'JC115': NEW_JERSEY,  # Grove St PATH
+    'JC116': NEW_JERSEY,  # Exchange Pl
+    'JC117': NEW_JERSEY,  # Dr. Lena Edwards Park
+    'JC118': NEW_JERSEY,  # Pacific Ave & Communipaw Ave
+    'JC122': NEW_JERSEY,  # Union St & Bergen Ave
+    'JC127': NEW_JERSEY,  # Arlington Ave & Wilkinson Ave
+    'JC139': NEW_JERSEY,  # Danforth Light Rail
+    'JC140': NEW_JERSEY,  # Caven Point Recreation Fields
+    'JC145': NEW_JERSEY,  # Mallory Ave & Roosevelt Ave
+    'JC148': NEW_JERSEY,  # Bay St & Washington St
+    'JC149': NEW_JERSEY,  # Washington St & Morgan St
+}
 
 
 def hour_label(hour: int) -> str:

@@ -275,3 +275,24 @@ def test_full_record_carries_the_typology_flag():
     facts = station_facts("A", _station(weekday=_curve(h14=1.1, h15=-0.4)), RELIABILITY, rank_unusable(RELIABILITY["stations"]), WINDOWS)
     assert facts["typology"] == COMMUTER
     assert facts["typology_matches_peak"] is False
+
+
+# --- the approved exclusion list -------------------------------------------
+
+def test_exclusion_list_is_the_approved_groups_with_reasons():
+    from pipeline.briefings import EXCLUDED_STATIONS, NEW_JERSEY, OPERATOR_FACILITY
+
+    reasons = list(EXCLUDED_STATIONS.values())
+    assert reasons.count(OPERATOR_FACILITY) == 7
+    assert reasons.count(NEW_JERSEY) == 86
+    assert len(EXCLUDED_STATIONS) == 93
+
+
+def test_every_excluded_id_exists_in_flows_json():
+    """Exact ids can silently miss (e.g. a trailing space); this catches a typo'd id."""
+    import json
+
+    from pipeline.briefings import EXCLUDED_STATIONS, FLOWS_PATH
+
+    stations = json.loads(FLOWS_PATH.read_text())["stations"]
+    assert [station_id for station_id in EXCLUDED_STATIONS if station_id not in stations] == []

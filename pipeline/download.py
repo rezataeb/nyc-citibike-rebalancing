@@ -13,6 +13,8 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+from pipeline.station_ids import canonicalize_columns
+
 BUCKET_URL = "https://s3.amazonaws.com/tripdata"
 RAW_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "raw"
 CHUNK_SIZE = 1024 * 1024  # 1 MB, for streaming the download to disk
@@ -56,6 +58,10 @@ def load_trips(zip_path: Path) -> pd.DataFrame:
     (float) for the same physical station -- which silently splits one
     station into two groups in any later groupby("station_id"). NaN stays
     NaN either way, so QC's missing-station-id logic is unaffected.
+
+    Reading as str was not enough on its own: the source files themselves
+    sometimes write "7293.1" for "7293.10" (found 2026-11-02, every month).
+    station_ids.canonicalize_columns merges those into their twin.
     """
     with zipfile.ZipFile(zip_path) as zf:
         csv_names = sorted(
@@ -64,7 +70,7 @@ def load_trips(zip_path: Path) -> pd.DataFrame:
             if name.endswith(".csv") and not name.startswith("__MACOSX")
         )
         frames = [pd.read_csv(zf.open(name), dtype=STATION_ID_COLUMNS) for name in csv_names]
-    return pd.concat(frames, ignore_index=True)
+    return canonicalize_columns(pd.concat(frames, ignore_index=True), list(STATION_ID_COLUMNS))
 
 
 if __name__ == "__main__":

@@ -11,32 +11,32 @@
     "max_gap_end": "2026-09-13T17:52:39+00:00",
     "n_days_with_snapshots": 94
   },
-  "n_joined": 2400,
+  "n_joined": 2397,
   "min_observations": 20,
   "method": {
     "inputs": "reliability.py's per-station unusable rate; a live GBFS capacity fetch; flows.json's weekday-curve magnitude as a demand control",
     "model": "unusable_rate ~ capacity + log1p(demand), plain OLS",
     "controls": "demand only -- borough/zone is not available anywhere in this pipeline"
   },
-  "capacity_coefficient_per_dock": -0.001030511935554707,
-  "capacity_coefficient_se": 0.00017658885729875159,
+  "capacity_coefficient_per_dock": -0.0010385786653882947,
+  "capacity_coefficient_se": 0.00017491786788989525,
   "capacity_gap_docks": 20,
-  "reliability_gap_points": 2.061023871109414,
+  "reliability_gap_points": 2.0771573307765894,
   "band_summary": [
     {
       "label": "< 20 docks",
       "n_stations": 570,
-      "mean_unusable_rate": 0.1489751590343902
+      "mean_unusable_rate": 0.14893739907156925
     },
     {
       "label": "20-39 docks",
-      "n_stations": 1380,
-      "mean_unusable_rate": 0.13405285023367824
+      "n_stations": 1375,
+      "mean_unusable_rate": 0.13375671850001586
     },
     {
       "label": "40+ docks",
-      "n_stations": 450,
-      "mean_unusable_rate": 0.10044189549924726
+      "n_stations": 452,
+      "mean_unusable_rate": 0.10034736418131229
     }
   ],
   "headline": "After accounting for demand, stations with 40+ docks are associated with unusable rates about 2.1 percentage points lower than stations with under 20 docks."

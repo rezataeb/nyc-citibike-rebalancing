@@ -42,22 +42,18 @@
   :root[data-theme="dark"] { --bg: #121216; --card: #1c1c22; --ink: #f2f2f5; --muted: #a3a3b5; --line: #34343e; }
 </style>
 </head>
-<body>
+<body data-video="hiring">
 <main>
   <header>
     <div class="brand">Citi Bike Rebalancing Explorer<small>Independent project · public data · not an official NYC DOT or Citi Bike product</small></div>
     <a href="https://nyc-citibike-rebalancing.vercel.app/">Try it for free →</a>
   </header>
 
-  <h1>A one-minute tour</h1>
-  <p class="sub">What it is, how it works, and what it shows. For recruiters and hiring managers.</p>
+  <h1 id="tour-title"></h1>
+  <p class="sub" id="tour-sub"></p>
 
   <div class="player" id="player">
-    <video id="tour" controls playsinline preload="metadata" poster="media/hiring_poster.jpg">
-      <source src="media/hiring.mp4" type="video/mp4">
-      <track kind="captions" src="media/hiring.vtt" srclang="en" label="English">
-      Your browser can't play this video. <a href="media/hiring.mp4">Download it</a>.
-    </video>
+    <video id="tour" controls playsinline preload="metadata"></video>
     <div class="endcard" id="endcard" role="region" aria-label="Links">
       <h2>Try it for free.</h2>
       <div class="links">
@@ -80,25 +76,49 @@
   <p class="note">The video has no voice; captions repeat the on-screen text. Every number in it comes from the project's public data files.</p>
 </main>
 <script>
-// The video's last slide lists the links as text; an MP4 cannot hold links.
-// Links are absolute, so the same page works on Vercel and on Netlify.
-// So when that slide starts, a clickable copy of it covers the video, and it
-// stays after the video ends. Seeking back hides it again.
-const END_CARD_LEAD_S = 7; // the last slide is 8 s; show once its text has settled
+// A video's last slide shows its call to action, but an MP4 cannot hold
+// links. So when that slide starts, a clickable copy of it covers the video,
+// and it stays after the video ends. Seeking back hides it again. Links are
+// absolute, so the same page works on Vercel and on Netlify.
+//
+// One page, two videos: <body data-video> picks the default (the Netlify
+// deploy sets "dot"); ?v=hiring or ?v=dot overrides it.
+const VIDEOS = {
+  hiring: { title: 'A one-minute tour', lastSlideS: 8,
+    sub: 'What it is, how it works, and what it shows. For recruiters and hiring managers.' },
+  dot: { title: 'A 90-second tour', lastSlideS: 5,
+    sub: 'Time change, live data, the Scenario Planner and AI briefings. For DOT planners and analysts.' },
+};
+// Show the card 1 s into the last slide, once its text has settled.
+const endCardLead = id => VIDEOS[id].lastSlideS - 1;
 
-// Pure rule, tested in tests/test_video_page.js.
-function endCardShouldShow(currentTime, duration, ended) {
+// Pure rules, tested in tests/test_video_page.js.
+function pickVideo(search, fallback) {
+  const v = new URLSearchParams(search).get('v');
+  return VIDEOS[v] ? v : (VIDEOS[fallback] ? fallback : 'hiring');
+}
+function endCardShouldShow(currentTime, duration, ended, lead) {
   if (ended) return true;
   if (!duration || !isFinite(duration)) return false;
-  return currentTime >= duration - END_CARD_LEAD_S;
+  return currentTime >= duration - lead;
 }
 
 function initVideoPage() {
+  const id = pickVideo(location.search, document.body.dataset.video);
+  const cfg = VIDEOS[id];
   const video = document.getElementById('tour');
   const card = document.getElementById('endcard');
+  document.getElementById('tour-title').textContent = cfg.title;
+  document.getElementById('tour-sub').textContent = cfg.sub;
+  video.poster = `media/${id}_poster.jpg`;
+  video.src = `media/${id}.mp4`;
+  const track = document.createElement('track');
+  Object.assign(track, { kind: 'captions', src: `media/${id}.vtt`, srclang: 'en', label: 'English' });
+  video.appendChild(track);
   // Default state set in JS, not left to markup (CLAUDE.md standing rule).
   card.classList.add('hidden');
-  const update = () => card.classList.toggle('hidden', !endCardShouldShow(video.currentTime, video.duration, video.ended));
+  const lead = endCardLead(id);
+  const update = () => card.classList.toggle('hidden', !endCardShouldShow(video.currentTime, video.duration, video.ended, lead));
   ['timeupdate', 'seeked', 'ended', 'play'].forEach(e => video.addEventListener(e, update));
   document.getElementById('replay').addEventListener('click', () => {
     video.currentTime = 0;
@@ -108,7 +128,7 @@ function initVideoPage() {
 }
 
 initVideoPage();
-if (typeof module !== 'undefined') module.exports = { endCardShouldShow, END_CARD_LEAD_S };
+if (typeof module !== 'undefined') module.exports = { endCardShouldShow, endCardLead, pickVideo, VIDEOS };
 </script>
 </body>
 </html>

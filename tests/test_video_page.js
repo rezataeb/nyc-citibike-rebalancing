@@ -1,7 +1,8 @@
-// Node test for video.html: the clickable end card that copies the video's
+// Node test for video.html: the clickable end card that copies a video's
 // last slide. What this guards: the card's default hidden state is set in JS
-// (CLAUDE.md standing rule), it appears on the last slide and after the end,
-// seeking back hides it, Replay restarts, and the links point where the
+// (CLAUDE.md standing rule), the page picks the right video (data-video, or
+// ?v= override), the card appears on each video's last slide and after the
+// end, seeking back hides it, Replay restarts, and the links point where the
 // slide says they do.
 //
 // Run with:
@@ -19,6 +20,7 @@ function makeElement() {
   const classes = new Set();
   const listeners = {};
   return {
+    children: [],
     classList: {
       add: c => classes.add(c),
       remove: c => classes.delete(c),
@@ -26,14 +28,17 @@ function makeElement() {
       contains: c => classes.has(c),
     },
     addEventListener: (e, fn) => { (listeners[e] = listeners[e] || []).push(fn); },
+    appendChild(child) { this.children.push(child); },
     fire: e => (listeners[e] || []).forEach(fn => fn()),
   };
 }
 
-function load() {
-  const elements = { tour: makeElement(), endcard: makeElement(), replay: makeElement() };
+function load({ dataVideo = 'hiring', search = '' } = {}) {
+  const ids = ['tour', 'endcard', 'replay', 'tour-title', 'tour-sub'];
+  const elements = Object.fromEntries(ids.map(id => [id, makeElement()]));
   Object.assign(elements.tour, { currentTime: 0, duration: 58.67, ended: false, played: 0, play() { this.played += 1; } });
-  const sandbox = { document: { getElementById: id => elements[id] }, module: { exports: {} }, isFinite };
+  const document = { getElementById: id => elements[id], createElement: () => ({}), body: { dataset: { video: dataVideo } } };
+  const sandbox = { document, location: { search }, URLSearchParams, module: { exports: {} }, isFinite };
   vm.runInNewContext(script, sandbox);
   return { elements, api: sandbox.module.exports };
 }
@@ -45,14 +50,34 @@ function testDefaultStateIsSetInJs() {
   assert.ok(elements.endcard.classList.contains('hidden'), 'end card hidden on load');
 }
 
+function testVideoChoice() {
+  const { api } = load();
+  assert.strictEqual(api.pickVideo('', 'hiring'), 'hiring');
+  assert.strictEqual(api.pickVideo('', 'dot'), 'dot', 'data-video picks the default');
+  assert.strictEqual(api.pickVideo('?v=dot', 'hiring'), 'dot', '?v= overrides');
+  assert.strictEqual(api.pickVideo('?v=nope', 'dot'), 'dot', 'an unknown ?v= is ignored');
+  assert.strictEqual(api.pickVideo('', 'nope'), 'hiring', 'an unknown default falls back to hiring');
+
+  const dot = load({ dataVideo: 'dot' }).elements;
+  assert.strictEqual(dot.tour.src, 'media/dot.mp4');
+  assert.strictEqual(dot.tour.poster, 'media/dot_poster.jpg');
+  assert.strictEqual(dot.tour.children[0].src, 'media/dot.vtt', 'captions track for the same video');
+  assert.strictEqual(dot['tour-title'].textContent, 'A 90-second tour');
+  assert.strictEqual(load().elements.tour.src, 'media/hiring.mp4');
+  assert.ok(html.includes('<body data-video="hiring">'), 'the repo page defaults to the hiring video');
+}
+
 function testRule() {
   const { api } = load();
   const d = 58.67;
-  assert.strictEqual(api.endCardShouldShow(10, d, false), false);
-  assert.strictEqual(api.endCardShouldShow(d - api.END_CARD_LEAD_S - 0.1, d, false), false);
-  assert.strictEqual(api.endCardShouldShow(d - api.END_CARD_LEAD_S, d, false), true);
-  assert.strictEqual(api.endCardShouldShow(0, d, true), true, 'always shown once ended');
-  assert.strictEqual(api.endCardShouldShow(5, NaN, false), false, 'no duration yet (metadata not loaded)');
+  const lead = api.endCardLead('hiring');
+  assert.strictEqual(lead, 7, 'hiring: 8 s last slide, card 1 s in');
+  assert.strictEqual(api.endCardLead('dot'), 4, 'dot: 5 s last slide, card 1 s in');
+  assert.strictEqual(api.endCardShouldShow(10, d, false, lead), false);
+  assert.strictEqual(api.endCardShouldShow(d - lead - 0.1, d, false, lead), false);
+  assert.strictEqual(api.endCardShouldShow(d - lead, d, false, lead), true);
+  assert.strictEqual(api.endCardShouldShow(0, d, true, lead), true, 'always shown once ended');
+  assert.strictEqual(api.endCardShouldShow(5, NaN, false, lead), false, 'no duration yet (metadata not loaded)');
 }
 
 function testPlaybackShowsAndHides() {
@@ -81,11 +106,11 @@ function testLinksMatchTheSlide() {
     assert.ok(card.includes(href), `end card links ${href}`);
   }
   assert.ok(card.includes('Reza Taeb'), 'name on the card');
-  assert.ok(html.includes('src="media/hiring.mp4"') && html.includes('src="media/hiring.vtt"'), 'video and captions wired');
 }
 
 testDefaultStateIsSetInJs();
+testVideoChoice();
 testRule();
 testPlaybackShowsAndHides();
 testLinksMatchTheSlide();
-console.log('video page test passed (end card default, rule, playback, links).');
+console.log('video page test passed (end card default, video choice, rule, playback, links).');

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Tour · Citi Bike Rebalancing Explorer</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="A one-minute tour of the Citi Bike Rebalancing Explorer, by Reza Taeb.">
+<style>
+  /* Same light palette and system font as dashboard.html. */
+  :root { --bg: #f3f2f0; --card: #ffffff; --ink: #0b0b0b; --muted: #52514e; --line: #d8d7d3; --accent: #c9832b; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .brand { font-weight: 700; font-size: 15px; }
+  .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.3px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 15px; }
+  .player { position: relative; border-radius: 12px; overflow: hidden; background: #0b0b12; box-shadow: 0 6px 30px rgba(0,0,0,0.12); }
+  video { display: block; width: 100%; height: auto; }
+  /* The video's last slide, rebuilt in HTML so its links can be clicked. */
+  /* Solid, so the slide's own text never shows through; stops short of the
+     bottom so the video's controls (scrubber, play) stay usable. */
+  .endcard { position: absolute; inset: 0 0 56px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    background: #0b0b12; color: #f2f2f5; text-align: center; padding: 16px; }
+  .endcard.hidden { display: none; }
+  .endcard h2 { margin: 0; font-size: clamp(22px, 4vw, 40px); letter-spacing: -0.5px; }
+  .endcard .name { color: #a3a3b5; font-size: 14px; }
+  .links { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .links a, .links button { font: inherit; font-size: 15px; text-decoration: none; padding: 10px 16px; border-radius: 22px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  .links a.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .endcard .links a, .endcard .links button { background: transparent; color: #f2f2f5; border-color: rgba(255,255,255,0.35); }
+  .endcard .links a.primary { background: #2dd4a7; color: #0b0b12; border-color: #2dd4a7; }
+  .links a:focus-visible, .links button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .below { margin-top: 16px; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 18px; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #121216; --card: #1c1c22; --ink: #f2f2f5; --muted: #a3a3b5; --line: #34343e; }
+    :root:not([data-theme="light"]) .links a.primary { background: #f2f2f5; color: #0b0b0b; border-color: #f2f2f5; }
+  }
+  :root[data-theme="dark"] { --bg: #121216; --card: #1c1c22; --ink: #f2f2f5; --muted: #a3a3b5; --line: #34343e; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">Citi Bike Rebalancing Explorer<small>Independent project · public data · not an official NYC DOT or Citi Bike product</small></div>
+    <a href="/">Open the live map →</a>
+  </header>
+
+  <h1>A one-minute tour</h1>
+  <p class="sub">What it is, how it works, and what it shows. For recruiters and hiring managers.</p>
+
+  <div class="player" id="player">
+    <video id="tour" controls playsinline preload="metadata" poster="media/hiring_poster.jpg">
+      <source src="media/hiring.mp4" type="video/mp4">
+      <track kind="captions" src="media/hiring.vtt" srclang="en" label="English">
+      Your browser can't play this video. <a href="media/hiring.mp4">Download it</a>.
+    </video>
+    <div class="endcard" id="endcard" role="region" aria-label="Links">
+      <h2>See it live.</h2>
+      <div class="links">
+        <a class="primary" href="/">Open the live map</a>
+        <a href="https://www.linkedin.com/in/reza-taeb/" target="_blank" rel="noopener">LinkedIn</a>
+        <a href="mailto:taeb.reza@gmail.com">Email</a>
+        <a href="https://github.com/rezataeb/nyc-citibike-rebalancing" target="_blank" rel="noopener">GitHub</a>
+        <button type="button" id="replay">Replay</button>
+      </div>
+      <div class="name">Reza Taeb</div>
+    </div>
+  </div>
+
+  <div class="links below" aria-label="Links">
+    <a class="primary" href="/">Open the live map</a>
+    <a href="https://www.linkedin.com/in/reza-taeb/" target="_blank" rel="noopener">LinkedIn</a>
+    <a href="mailto:taeb.reza@gmail.com">taeb.reza@gmail.com</a>
+    <a href="https://github.com/rezataeb/nyc-citibike-rebalancing" target="_blank" rel="noopener">GitHub</a>
+  </div>
+  <p class="note">The video has no voice; captions repeat the on-screen text. Every number in it comes from the project's public data files.</p>
+</main>
+<script>
+// The video's last slide lists the links as text; an MP4 cannot hold links.
+// So when that slide starts, a clickable copy of it covers the video, and it
+// stays after the video ends. Seeking back hides it again.
+const END_CARD_LEAD_S = 7; // the last slide is 8 s; show once its text has settled
+
+// Pure rule, tested in tests/test_video_page.js.
+function endCardShouldShow(currentTime, duration, ended) {
+  if (ended) return true;
+  if (!duration || !isFinite(duration)) return false;
+  return currentTime >= duration - END_CARD_LEAD_S;
+}
+
+function initVideoPage() {
+  const video = document.getElementById('tour');
+  const card = document.getElementById('endcard');
+  // Default state set in JS, not left to markup (CLAUDE.md standing rule).
+  card.classList.add('hidden');
+  const update = () => card.classList.toggle('hidden', !endCardShouldShow(video.currentTime, video.duration, video.ended));
+  ['timeupdate', 'seeked', 'ended', 'play'].forEach(e => video.addEventListener(e, update));
+  document.getElementById('replay').addEventListener('click', () => {
+    video.currentTime = 0;
+    card.classList.add('hidden');
+    video.play();
+  });
+}
+
+initVideoPage();
+if (typeof module !== 'undefined') module.exports = { endCardShouldShow, END_CARD_LEAD_S };
+</script>
+</body>
+</html>

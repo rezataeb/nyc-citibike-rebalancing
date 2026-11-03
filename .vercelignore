@@ -29,3 +29,7 @@ reference/
 # dashboard.html links to its working notes as the "full provenance" page.)
 docs/
 demo/
+
+# API keys -- never upload (Vercel does not read .gitignore when .vercelignore exists)
+.env
+.env.*

@@ -1,19 +1,19 @@
-"""Incremental data-window update: drop Jul/Aug 2025, add Jul/Aug 2026.
+"""Roll the trip window to pipeline/window.py's TARGET_MONTHS, incrementally.
 
-Avoids re-downloading the 10 already-processed months. Specifically:
-  1. Downloads and QCs only 2026-07 and 2026-08 from Citi Bike S3.
-  2. Loads the existing daily_net_flow.parquet, filters out rows whose
-     date falls in 2025-07 or 2025-08, appends the two new months.
-  3. Reconstructs the (station, month, day_type, hour) monthly frame from
-     the updated daily table, then regenerates flows.json via the same
-     export_flows -> apply_typology -> equity_join chain build_full_year uses.
-  4. Writes an updated data_manifest.json.
-
-Run this ONCE after updating TARGET_MONTHS / WEATHER_FETCH_* in the three
-source files (build_full_year.py, elasticities.py, demand_model.py).
-After this script succeeds, run:
+Works out which months to add and drop by comparing data_manifest.json's
+current months with TARGET_MONTHS, so rolling forward is one edit to
+pipeline/window.py and one run of this script -- no month lists to type.
+Avoids re-downloading months already processed:
+  1. Downloads and QCs only the months to add, from Citi Bike's S3 archive.
+  2. Loads daily_net_flow.parquet, drops the months that left the window,
+     appends the new ones, and runs station_ids.repair_daily over the result
+     (canonical ids across all months; rows outside the window dropped --
+     the Jun 30, 2025 leak this guards against is in station_ids.py).
+  3. Rebuilds flows.json via export_flows -> apply_typology -> equity_join.
+  4. Writes data_manifest.json.
+Then run:
   python3 -m pipeline.reproduce_all --skip-download
-to rebuild elasticities, backtest, fleet_simulator, and the rest.
+to rebuild elasticities, the backtest, the fleet simulator and the rest.
 """
 from __future__ import annotations
 
@@ -34,10 +34,13 @@ from pipeline.build_full_year import (
 )
 from pipeline.equity_join import run_equity_join
 from pipeline.flows import export_flows
+from pipeline.station_ids import repair_daily
 from pipeline.station_typology import apply_typology
 
-ADD_MONTHS = ["2026-07", "2026-08"]
-DROP_MONTHS = ["2025-07", "2025-08"]
+
+def plan_window(current: list[str], target: list[str]) -> tuple[list[str], list[str]]:
+    """(months to add, months to drop) to turn `current` into `target`, each sorted."""
+    return sorted(set(target) - set(current)), sorted(set(current) - set(target))
 
 
 def daily_parquet_to_monthly_frame(daily: pd.DataFrame) -> pd.DataFrame:
@@ -76,32 +79,33 @@ def daily_parquet_to_monthly_frame(daily: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
-    assert ADD_MONTHS[0] in TARGET_MONTHS, (
-        "TARGET_MONTHS in build_full_year.py still contains old window — "
-        "update it to Sep 2025–Aug 2026 first."
-    )
-    assert DROP_MONTHS[0] not in TARGET_MONTHS, (
-        f"{DROP_MONTHS[0]} is still in TARGET_MONTHS — remove it first."
-    )
+    current = json.loads(MANIFEST_PATH.read_text())["months"]
+    add_months, drop_months = plan_window(current, TARGET_MONTHS)
+    print(f"window: {current[0]}..{current[-1]} -> {TARGET_MONTHS[0]}..{TARGET_MONTHS[-1]}")
+    print(f"  add {add_months or 'nothing'}, drop {drop_months or 'nothing'}")
+    if not add_months and not drop_months:
+        print("already at the target window -- nothing to do")
+        return
 
-    print("=== Step 1: download + QC the two new months ===")
+    print("=== Step 1: download + QC the new months ===")
     new_daily_frames = []
-    for ym in ADD_MONTHS:
+    for ym in add_months:
         _monthly, daily, _schema = process_month(ym)
         new_daily_frames.append(daily)
-    new_daily = pd.concat(new_daily_frames, ignore_index=True)
+    new_daily = pd.concat(new_daily_frames, ignore_index=True) if new_daily_frames else None
 
     print("\n=== Step 2: update daily_net_flow.parquet ===")
     existing_daily = pd.read_parquet(DAILY_NET_FLOW_PATH)
     print(f"  existing: {len(existing_daily):,} rows, "
           f"{existing_daily['date'].min().date()} .. {existing_daily['date'].max().date()}")
 
-    drop_mask = existing_daily["date"].dt.strftime("%Y-%m").isin(DROP_MONTHS)
+    drop_mask = existing_daily["date"].dt.strftime("%Y-%m").isin(drop_months)
     trimmed = existing_daily[~drop_mask].copy()
-    print(f"  dropped {drop_mask.sum():,} rows from {DROP_MONTHS}")
+    print(f"  dropped {drop_mask.sum():,} rows from {drop_months}")
 
+    combined = pd.concat([trimmed] + ([new_daily] if new_daily is not None else []), ignore_index=True)
     combined = (
-        pd.concat([trimmed, new_daily], ignore_index=True)
+        repair_daily(combined, TARGET_MONTHS)  # canonical ids across months; nothing outside the window
         .sort_values(["station_id", "date", "hour"])
         .reset_index(drop=True)
     )
@@ -128,6 +132,7 @@ def main() -> None:
         "n_stations_full_coverage": n_full,
         "flows_path": str(FLOWS_PATH.relative_to(DATA_DIR.parent)),
         "daily_net_flow_path": str(DAILY_NET_FLOW_PATH.relative_to(DATA_DIR.parent)),
+        "station_id_repair": "pipeline/station_ids.py, applied by update_window.py",
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
     print(f"  months: {manifest['months'][0]} .. {manifest['months'][-1]}")

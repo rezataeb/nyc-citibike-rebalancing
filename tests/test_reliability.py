@@ -211,3 +211,20 @@ def test_caveat_refuses_the_outage_hours_framing(tmp_path):
 
     assert "NOT outage hours" in caveat
     assert "$" not in caveat
+
+
+def test_until_freezes_the_window(tmp_path):
+    """Snapshots after `until` are ignored, so a later log never changes a published rate."""
+    from pipeline.reliability import compute_reliability
+
+    log = tmp_path / "snapshots_test.csv"
+    log.write_text("\n".join([
+        HEADER,
+        "A,2026-10-31 12:00:00+00:00,0,30,1,1",  # in the window: empty
+        "A,2026-11-01 12:00:00+00:00,5,25,1,1",  # after it: usable, must be ignored
+    ]) + "\n")
+    frozen = compute_reliability(log, until="2026-10-31")
+    assert frozen["system"]["n_observations"] == 1
+    assert frozen["system"]["unusable_rate"] == 1.0
+    assert frozen["window"]["end"].startswith("2026-10-31")
+    assert compute_reliability(log, until=None)["system"]["n_observations"] == 2

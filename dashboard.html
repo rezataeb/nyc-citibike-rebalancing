@@ -2337,6 +2337,13 @@ function parsePeriod(period) {
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+// The trip window as text ("Oct 2025 – Sep 2026"), from the loaded data.
+function tripWindowLabel() {
+  const months = state.tripMonths;
+  if (!months.length) return 'trip-data';
+  return `${formatPeriodLabel('month:' + months[0])} – ${formatPeriodLabel('month:' + months[months.length - 1])}`;
+}
+
 function formatPeriodLabel(period) {
   if (period === 'all') return 'all-period average';
   const { kind, key } = parsePeriod(period);
@@ -2493,6 +2500,7 @@ function defaultScenarioState() {
 // variables) so the Node smoke test can inspect it via the test hook below.
 const state = {
   stations: null,   // raw stations object from flows.json, once loaded
+  tripMonths: [],   // flows.json granularity.months: the trip window, never typed into the page
   markers: {},      // station_id -> Leaflet circleMarker, kept for in-place updates
   domainMax: null,
   currentHour: DEFAULT_HOUR,
@@ -3164,7 +3172,7 @@ function renderDistribution() {
   // disclosure now, always reachable regardless of mode -- its CONTENT
   // still varies, since the dock-fill/reliability paragraph only makes
   // sense in live mode.
-  const weatherMethodNote = `A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Sep 2025–Aug 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading — each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.`;
+  const weatherMethodNote = `A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real ${tripWindowLabel()} year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading — each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.`;
   if (live) {
     note.textContent = '';
     const fill = computeFillDistribution();
@@ -5941,6 +5949,7 @@ const liveReady = fetchLiveFeed()
 const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady, reliabilityReady, reliabilityCapacityReady])
   .then(([flowsResult, liveResult, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload, reliabilityPayload, reliabilityCapacityPayload]) => {
     state.stations = flowsResult.payload.stations;
+    state.tripMonths = flowsResult.payload.granularity.months;
     state.equityJoinMeta = flowsResult.payload.equity_join || null;
     state.liveAvailable = liveResult.ok;
     state.liveStations = liveResult.ok ? liveResult.payload.stations : {};

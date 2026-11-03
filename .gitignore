@@ -19,3 +19,6 @@ AI_Collaboration_Retrospective_Addendum.pdf
 # API keys -- never commit
 .env
 .env.*
+
+# Netlify CLI local state (site link); not source
+.netlify/

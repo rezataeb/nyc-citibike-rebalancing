@@ -13,9 +13,10 @@
     "2026-07",
     "2026-08"
   ],
-  "run_at": "2026-09-19T04:53:01.554326+00:00",
-  "n_stations_any_coverage": 2592,
-  "n_stations_full_coverage": 1672,
+  "run_at": "2026-11-02T22:55:24.521606+00:00",
+  "n_stations_any_coverage": 2485,
+  "n_stations_full_coverage": 2033,
   "flows_path": "data/flows.json",
-  "daily_net_flow_path": "data/daily_net_flow.parquet"
+  "daily_net_flow_path": "data/daily_net_flow.parquet",
+  "station_id_repair": "pipeline/station_ids.py (2026-11-02)"
 }

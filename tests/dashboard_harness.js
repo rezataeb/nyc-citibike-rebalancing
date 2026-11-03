@@ -259,6 +259,7 @@ function makeElementStub(id) {
 
 // options:
 //   flows / live / fleetScenarios / reliability -- payload, or null to make that fetch 404
+//   briefings -- data/briefings.json payload, or null (default) to make it 404
 //   liveFeed -- { status, information } GBFS payloads, or null (default) so the
 //               live feed 404s and the dashboard falls back to `live`
 //   startZoom -- initial map zoom (default 11, the dashboard's own city-wide default)
@@ -269,6 +270,7 @@ function buildSandbox(options = {}) {
     fleetScenarios = null, // default off: most tests don't need it, and 404ing it exercises graceful degradation
     reliability = null,    // same -- default off, so every existing test keeps exercising the ribbon's missing-file path
     liveFeed = null,       // default off: the GBFS feed 404s, so tests exercise the snapshot fallback unless they opt in
+    briefings = null,      // AI version: default off, so every existing test exercises the Ask panel's missing-file path
     startZoom = 11,
   } = options;
 
@@ -424,6 +426,7 @@ function buildSandbox(options = {}) {
       if (url.includes('fleet_scenarios')) return fleetScenarios ? found(fleetScenarios) : notFound();
       if (url.includes('station_status')) return liveFeed ? found(liveFeed.status) : notFound();
       if (url.includes('station_information')) return liveFeed ? found(liveFeed.information) : notFound();
+      if (url.includes('briefings')) return briefings ? found(briefings) : notFound();
       if (url.includes('reliability')) return reliability ? found(reliability) : notFound();
       // Every other optional file 404s, exercising dashboard2's own
       // graceful-degradation paths on each load.

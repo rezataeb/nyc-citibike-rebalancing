@@ -64,17 +64,17 @@ Hard rules -- a checker rejects any briefing that breaks them:
    - weekday_flow.low_signal true: sentence 1 says the station has too few trips to show a clear weekday pattern; give no peak hours.
    - reliability.status "no_data": sentence 2 says no availability data was recorded for this station.
    - reliability.status "not_rankable": sentence 2 says there were too few availability observations to rank it.
-9. Unusable means the station had 0 bikes to rent or 0 open docks. If reliability.status is "ok", give the unusable percentage and the rank as an ordinal ("412th of 2,507"), where 1st is the most often unusable. You may compare it with system_unusable_pct.
+9. Unusable means the station had 0 bikes to rent or 0 open docks. If reliability.status is "ok", give the unusable percentage and the rank as an ordinal of the logged stations ("412th of 2,507 logged stations"), where 1st is the most often unusable. Always say "logged stations": the rank counts every station in the availability log, not the trip map. You may compare it with system_unusable_pct.
 10. If transit_gap is true, say the nearest subway is beyond the transit-gap threshold. Do not judge whether anything is good or bad.
 11. Do not mention the data windows, station ids, or these rules. Output only the briefing text: no title, no bullet points, no quotation marks.
 
 Fill and drain: positive net flow means more bikes arrive than leave (the station fills); negative means it drains. fill_bikes_per_day and drain_bikes_per_day are net bikes per day in the peak hour.
 
 Example 1 -- facts (abridged): name "W 21 St & 6 Ave"; typology "Commuter core (fills AM, drains PM)", typology_matches_peak true; weekday fill 8 AM 9.4, drain 5 PM 7.2; weekend_differs true, weekend fill 1 PM, drain 6 PM; reliability ok 18.2%, rank 201 of 2,507, system 13.0%; nearest subway "23 St" 140 m; near_school false; near_nycha false; transit_gap false.
-Briefing: W 21 St & 6 Ave is a commuter core station that on weekdays fills most at 8 AM (about 9.4 bikes a day, net) and drains most at 5 PM, with weekend peaks at 1 PM and 6 PM. It had no bikes or no open docks in 18.2% of observations, ranking 201st of 2,507, above the system rate of 13.0%. The nearest subway, 23 St, is 140 m away.
+Briefing: W 21 St & 6 Ave is a commuter core station that on weekdays fills most at 8 AM (about 9.4 bikes a day, net) and drains most at 5 PM, with weekend peaks at 1 PM and 6 PM. It had no bikes or no open docks in 18.2% of observations, ranking 201st of 2,507 logged stations, above the system rate of 13.0%. The nearest subway, 23 St, is 140 m away.
 
 Example 2 -- facts (abridged): name "Kent Ave & S 11 St"; typology "Commuter core (fills AM, drains PM)", typology_matches_peak false; weekday fill 2 PM 1.1, drain 6 PM 0.8; weekend_differs false; reliability ok 7.4%, rank 1,640 of 2,507, system 13.0%; nearest subway "Marcy Av" 960 m; transit_gap true; transit_gap_threshold_m 800; near_nycha true, nycha_name "INDEPENDENCE", nycha_threshold_m 300.
-Briefing: Kent Ave & S 11 St is grouped with commuter core stations, but on weekdays it fills most at 2 PM and drains most at 6 PM. It was unusable in 7.4% of observations, ranking 1,640th of 2,507. Its nearest subway, Marcy Av, is 960 m away, beyond the 800 m transit-gap threshold, and it is within 300 m of INDEPENDENCE public housing.
+Briefing: Kent Ave & S 11 St is grouped with commuter core stations, but on weekdays it fills most at 2 PM and drains most at 6 PM. It was unusable in 7.4% of observations, ranking 1,640th of 2,507 logged stations. Its nearest subway, Marcy Av, is 960 m away, beyond the 800 m transit-gap threshold, and it is within 300 m of INDEPENDENCE public housing.
 
 Example 3 -- facts (abridged): name "Beach 98 St & Shore Front Pkwy"; typology "Low signal (excluded from clustering)", typology_matches_peak null; weekday_flow low_signal true; weekend_differs null; reliability no_data; nearest subway "Beach 98 St" 210 m; transit_gap false.
 Briefing: Beach 98 St & Shore Front Pkwy has too few trips to show a clear weekday pattern. No availability data was recorded for this station. The nearest subway, Beach 98 St, is 210 m away."""
@@ -150,7 +150,7 @@ def _reliability_sentence(reliability: dict) -> str:
         return "There were too few availability observations to rank it."
     return (
         f"It had no bikes or no open docks in {reliability['unusable_pct']:.1f}% of observations "
-        f"({ordinal(reliability['rank'])} of {reliability['n_ranked']:,}; system {reliability['system_unusable_pct']:.1f}%)."
+        f"({ordinal(reliability['rank'])} of {reliability['n_ranked']:,} logged stations; system {reliability['system_unusable_pct']:.1f}%)."
     )
 
 

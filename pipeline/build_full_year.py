@@ -66,6 +66,10 @@ def process_month(year_month: str) -> tuple[pd.DataFrame, pd.DataFrame, list[str
 
     monthly = compute_net_flow(clean)
     daily = compute_daily_flow_components(clean)
+    # Keep only this month's own rows: an archive also holds trips that
+    # started the day before it begins (the Jun 30, 2025 leak, 2026-11-02).
+    monthly = monthly[monthly["month"] == year_month]
+    daily = daily[daily["date"].dt.strftime("%Y-%m") == year_month]
 
     zip_path.unlink()
     print(f"[{year_month}] deleted {zip_path.name} after aggregation")

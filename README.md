@@ -53,7 +53,7 @@ dashboard says so. It is not a penalty calculation.
   stations are excluded from that denominator.
 - After accounting for demand, stations with 40+ docks are associated with
   unusable rates about **2.1 percentage points lower** than stations with
-  under 20 docks (2,400 stations; a plain OLS fit). This is a pattern in
+  under 20 docks (2,397 stations; a plain OLS fit). This is a pattern in
   observational data, not proof that adding docks causes better reliability.
 
 ## Limitations

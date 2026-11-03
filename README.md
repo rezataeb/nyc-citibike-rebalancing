@@ -13,8 +13,8 @@
 ![Dashboard: historical station balance map, KPI ribbon and priority truck stops](docs/dashboard-screenshot.png)
 
 An interactive map of where Citi Bike stations run out of bikes or fill up
-with them, and where a rebalancing truck would do the most good. Built as a
-portfolio project for NYC DOT Bike Share & Shared Mobility reviewers, using
+with them, and where a rebalancing truck would do the most good. Built as an
+independent project for NYC DOT Bike Share & Shared Mobility reviewers, using
 public data only and a $0 stack (static HTML plus precomputed JSON, no backend).
 
 ## Why this exists

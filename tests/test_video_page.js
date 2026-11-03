@@ -34,7 +34,7 @@ function makeElement() {
 }
 
 function load({ dataVideo = 'hiring', search = '' } = {}) {
-  const ids = ['tour', 'endcard', 'replay', 'tour-title', 'tour-sub'];
+  const ids = ['tour', 'endcard', 'replay', 'tour-title', 'tour-sub', 'endcard-title'];
   const elements = Object.fromEntries(ids.map(id => [id, makeElement()]));
   Object.assign(elements.tour, { currentTime: 0, duration: 58.67, ended: false, played: 0, play() { this.played += 1; } });
   const document = { getElementById: id => elements[id], createElement: () => ({}), body: { dataset: { video: dataVideo } } };
@@ -63,7 +63,11 @@ function testVideoChoice() {
   assert.strictEqual(dot.tour.poster, 'media/dot_poster.jpg');
   assert.strictEqual(dot.tour.children[0].src, 'media/dot.vtt', 'captions track for the same video');
   assert.strictEqual(dot['tour-title'].textContent, 'A 90-second tour');
-  assert.strictEqual(load().elements.tour.src, 'media/hiring.mp4');
+  assert.ok(dot.endcard.classList.contains('light'), 'DOT video (light slides) gets the light end card');
+  assert.strictEqual(dot['endcard-title'].textContent, 'See where it hurts and who it hits.', 'card repeats that video’s last slide');
+  const hiring = load().elements;
+  assert.ok(!hiring.endcard.classList.contains('light'), 'hiring video (dark slides) keeps the dark end card');
+  assert.strictEqual(hiring.tour.src, 'media/hiring.mp4');
   assert.ok(html.includes('<body data-video="hiring">'), 'the repo page defaults to the hiring video');
 }
 

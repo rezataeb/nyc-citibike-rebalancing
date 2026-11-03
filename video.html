@@ -24,6 +24,11 @@
   .endcard { position: absolute; inset: 0 0 56px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
     background: #0b0b12; color: #f2f2f5; text-align: center; padding: 16px; }
   .endcard.hidden { display: none; }
+  /* Light card for videos on the light (Paper) palette, matching their last slide. */
+  .endcard.light { background: #f5f2eb; color: #1c1b19; }
+  .endcard.light .name { color: #55514a; }
+  .endcard.light .links a, .endcard.light .links button { color: #1c1b19; border-color: rgba(28,27,25,0.3); }
+  .endcard.light .links a.primary { background: #0e7c61; color: #fff; border-color: #0e7c61; }
   .endcard h2 { margin: 0; font-size: clamp(22px, 4vw, 40px); letter-spacing: -0.5px; }
   .endcard .name { color: #a3a3b5; font-size: 14px; }
   .links { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
@@ -55,7 +60,7 @@
   <div class="player" id="player">
     <video id="tour" controls playsinline preload="metadata"></video>
     <div class="endcard" id="endcard" role="region" aria-label="Links">
-      <h2>Try it for free.</h2>
+      <h2 id="endcard-title">Try it for free.</h2>
       <div class="links">
         <a class="primary" href="https://nyc-citibike-rebalancing.vercel.app/">Try it for free</a>
         <a href="https://www.linkedin.com/in/reza-taeb/" target="_blank" rel="noopener">LinkedIn</a>
@@ -84,9 +89,9 @@
 // One page, two videos: <body data-video> picks the default (the Netlify
 // deploy sets "dot"); ?v=hiring or ?v=dot overrides it.
 const VIDEOS = {
-  hiring: { title: 'A one-minute tour', lastSlideS: 8,
+  hiring: { title: 'A one-minute tour', lastSlideS: 8, light: false, cta: 'Try it for free.',
     sub: 'What it is, how it works, and what it shows. For recruiters and hiring managers.' },
-  dot: { title: 'A 90-second tour', lastSlideS: 5,
+  dot: { title: 'A 90-second tour', lastSlideS: 5, light: true, cta: 'See where it hurts and who it hits.',
     sub: 'Time change, live data, the Scenario Planner and AI briefings. For DOT planners and analysts.' },
 };
 // Show the card 1 s into the last slide, once its text has settled.
@@ -117,6 +122,8 @@ function initVideoPage() {
   video.appendChild(track);
   // Default state set in JS, not left to markup (CLAUDE.md standing rule).
   card.classList.add('hidden');
+  card.classList.toggle('light', cfg.light);
+  document.getElementById('endcard-title').textContent = cfg.cta;
   const lead = endCardLead(id);
   const update = () => card.classList.toggle('hidden', !endCardShouldShow(video.currentTime, video.duration, video.ended, lead));
   ['timeupdate', 'seeked', 'ended', 'play'].forEach(e => video.addEventListener(e, update));

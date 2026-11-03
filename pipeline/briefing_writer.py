@@ -324,6 +324,67 @@ def summarize(results: dict) -> dict:
     }
 
 
+def review_page(results_path: Path, out_path: Path) -> None:
+    """A local HTML page to review saved pilot results by eye: facts, text, source, checker verdict."""
+    import html
+
+    from pipeline.guardrails import check_briefing
+
+    data = json.loads(results_path.read_text())
+    rows = []
+    for station_id, r in data["results"].items():
+        f = r["facts"]
+        rel = f["reliability"]
+        wd, we = f["weekday_flow"], f["weekend_flow"]
+        facts_lines = [
+            f"<b>{html.escape(f['name'])}</b> ({station_id})",
+            f"type: {html.escape(f['typology'])} · matches peak: {f['typology_matches_peak']}",
+            "weekday: low signal" if wd["low_signal"] else f"weekday: fill {wd['fill_peak_hour']} ({wd['fill_bikes_per_day']}), drain {wd['drain_peak_hour']} ({wd['drain_bikes_per_day']})",
+            "weekend: low signal" if we["low_signal"] else f"weekend: fill {we['fill_peak_hour']}, drain {we['drain_peak_hour']} · differs: {f['weekend_differs']}",
+            f"reliability: {rel['status']}" + (f" · {rel['unusable_pct']}% · rank {rel['rank']:,} of {rel['n_ranked']:,} · system {rel['system_unusable_pct']}%" if rel["status"] == "ok" else ""),
+            f"subway: {html.escape(f['context']['nearest_subway'])} {f['context']['subway_distance_m']} m · gap: {f['context']['transit_gap']} · NYCHA: {f['context']['near_nycha']} · school: {f['context']['near_school']}",
+        ]
+        problems = check_briefing(r["text"], f)
+        verdict = "passes" if not problems else "FAILS: " + "; ".join(problems)
+        first = "" if r["source"] == "model" else f"<details><summary>first draft rejected</summary>{html.escape(r['first_text'])}<br><i>{html.escape('; '.join(r['first_problems']))}</i></details>"
+        rows.append(
+            f"<tr><td>{'<br>'.join(facts_lines)}</td><td>{html.escape(r['text'])}{first}</td>"
+            f"<td class='{r['source']}'>{r['source']}<br><small>{r.get('set', '')}</small></td><td>{html.escape(verdict)}</td></tr>"
+        )
+    summary = html.escape(json.dumps(data["summary"].get("all", data["summary"]), indent=1))
+    out_path.write_text(f"""<!doctype html><meta charset="utf-8"><title>Briefings pilot review</title>
+<style>body{{font:14px/1.45 system-ui,sans-serif;margin:24px;color:#1a1a1a}}table{{border-collapse:collapse;width:100%}}
+td,th{{border:1px solid #ccc;padding:8px;vertical-align:top}}th{{background:#f3f3f3;text-align:left}}td:nth-child(1){{width:32%;font-size:12px}}
+td:nth-child(2){{width:44%}}.model{{color:#176b2c}}.model_retry{{color:#8a5a00}}.template{{color:#a01c1c}}pre{{background:#f6f6f6;padding:8px}}</style>
+<h1>Briefings pilot review</h1><p>Read each briefing against its facts on the left. The checker verdict is re-run when this page is built.</p>
+<pre>{summary}</pre><table><tr><th>Facts (what the model saw)</th><th>Briefing</th><th>Source</th><th>Checker</th></tr>{''.join(rows)}</table>""")
+    print(f"wrote {out_path}")
+
+
+def one_station(station_id: str, live: bool = False) -> None:
+    """Show one station's facts, its template briefing, and (with live=True, ~$0.0002) a model briefing."""
+    from pipeline.briefings import FLOWS_PATH, MANIFEST_PATH, RELIABILITY_PATH, build_all_facts
+    from pipeline.guardrails import check_briefing
+
+    all_facts = build_all_facts(
+        json.loads(FLOWS_PATH.read_text()), json.loads(RELIABILITY_PATH.read_text()), json.loads(MANIFEST_PATH.read_text())
+    )
+    if station_id not in all_facts:
+        print(f"{station_id!r} has no facts record (not in flows.json, or excluded)")
+        return
+    facts = all_facts[station_id]
+    print(json.dumps(prompt_facts(facts), indent=1, ensure_ascii=False))
+    template = template_fallback(facts)
+    print(f"\nTEMPLATE: {template}\nchecker: {check_briefing(template, facts) or 'passes'}")
+    if live:
+        import anthropic
+
+        load_api_key()
+        result = write_one(anthropic.Anthropic(), facts)
+        print(f"\nMODEL ({result['source']}, ${result['cost']:.5f}): {result['text']}")
+        print(f"checker: {check_briefing(result['text'], facts) or 'passes'}")
+
+
 def dry_run(n: int = 20) -> None:
     """$0: build real requests for the pilot sample, count tokens, print estimates and one prompt."""
     import anthropic
@@ -366,11 +427,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true", help="$0: count tokens and estimate cost")
     parser.add_argument("--pilot", action="store_true", help="paid (~$0.01): write briefings for the pilot sample")
+    parser.add_argument("--review", type=Path, help="build a local HTML review page from saved pilot results")
+    parser.add_argument("--station", help="show one station's facts and template briefing")
+    parser.add_argument("--live", action="store_true", help="with --station: also ask the model (~$0.0002)")
     parser.add_argument("-n", type=int, default=20, help="pilot sample size")
     parser.add_argument("--holdout", type=int, default=0, help="extra never-reviewed stations after the pilot sample")
     parser.add_argument("--out", type=Path, default=PILOT_PATH, help="where to save pilot results (keep it outside the repo)")
     args = parser.parse_args()
-    if args.dry_run:
+    if args.review:
+        review_page(args.review, args.review.with_suffix(".html"))
+    elif args.station:
+        one_station(args.station, args.live)
+    elif args.dry_run:
         dry_run(args.n)
     elif args.pilot:
         pilot(args.n, args.out, args.holdout)

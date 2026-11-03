@@ -23,6 +23,8 @@ Method, stated plainly:
     weekday(s) or weekend(s).
   - Typology hedge: when facts say typology_matches_peak is False, a sentence
     naming the type must say "grouped with".
+  - The station name must appear exactly as in the facts, and weekend peak
+    hours only when weekend_differs is true (both found in the first pilot).
   - Causal words ("because", "caused", "due to", ...) fail: the facts hold no
     causes. Length: at most MAX_SENTENCES sentences and MAX_WORDS words.
 """
@@ -205,6 +207,57 @@ def check_day_type_scope(text: str, facts: dict | None = None) -> list[str]:
     return violations
 
 
+def check_name(text: str, facts: dict) -> list[str]:
+    """The station name must appear exactly as in the facts.
+
+    Found in the pilot: "59 St & 4 Ave" came out as "59 4 Ave" -- every number
+    was real, so the number check passed a wrong name.
+    """
+    name = (facts.get("name") or "").strip()
+    return [] if not name or name in text else [f"station name not written exactly: {name!r}"]
+
+
+def check_weekend_scope(text: str, facts: dict) -> list[str]:
+    """Weekend times may appear only when weekend_differs is true.
+
+    Saying a station has too few weekend trips is fine; giving weekend peak
+    hours when the rules say weekends add nothing is not (found in the pilot).
+    """
+    if facts.get("weekend_differs") is True:
+        return []
+    names = _fact_names(facts)
+    violations = []
+    for sentence in split_sentences(text):
+        scrubbed = sentence
+        for name in names:
+            scrubbed = re.sub(re.escape(name), " ", scrubbed, flags=re.IGNORECASE)
+        if "weekend" in scrubbed.lower() and (_TIME.search(scrubbed) or _NOON_MIDNIGHT.search(scrubbed)):
+            violations.append(f"weekend times given but weekend_differs is not true: {sentence!r}")
+    return violations
+
+
+def check_directions(text: str, facts: dict) -> list[str]:
+    """Words the number check can't see: is 'above/below the system rate' the right way round,
+    and is the hour after 'fills most at' / 'drains most at' the weekday fill / drain hour?"""
+    violations = []
+    reliability = facts.get("reliability") or {}
+    if reliability.get("status") == "ok":
+        rate, system = reliability["unusable_pct"], reliability["system_unusable_pct"]
+        lower = text.lower()
+        if re.search(r"\b(above|higher than|worse than)\b", lower) and rate <= system:
+            violations.append(f"says above the system rate, but {rate} <= {system}")
+        if re.search(r"\b(below|lower than|better than)\b", lower) and rate >= system:
+            violations.append(f"says below the system rate, but {rate} >= {system}")
+    weekday = facts.get("weekday_flow") or {}
+    if not weekday.get("low_signal", True):
+        first_sentence = split_sentences(text)[0] if text.strip() else ""
+        for verb, key in (("fills?", "fill_peak_hour"), ("drains?", "drain_peak_hour")):
+            match = re.search(rf"\b{verb} most at (\d{{1,2}} [AP]M)", first_sentence)
+            if match and match.group(1) != weekday.get(key):
+                violations.append(f"weekday {key.split('_')[0]} hour is {weekday.get(key)}, text says {match.group(1)}")
+    return violations
+
+
 def check_typology_hedge(text: str, facts: dict) -> list[str]:
     """When the station's own peaks contradict its type name, it may only be 'grouped with' it."""
     if facts.get("typology_matches_peak") is not False:
@@ -230,4 +283,12 @@ def check_style(text: str) -> list[str]:
 
 def check_briefing(text: str, facts: dict) -> list[str]:
     """All violations for one briefing; an empty list means it passes."""
-    return check_numbers(text, facts) + check_day_type_scope(text, facts) + check_typology_hedge(text, facts) + check_style(text)
+    return (
+        check_numbers(text, facts)
+        + check_name(text, facts)
+        + check_day_type_scope(text, facts)
+        + check_weekend_scope(text, facts)
+        + check_directions(text, facts)
+        + check_typology_hedge(text, facts)
+        + check_style(text)
+    )

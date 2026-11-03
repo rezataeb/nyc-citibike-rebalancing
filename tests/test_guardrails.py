@@ -214,3 +214,44 @@ def test_time_words_inside_a_fact_name_are_not_time_claims():
 def test_number_glued_to_m_inside_a_name_is_allowed_when_the_name_is_a_fact():
     facts = {**FACTS, "context": {**FACTS["context"], "school_name": "P.S. 184m Shuang Wen"}}
     assert check_numbers("It is near P.S. 184m Shuang Wen.", facts) == []
+
+
+# --- found in the first pilot -----------------------------------------------------
+
+def test_mangled_station_name_is_rejected_even_when_its_numbers_are_real():
+    facts = {**FACTS, "name": "59 St & 4 Ave"}
+    from pipeline.guardrails import check_name
+
+    assert check_name("59 4 Ave is grouped with commuter core stations.", facts) != []
+    assert check_name("59 St & 4 Ave is grouped with commuter core stations.", facts) == []
+
+
+def test_weekend_hours_only_when_weekend_differs():
+    from pipeline.guardrails import check_weekend_scope
+
+    same = {**FACTS, "weekend_differs": False}
+    assert check_weekend_scope("On weekends it fills most at 3 PM.", same) != []
+    assert check_weekend_scope("On weekends it fills most at 3 PM.", FACTS) == []  # FACTS: weekend_differs True
+
+
+def test_saying_weekend_trips_are_few_has_no_hours_so_it_is_not_a_weekend_claim():
+    from pipeline.guardrails import check_weekend_scope
+
+    assert check_weekend_scope("It has too few weekday or weekend trips to show a pattern.", {**FACTS, "weekend_differs": None}) == []
+
+
+def test_above_or_below_the_system_rate_must_be_the_right_way_round():
+    from pipeline.guardrails import check_directions
+
+    low = {**FACTS, "reliability": {**FACTS["reliability"], "unusable_pct": 4.7}}
+    assert check_directions("It was unusable in 4.7% of observations, above the system rate of 13.0%.", low) != []
+    assert check_directions("It was unusable in 4.7% of observations, below the system rate of 13.0%.", low) == []
+
+
+def test_swapped_fill_and_drain_hours_are_rejected():
+    """Both hours are real facts, so only a direction check can catch the swap."""
+    from pipeline.guardrails import check_directions
+
+    swapped = "On weekdays it fills most at 5 PM and drains most at 8 AM."
+    assert check_directions(swapped, FACTS) != []
+    assert check_directions("On weekdays it fills most at 8 AM and drains most at 5 PM.", FACTS) == []

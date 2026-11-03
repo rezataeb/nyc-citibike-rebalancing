@@ -46,7 +46,7 @@
 <main>
   <header>
     <div class="brand">Citi Bike Rebalancing Explorer<small>Independent project · public data · not an official NYC DOT or Citi Bike product</small></div>
-    <a href="/">Open the live map →</a>
+    <a href="https://nyc-citibike-rebalancing.vercel.app/">Try it for free →</a>
   </header>
 
   <h1>A one-minute tour</h1>
@@ -59,9 +59,9 @@
       Your browser can't play this video. <a href="media/hiring.mp4">Download it</a>.
     </video>
     <div class="endcard" id="endcard" role="region" aria-label="Links">
-      <h2>See it live.</h2>
+      <h2>Try it for free.</h2>
       <div class="links">
-        <a class="primary" href="/">Open the live map</a>
+        <a class="primary" href="https://nyc-citibike-rebalancing.vercel.app/">Try it for free</a>
         <a href="https://www.linkedin.com/in/reza-taeb/" target="_blank" rel="noopener">LinkedIn</a>
         <a href="mailto:taeb.reza@gmail.com">Email</a>
         <a href="https://github.com/rezataeb/nyc-citibike-rebalancing" target="_blank" rel="noopener">GitHub</a>
@@ -72,7 +72,7 @@
   </div>
 
   <div class="links below" aria-label="Links">
-    <a class="primary" href="/">Open the live map</a>
+    <a class="primary" href="https://nyc-citibike-rebalancing.vercel.app/">Try it for free</a>
     <a href="https://www.linkedin.com/in/reza-taeb/" target="_blank" rel="noopener">LinkedIn</a>
     <a href="mailto:taeb.reza@gmail.com">taeb.reza@gmail.com</a>
     <a href="https://github.com/rezataeb/nyc-citibike-rebalancing" target="_blank" rel="noopener">GitHub</a>
@@ -81,6 +81,7 @@
 </main>
 <script>
 // The video's last slide lists the links as text; an MP4 cannot hold links.
+// Links are absolute, so the same page works on Vercel and on Netlify.
 // So when that slide starts, a clickable copy of it covers the video, and it
 // stays after the video ends. Seeking back hides it again.
 const END_CARD_LEAD_S = 7; // the last slide is 8 s; show once its text has settled

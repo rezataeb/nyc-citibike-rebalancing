@@ -75,7 +75,8 @@ function testPlaybackShowsAndHides() {
 
 function testLinksMatchTheSlide() {
   const card = html.match(/<div class="endcard"[\s\S]*?<\/div>\s*<\/div>/)[0];
-  for (const href of ['href="/"', 'href="https://www.linkedin.com/in/reza-taeb/"', 'href="mailto:taeb.reza@gmail.com"',
+  assert.ok(card.includes('Try it for free'), 'the card says what the slide says');
+  for (const href of ['href="https://nyc-citibike-rebalancing.vercel.app/"', 'href="https://www.linkedin.com/in/reza-taeb/"', 'href="mailto:taeb.reza@gmail.com"',
     'href="https://github.com/rezataeb/nyc-citibike-rebalancing"']) {
     assert.ok(card.includes(href), `end card links ${href}`);
   }

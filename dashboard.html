@@ -489,6 +489,35 @@
   /* Session 50: the .readout rules that sat here are gone with the markup
      they styled -- the rail readout became the masthead #ribbon above. */
 
+  /* AI version, Feature 1: the Ask panel. Same card border/radius as
+     .worst and .distribution; the answer reads as a reply (a left rule,
+     not a second nested card). Muted tones reuse this file's existing
+     #666057/#f3f2f0 chip palette -- no new colors. */
+  .ask { border: 1px solid #d8d7d3; border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; background: #fff; }
+  .ask__title { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: #0b0b0b; margin-bottom: 8px; }
+  #ask-form { display: flex; gap: 6px; }
+  #ask-input { flex: 1; box-sizing: border-box; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px; border: 1px solid #d8d7d3; background: #fff; color: #0b0b0b; }
+  #ask-input:focus-visible { outline: 2px solid #2a78d6; outline-offset: 1px; }
+  #ask-submit { flex: none; }
+  #ask-suggestions { list-style: none; margin: 4px 0 0; padding: 0; border: 1px solid #d8d7d3; border-radius: 8px; overflow: hidden; }
+  #ask-suggestions li button, .ask-list li button { all: unset; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: baseline; width: 100%; box-sizing: border-box; padding: 7px 10px; font-size: 12.5px; color: #0b0b0b; cursor: pointer; }
+  #ask-suggestions li + li, .ask-list li + li { border-top: 1px solid #f0ede7; }
+  #ask-suggestions li button:hover, #ask-suggestions li button:focus-visible, #ask-suggestions li button.active,
+  .ask-list li button:hover, .ask-list li button:focus-visible { background: #faf9f7; }
+  #ask-suggestions li button:focus-visible, .ask-list li button:focus-visible { outline: 2px solid #2a78d6; outline-offset: -2px; }
+  #ask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .ask-chip { font: inherit; font-size: 11.5px; padding: 5px 10px; border-radius: 14px; border: 1px solid #d8d7d3; background: #f3f2f0; color: #3a3937; cursor: pointer; }
+  .ask-chip:hover, .ask-chip:focus-visible { background: #ebe9e5; color: #0b0b0b; }
+  #ask-answer { margin-top: 12px; padding: 2px 0 2px 12px; border-left: 3px solid #1c3350; }
+  #ask-question { font-size: 11px; color: #666057; margin-bottom: 4px; }
+  #ask-body { font-size: 13.5px; line-height: 1.5; color: #0b0b0b; }
+  #ask-source { margin-top: 8px; font-size: 11px; line-height: 1.4; color: #666057; }
+  .ask-link { font: inherit; font-size: 11px; font-weight: 600; color: #52514e; background: none; border: none; padding: 0 0 6px; cursor: pointer; }
+  .ask-link:hover, .ask-link:focus-visible { color: #0b0b0b; text-decoration: underline; }
+  .ask-list { list-style: none; margin: 6px 0 0; padding: 0; }
+  .ask-list .ask-rank { font: 700 11px ui-monospace, "SF Mono", Menlo, monospace; color: #898781; margin-right: 6px; }
+  .ask-list .ask-pct { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums; }
+
   .worst { border: 1px solid #d8d7d3; border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
   .worst__title { padding: 10px 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #666057; border-bottom: 1px solid #d8d7d3; }
   #priority-stops-framing { padding: 10px 14px 0; font-size: 11px; color: #666057; line-height: 1.4; }
@@ -1451,6 +1480,33 @@
     </div>
 
     <div id="side-content">
+
+      <!-- AI version, Feature 1: ask-and-answer panel. Station answers are
+           the AI briefings written once by pipeline/briefing_writer.py
+           (data/briefings.json), every number checked by code before they
+           ship -- so asking costs $0 and is instant. List questions are
+           computed here, in the browser, from reliability.json. Typed
+           open-ended questions to a live model are Feature 2 (not built). -->
+      <section class="ask" id="ask-panel" aria-labelledby="ask-title">
+        <div class="ask__title" id="ask-title">Ask the data</div>
+        <form id="ask-form" autocomplete="off" role="search">
+          <input type="text" id="ask-input" placeholder="Type a station name, e.g. W 21 St &amp; 6 Ave"
+                 aria-label="Ask about a station" aria-autocomplete="list" aria-controls="ask-suggestions" aria-expanded="false">
+          <button type="submit" id="ask-submit" class="share-btn">Ask</button>
+        </form>
+        <ul id="ask-suggestions" role="listbox" aria-label="Matching stations"></ul>
+        <div id="ask-chips">
+          <button type="button" class="ask-chip" id="ask-chip-unusable">Most often unusable</button>
+          <button type="button" class="ask-chip" id="ask-chip-nycha">Most unusable near NYCHA</button>
+          <button type="button" class="ask-chip" id="ask-chip-gap">Most unusable beyond the subway gap</button>
+        </div>
+        <div id="ask-answer" aria-live="polite">
+          <button type="button" id="ask-back" class="ask-link"></button>
+          <div id="ask-question"></div>
+          <div id="ask-body"></div>
+          <div id="ask-source"></div>
+        </div>
+      </section>
 
       <!-- Session 50: the four-tile readout that used to sit here moved to
            the masthead as #ribbon (see <header id="topbar">). It was never
@@ -4886,6 +4942,275 @@ function setMode(mode) {
 
 
 
+// ---------------------------------------------------------------------------
+// AI version, Feature 1: the Ask panel.
+//
+// Two kinds of answer, both $0 and instant -- the page never calls a model.
+// A station question returns that station's AI briefing from
+// data/briefings.json (written once by pipeline/briefing_writer.py; every
+// number and claim checked by code before it shipped). A list question is
+// computed here from reliability.json. Anything else gets a plain "not
+// yet": open-ended questions to a live model are Feature 2, not built.
+// ---------------------------------------------------------------------------
+
+const ASK_SUGGESTION_LIMIT = 6;
+const ASK_LIST_LENGTH = 10;
+const ASK_LEAD_IN = /^(tell me about|what about|how is|how s|show me|about)\s+/; // not "station": "station a" must stay a name
+const ask = { lastList: null };
+
+// Lowercase, "&" read as "and", punctuation dropped -- so "w 21 st and 6
+// ave?" and "W 21 St & 6 Ave" compare equal.
+function normalizeName(text) {
+  return String(text).toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// A typed question as a station-name search: normalized, with lead-ins
+// like "tell me about" removed.
+function normalizeStationQuery(text) {
+  let q = normalizeName(text);
+  while (ASK_LEAD_IN.test(q)) q = q.replace(ASK_LEAD_IN, '');
+  return q;
+}
+
+// Station ids whose name contains the query: an exact name first, then
+// names that START with it, then shorter names -- closest match leads.
+function matchStations(query, stations, limit = ASK_SUGGESTION_LIMIT) {
+  const q = normalizeStationQuery(query);
+  if (!q || !stations) return [];
+  const hits = [];
+  for (const id in stations) {
+    const name = normalizeName(stations[id].name);
+    const at = name.indexOf(q);
+    if (at >= 0) hits.push({ id, exact: name === q ? 0 : 1, starts: at === 0 ? 0 : 1, length: name.length });
+  }
+  hits.sort((a, b) => a.exact - b.exact || a.starts - b.starts || a.length - b.length || (a.id < b.id ? -1 : 1));
+  return hits.slice(0, limit).map(h => h.id);
+}
+
+// The three list questions. `keep` filters on the station's own flows.json
+// context flags -- the same default-threshold flags the briefings use, not
+// the Scenario Planner's sliders.
+const ASK_LISTS = {
+  unusable: { title: () => 'Most often unusable stations', keep: () => true },
+  nycha: { title: t => `Most often unusable near NYCHA housing${t.nycha ? ` (within ${t.nycha} m)` : ''}`, keep: c => Boolean(c && c.near_nycha) },
+  gap: { title: t => `Most often unusable beyond the subway gap${t.subway ? ` (over ${t.subway} m)` : ''}`, keep: c => Boolean(c && c.transit_gap) },
+};
+
+// Typed words -> a list question, or null. Only fires on a reliability word,
+// so a station that happens to contain "gap" is still found by name first.
+function listQuestionFor(text) {
+  const q = normalizeName(text);
+  if (!/\b(unusable|unreliable|reliab|empty|full|outage)/.test(q)) return null;
+  if (/\b(nycha|housing)\b/.test(q)) return 'nycha';
+  if (/\b(subway|transit|gap)\b/.test(q)) return 'gap';
+  return 'unusable';
+}
+
+// Top-n stations by observed unusable rate (0 bikes or 0 open docks), among
+// stations in `pool` with enough observations to rank -- reliability.json's
+// own min_observations rule. No rank numbers are shown: a briefing's rank is
+// over every logged station, so a list position would contradict it.
+function rankUnusable(reliability, stations, pool, keep, n = ASK_LIST_LENGTH) {
+  if (!reliability || !stations) return [];
+  const minObs = reliability.per_station_summary.min_observations;
+  return Object.entries(reliability.stations)
+    .filter(([id, r]) => stations[id] && pool[id] && r.n_observations >= minObs && keep(stations[id].context))
+    .sort((a, b) => b[1].unusable_rate - a[1].unusable_rate || (a[0] < b[0] ? -1 : 1))
+    .slice(0, n)
+    .map(([id, r]) => ({ id, name: stations[id].name, pct: r.unusable_rate * 100 }));
+}
+
+// The provenance line under a briefing -- who wrote it and which data windows.
+function briefingSourceLine(source, meta) {
+  const who = source === 'template'
+    ? 'Written by a fixed template (the AI draft did not pass the checks)'
+    : 'AI-written from this station’s data; every number checked by code';
+  return `${who} · trips ${meta.trip_window} · availability ${meta.reliability_window}`;
+}
+
+function setAskAnswerVisible(visible) {
+  document.getElementById('ask-answer').classList.toggle('hidden', !visible);
+}
+
+function setAskSuggestions(ids) {
+  const list = document.getElementById('ask-suggestions');
+  list.textContent = '';
+  const buttons = ids.map(id => {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ask-suggestion';
+    btn.setAttribute('role', 'option');
+    btn.textContent = state.stations[id].name;
+    btn.addEventListener('mousedown', event => event.preventDefault()); // keep focus in the input so blur doesn't close the list first
+    btn.addEventListener('click', () => askAboutStation(id));
+    li.appendChild(btn);
+    list.appendChild(li);
+    return btn;
+  });
+  buttons.forEach((btn, i) => btn.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' && buttons[i + 1]) { event.preventDefault(); buttons[i + 1].focus(); }
+    if (event.key === 'ArrowUp') { event.preventDefault(); (buttons[i - 1] || document.getElementById('ask-input')).focus(); }
+    if (event.key === 'Escape') { setAskSuggestions([]); document.getElementById('ask-input').focus(); }
+  }));
+  buttons.forEach(btn => btn.addEventListener('blur', event => {
+    const next = event.relatedTarget;
+    if (!next || (next.id !== 'ask-input' && !(next.classList && next.classList.contains('ask-suggestion')))) setAskSuggestions([]);
+  }));
+  ask.suggestionButtons = buttons;
+  list.classList.toggle('hidden', ids.length === 0);
+  document.getElementById('ask-input').setAttribute('aria-expanded', String(ids.length > 0));
+}
+
+// Writes one answer: the question line, a body (text or a built list), the
+// source line, and a "back" link when a list question came before.
+function showAskAnswer(question, body, source) {
+  document.getElementById('ask-question').textContent = question;
+  const bodyEl = document.getElementById('ask-body');
+  bodyEl.textContent = '';
+  if (typeof body === 'string') bodyEl.textContent = body;
+  else bodyEl.appendChild(body);
+  document.getElementById('ask-source').textContent = source || '';
+  setAskAnswerVisible(true);
+}
+
+function setAskBack(listKey) {
+  const back = document.getElementById('ask-back');
+  back.textContent = listKey ? `← Back to: ${ASK_LISTS[listKey].title(askThresholds())}` : '';
+  back.classList.toggle('hidden', !listKey);
+}
+
+function askThresholds() {
+  const layers = (state.equityJoinMeta && state.equityJoinMeta.layers) || {};
+  return { nycha: layers.nycha && layers.nycha.threshold_m, subway: layers.subway && layers.subway.threshold_m };
+}
+
+// A station's answer. Called from selectStation(), so a map click and a typed
+// question land in the same place.
+function renderAskStation(id) {
+  const s = state.stations[id];
+  const briefing = state.briefings && state.briefings.stations[id];
+  setAskBack(ask.lastList);
+  if (state.briefings === undefined) {
+    showAskAnswer(`About ${s.name}`, 'Loading station briefings…', '');
+  } else if (!state.briefings) {
+    showAskAnswer(`About ${s.name}`, 'Station briefings did not load. The station card on the map still works.', '');
+  } else if (!briefing) {
+    showAskAnswer(`About ${s.name}`, `There is no briefing for ${s.name}. Briefings cover New York City stations; New Jersey stations and operator facilities are left out.`, '');
+  } else {
+    showAskAnswer(`About ${s.name}`, briefing.text, briefingSourceLine(briefing.source, state.briefings.meta));
+  }
+}
+
+function askAboutStation(id) {
+  setAskSuggestions([]);
+  document.getElementById('ask-input').value = '';
+  flyToStation(id);
+  selectStation(id); // renders the answer via renderAskStation()
+}
+
+// A clickable list of stations: name, plus a value when `valueFor` gives one.
+function buildAskStationList(rows, valueFor) {
+  const ol = document.createElement('ol');
+  ol.className = 'ask-list';
+  for (const row of rows) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const name = document.createElement('span');
+    name.textContent = row.name;
+    btn.appendChild(name);
+    if (valueFor) {
+      const value = document.createElement('span');
+      value.className = 'ask-pct';
+      value.textContent = valueFor(row);
+      btn.appendChild(value);
+    }
+    btn.addEventListener('click', () => askAboutStation(row.id));
+    li.appendChild(btn);
+    ol.appendChild(li);
+  }
+  return ol;
+}
+
+function renderAskList(key) {
+  ask.lastList = key;
+  setAskBack(null);
+  const title = ASK_LISTS[key].title(askThresholds());
+  if (!state.reliability) {
+    showAskAnswer(title, 'The availability log did not load, so this list is not available right now.', '');
+    return;
+  }
+  const pool = state.briefings ? state.briefings.stations : state.stations;
+  const rows = rankUnusable(state.reliability, state.stations, pool, ASK_LISTS[key].keep);
+  if (!rows.length) {
+    showAskAnswer(title, 'No station with enough availability observations matches this question.', '');
+    return;
+  }
+  const logWindow = state.briefings ? state.briefings.meta.reliability_window : formatWindowRange(state.reliability.window);
+  showAskAnswer(title, buildAskStationList(rows, row => `${row.pct.toFixed(1)}%`),
+    `Share of observations with 0 bikes or 0 open docks, ${logWindow}. Computed in your browser from the availability log. Click a station for its briefing.`);
+}
+
+// The Ask button / Enter. Returns what kind of answer it gave (for tests).
+function askSubmit(text) {
+  const q = normalizeStationQuery(text);
+  if (!q) return 'empty';
+  setAskSuggestions([]);
+  ask.lastList = null;
+  const ids = matchStations(text, state.stations);
+  const exact = ids.length && normalizeName(state.stations[ids[0]].name) === q;
+  if (ids.length === 1 || exact) {
+    askAboutStation(ids[0]);
+    return 'station';
+  }
+  const listKey = listQuestionFor(text);
+  if (listKey) {
+    renderAskList(listKey);
+    return 'list';
+  }
+  setAskBack(null);
+  if (ids.length > 1) {
+    showAskAnswer(`“${text.trim()}”`, buildAskStationList(ids.map(id => ({ id, name: state.stations[id].name }))),
+      'Several stations match. Pick one.');
+    return 'choose';
+  }
+  showAskAnswer(`“${text.trim()}”`,
+    'For now I answer two kinds of question: about one station (type its name, or click it on the map) and the three lists above. Open-ended questions are coming next.', '');
+  return 'unsupported';
+}
+
+// Default state set here, not left to the markup (CLAUDE.md standing rule).
+function initAskPanel() {
+  const input = document.getElementById('ask-input');
+  input.value = '';
+  input.setAttribute('aria-expanded', 'false');
+  setAskSuggestions([]);
+  setAskBack(null);
+  setAskAnswerVisible(false);
+
+  document.getElementById('ask-form').addEventListener('submit', event => {
+    event.preventDefault();
+    askSubmit(input.value);
+  });
+  input.addEventListener('input', () => {
+    setAskSuggestions(normalizeStationQuery(input.value).length >= 2 ? matchStations(input.value, state.stations) : []);
+  });
+  input.addEventListener('keydown', event => {
+    const buttons = ask.suggestionButtons || [];
+    if (event.key === 'ArrowDown' && buttons.length) { event.preventDefault(); buttons[0].focus(); }
+    if (event.key === 'Escape') setAskSuggestions([]);
+  });
+  input.addEventListener('blur', event => {
+    const next = event.relatedTarget;
+    if (!next || !next.classList || !next.classList.contains('ask-suggestion')) setAskSuggestions([]);
+  });
+  for (const key of Object.keys(ASK_LISTS)) {
+    document.getElementById(`ask-chip-${key}`).addEventListener('click', () => renderAskList(key));
+  }
+  document.getElementById('ask-back').addEventListener('click', () => renderAskList(ask.lastList));
+}
+
 // Builds the equity-context lines shown in the detail panel from flows.json's
 // real `context` fields (near_nycha, near_school, nycha/school/subway
 // distances+names, transit_gap) -- confirmed against actual data/flows.json
@@ -4967,6 +5292,7 @@ function selectStation(id) {
   updateStationDetail();
   setDetailVisible(true);
   setDetailMoreInfoExpanded(false);
+  renderAskStation(id);
 }
 
 // Clears the selection and hides the detail card -- Legend (a permanent,
@@ -5526,6 +5852,16 @@ const reliabilityReady = fetchJSON('data/reliability.json').catch(() => null);
 // fit on a degenerate join) that renderReliabilityCapacity() also treats
 // as "don't show this section," same as a missing file.
 const reliabilityCapacityReady = fetchJSON('data/reliability_capacity.json').catch(() => null);
+
+// briefings.json (pipeline/briefing_writer.py, AI version Feature 1) -- the
+// Ask panel's station answers. Deliberately NOT in the Promise.all below:
+// the map must never wait on it. undefined while loading, null if it failed.
+initAskPanel();
+const briefingsReady = fetchJSON('data/briefings.json').catch(() => null).then(payload => {
+  state.briefings = payload;
+  if (state.selectedId && !document.getElementById('ask-answer').classList.contains('hidden')) renderAskStation(state.selectedId);
+  return payload;
+});
 
 // flows.json and live_status.json now fail INDEPENDENTLY -- a live-feed
 // hiccup must not take down real historical data, and a historical-data
@@ -6187,8 +6523,10 @@ if (typeof globalThis !== 'undefined') {
     isBaselineWeatherScenario, matchingWeatherPreset, renderWeatherScenarioStatus,
     defaultScenarioState, scenarioStateDiffersFromDefault, renderDiffBar, renderScenarioRow, applyScenarioState,
     resetToBaseline, buildShareableUrl, parsePresetInput,
+    normalizeName, normalizeStationQuery, matchStations, listQuestionFor, rankUnusable, briefingSourceLine,
+    renderAskStation, renderAskList, askSubmit, askAboutStation, initAskPanel, ASK_LISTS,
     getState: () => state,
-    ready,
+    ready, briefingsReady,
   };
 }
 </script>

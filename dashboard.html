@@ -1524,7 +1524,7 @@
            placed into one bucket, as a single stacked bar with real counts.
            Mode-aware, because the quantity being distributed changes: live
            mode bins dock fill %, historical mode bins net flow. Both bin
-           the same 2,516-station population the map draws.
+           the same station population the map draws.
 
            Segments are proportional to their counts, so the bar IS the
            distribution rather than a decorative five-colour strip. Counts
@@ -1682,7 +1682,7 @@
             <div class="scenario-bar-track">
               <div class="scenario-bar-fill" id="scenario-fill-equity"></div>
             </div>
-            <div class="scenario-bar-domain">share of all 2,516 stations</div>
+            <div class="scenario-bar-domain" id="scenario-domain-equity"></div>
             <div class="scenario-row-foot">
               <span class="baseline" id="scenario-baseline-equity"></span>
               <span class="scenario" id="scenario-scenario-equity"></span>
@@ -4064,16 +4064,18 @@ function renderScenarioRow(name, { pillText, pillWarn, baselineText, scenarioTex
 //
 // Design critique task 04: each bar now plots (scenario - baseline) / a
 // real domain -- a delta, zero-centered -- not an absolute level:
-//   Equity: delta in stations flagged, as a share of the real 2,516-
-//     station total. Fleet: delta in unserved deficit stations (vs. the
-//     TRUE default fleet size, 1 truck -- not zero trucks, which never
-//     actually occurs), as a share of the real flagged total. Both rows
-//     now plot the same KIND of quantity (a change in station count, as
-//     a share of a real total), so they're actually comparable to each
-//     other for the first time. Weather has no bar at all -- it's a
-//     projection input, not an outcome measured in "stations affected,"
-//     and forcing it onto the same axis is exactly what needed its own
-//     "not comparable" disclaimer before.
+//   Equity: delta in stations flagged, as a share of the real station
+//     total (counted from flows.json, not hard-coded -- the label once
+//     said 2,516 after the data fix made it 2,485). Fleet: delta in
+//     unserved deficit stations (vs. the TRUE default fleet size, 1
+//     truck -- not zero trucks, which never actually occurs), as a share
+//     of the real flagged total. Both rows now plot the same KIND of
+//     quantity (a change in station count, as a share of a real total),
+//     so they're actually comparable to each other for the first time.
+//     Weather has no bar at all -- it's a projection input, not an
+//     outcome measured in "stations affected," and forcing it onto the
+//     same axis is exactly what needed its own "not comparable"
+//     disclaimer before.
 // Each section still degrades independently if its own data source never
 // loaded, same graceful-degradation rule as every other optional layer.
 function renderDiffBar() {
@@ -4090,6 +4092,8 @@ function renderDiffBar() {
   const summaryClauses = [];
 
   const totalStations = Object.keys(state.stations).length;
+  document.getElementById('scenario-domain-equity').textContent =
+    `share of all ${totalStations.toLocaleString()} stations`;
   const equityBaseline = computeEquityCounts(state.stations, EQUITY_BASELINE_THRESHOLDS);
   const equityScenario = computeEquityCounts(state.stations, state.scenarioState.equityThresholds);
   const equityDelta = equityScenario.nychaOrSchoolCount - equityBaseline.nychaOrSchoolCount;

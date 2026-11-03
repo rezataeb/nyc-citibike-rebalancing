@@ -234,35 +234,41 @@ def response_text(message) -> str:
     return " ".join(b.text for b in message.content if b.type == "text").strip()
 
 
-def usage_cost(usage) -> float:
-    """USD for one response, from its real token counts (standard API prices)."""
+def usage_cost(usage, batch: bool = False) -> float:
+    """USD for one response, from its real token counts (standard API prices; half for Batch)."""
     cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
     cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-    return (
+    cost = (
         usage.input_tokens * PRICE_INPUT
         + cache_write * PRICE_INPUT * CACHE_WRITE_FACTOR
         + cache_read * PRICE_INPUT * CACHE_READ_FACTOR
         + usage.output_tokens * PRICE_OUTPUT
     ) / 1e6
+    return cost * BATCH_FACTOR if batch else cost
 
 
 def write_one(client, facts: dict) -> dict:
     """Model briefing -> check -> one retry with the problems -> template fallback."""
+    return finish_one(client, facts, client.messages.create(**build_params(facts)))
+
+
+def finish_one(client, facts: dict, first, first_from_batch: bool = False) -> dict:
+    """Check a first answer (live or from a Batch); retry once on the standard API; else the template."""
     from pipeline.guardrails import check_briefing
 
     params = build_params(facts)
-    first = client.messages.create(**params)
     text = response_text(first)
     problems = check_briefing(text, facts) if text else ["no text (stop_reason: %s)" % first.stop_reason]
     record = {"first_text": text, "first_problems": problems, "usage": [first.usage.model_dump()]}
+    first_cost = usage_cost(first.usage, batch=first_from_batch)
     if not problems:
-        return {**record, "text": text, "source": "model", "cost": usage_cost(first.usage)}
+        return {**record, "text": text, "source": "model", "cost": first_cost}
 
     second = client.messages.create(**{**params, "messages": retry_messages(facts, text, problems)})
     text2 = response_text(second)
     problems2 = check_briefing(text2, facts) if text2 else ["no text (stop_reason: %s)" % second.stop_reason]
     record.update(retry_text=text2, retry_problems=problems2, usage=record["usage"] + [second.usage.model_dump()])
-    cost = usage_cost(first.usage) + usage_cost(second.usage)
+    cost = first_cost + usage_cost(second.usage)
     if not problems2:
         return {**record, "text": text2, "source": "model_retry", "cost": cost}
     return {**record, "text": template_fallback(facts), "source": "template", "cost": cost}
@@ -322,6 +328,119 @@ def summarize(results: dict) -> dict:
         "mean_output_tokens": round(sum(u["output_tokens"] for u in usage) / len(usage), 1),
         "cost_usd": round(total, 5),
     }
+
+
+# --- full run (step 5): one Batch, resumable, skips unchanged stations ------------
+
+BRIEFINGS_PATH = Path(__file__).resolve().parent.parent / "data" / "briefings.json"  # shipped with the dashboard
+BATCH_STATE_PATH = PILOT_PATH.parent / "briefings_batch_state.json"  # local: lets an interrupted run resume
+RUN_LOG_PATH = PILOT_PATH.parent / "briefings_full_run.json"  # local: every draft, problem and cost
+POLL_SECONDS = 60
+
+
+def stations_to_write(all_facts: dict[str, dict], existing: dict[str, dict]) -> list[str]:
+    """Stations with no briefing yet, or whose facts changed since theirs was written (hash differs)."""
+    from pipeline.briefings import facts_hash
+
+    return sorted(i for i, f in all_facts.items() if existing.get(i, {}).get("facts_hash") != facts_hash(f))
+
+
+def custom_ids(station_ids: list[str]) -> dict[str, str]:
+    """Batch custom_id -> station id. Station ids contain dots, which a custom_id may not."""
+    return {f"s{n:05d}": station_id for n, station_id in enumerate(station_ids)}
+
+
+def collect_results(client, results, id_map: dict[str, str], all_facts: dict[str, dict]) -> dict[str, dict]:
+    """Batch results -> briefings. Succeeded: check, retry, template. Errored, expired or missing: rerun live."""
+    out = {}
+    for result in results:
+        station_id = id_map[result.custom_id]
+        if result.result.type == "succeeded":
+            out[station_id] = finish_one(client, all_facts[station_id], result.result.message, first_from_batch=True)
+        else:
+            out[station_id] = {**write_one(client, all_facts[station_id]), "batch_result": result.result.type}
+    for station_id in set(id_map.values()) - set(out):
+        out[station_id] = {**write_one(client, all_facts[station_id]), "batch_result": "missing"}
+    return out
+
+
+def briefings_file(records: dict[str, dict], all_facts: dict[str, dict], previous: dict[str, dict], generated: str) -> dict:
+    """The shipped file: new briefings plus unchanged old ones, for current stations only."""
+    from pipeline.briefings import facts_hash
+
+    stations = {i: b for i, b in previous.items() if i in all_facts}
+    stations.update({i: {"text": r["text"], "source": r["source"], "facts_hash": facts_hash(all_facts[i])}
+                     for i, r in records.items()})
+    sources = [b["source"] for b in stations.values()]
+    any_facts = next(iter(all_facts.values()))
+    return {
+        "meta": {
+            "model": MODEL,
+            "generated": generated,
+            "trip_window": any_facts["trip_window"],
+            "reliability_window": any_facts["reliability_window"],
+            "n": len(stations),
+            "sources": {s: sources.count(s) for s in ("model", "model_retry", "template")},
+            "method": "AI-written from each station's facts record; every number and claim checked by code; "
+                      "a rule-based template is used where the AI draft failed the checks twice.",
+        },
+        "stations": dict(sorted(stations.items())),
+    }
+
+
+def full_run(limit: int | None = None) -> None:
+    """Paid (~$0.20 for all stations): one Batch at half price, then checks, retries and the template.
+
+    Safe to rerun: a saved batch id is resumed instead of paying again, and
+    stations whose facts are unchanged since their briefing are skipped.
+    """
+    import datetime
+    import time
+
+    import anthropic
+
+    from pipeline.briefings import FLOWS_PATH, MANIFEST_PATH, RELIABILITY_PATH, build_all_facts
+
+    all_facts = build_all_facts(
+        json.loads(FLOWS_PATH.read_text()), json.loads(RELIABILITY_PATH.read_text()), json.loads(MANIFEST_PATH.read_text())
+    )
+    previous = json.loads(BRIEFINGS_PATH.read_text())["stations"] if BRIEFINGS_PATH.exists() else {}
+    load_api_key()
+    client = anthropic.Anthropic()
+
+    if BATCH_STATE_PATH.exists():
+        state = json.loads(BATCH_STATE_PATH.read_text())
+        print(f"resuming batch {state['batch_id']} ({len(state['id_map'])} stations)")
+    else:
+        todo = stations_to_write(all_facts, previous)[:limit]
+        if not todo:
+            print("every briefing is up to date -- nothing to send")
+            return
+        id_map = custom_ids(todo)
+        batch = client.messages.batches.create(
+            requests=[{"custom_id": c, "params": build_params(all_facts[i])} for c, i in id_map.items()]
+        )
+        state = {"batch_id": batch.id, "id_map": id_map}
+        BATCH_STATE_PATH.write_text(json.dumps(state, indent=1))
+        print(f"submitted batch {batch.id} ({len(id_map)} stations)")
+
+    while True:
+        batch = client.messages.batches.retrieve(state["batch_id"])
+        if batch.processing_status == "ended":
+            break
+        counts = batch.request_counts
+        print(f"{batch.processing_status}: {counts.processing} processing, {counts.succeeded} done", flush=True)
+        time.sleep(POLL_SECONDS)
+
+    records = collect_results(client, client.messages.batches.results(state["batch_id"]), state["id_map"], all_facts)
+    summary = summarize(records)
+    RUN_LOG_PATH.write_text(json.dumps({"summary": summary, "batch_id": state["batch_id"], "results": records},
+                                       indent=1, ensure_ascii=False))
+    out = briefings_file(records, all_facts, previous, datetime.date.today().isoformat())
+    BRIEFINGS_PATH.write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    BATCH_STATE_PATH.unlink()
+    print(json.dumps(summary, indent=1))
+    print(f"wrote {BRIEFINGS_PATH} ({out['meta']['n']} stations) and the local log {RUN_LOG_PATH}")
 
 
 def review_page(results_path: Path, out_path: Path) -> None:
@@ -427,6 +546,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true", help="$0: count tokens and estimate cost")
     parser.add_argument("--pilot", action="store_true", help="paid (~$0.01): write briefings for the pilot sample")
+    parser.add_argument("--full", action="store_true", help="paid (~$0.20): Batch-write every new or changed station")
+    parser.add_argument("--limit", type=int, help="with --full: send at most this many stations")
     parser.add_argument("--review", type=Path, help="build a local HTML review page from saved pilot results")
     parser.add_argument("--station", help="show one station's facts and template briefing")
     parser.add_argument("--live", action="store_true", help="with --station: also ask the model (~$0.0002)")
@@ -442,5 +563,7 @@ if __name__ == "__main__":
         dry_run(args.n)
     elif args.pilot:
         pilot(args.n, args.out, args.holdout)
+    elif args.full:
+        full_run(args.limit)
     else:
         parser.print_help()

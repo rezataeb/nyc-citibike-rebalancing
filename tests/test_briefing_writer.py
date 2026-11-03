@@ -151,3 +151,67 @@ def test_usage_cost_prices_cache_reads_at_ten_percent():
 
     # 300*0.10 + 1800*0.10*0.10 + 80*0.50 = 30 + 18 + 40 = 88 per million
     assert usage_cost(_Usage()) == pytest.approx(88 / 1e6)
+
+
+# --- full run (step 5) -------------------------------------------------------------
+
+class _BatchResult:
+    def __init__(self, custom_id, kind, text=None):
+        self.custom_id = custom_id
+        self.result = type("R", (), {"type": kind, "message": _Message(text) if text is not None else None})()
+
+
+def test_custom_ids_have_no_dots_and_map_back_to_station_ids():
+    import re
+
+    from pipeline.briefing_writer import custom_ids
+
+    id_map = custom_ids(["5980.10", "6140.05"])
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]{1,64}", c) for c in id_map)
+    assert sorted(id_map.values()) == ["5980.10", "6140.05"]
+
+
+def test_only_new_or_changed_stations_are_sent(all_facts):
+    from pipeline.briefing_writer import stations_to_write
+    from pipeline.briefings import facts_hash
+
+    first, second, *_ = sorted(all_facts)
+    existing = {first: {"facts_hash": facts_hash(all_facts[first])}, second: {"facts_hash": "stale"}}
+    todo = stations_to_write(all_facts, existing)
+    assert first not in todo and second in todo and len(todo) == len(all_facts) - 1
+
+
+def test_batch_results_are_checked_and_failures_rerun_live(all_facts, some_facts):
+    from pipeline.briefing_writer import collect_results
+
+    sid = some_facts["station_id"]
+    others = [i for i in sorted(all_facts) if i != sid][:2]
+    facts = {sid: some_facts, others[0]: all_facts[others[0]], others[1]: all_facts[others[1]]}
+    id_map = {"s00000": sid, "s00001": others[0], "s00002": others[1]}
+    results = [
+        _BatchResult("s00000", "succeeded", template_fallback(some_facts)),  # passes the checker
+        _BatchResult("s00001", "errored"),                                    # rerun on the standard API
+    ]                                                                         # s00002 never came back
+    live = _FakeClient(template_fallback(facts[others[0]]), template_fallback(facts[others[1]]))
+    out = collect_results(live, results, id_map, facts)
+    assert out[sid]["source"] == "model"
+    assert out[others[0]]["batch_result"] == "errored" and out[others[0]]["source"] == "model"
+    assert out[others[1]]["batch_result"] == "missing"
+    assert len(live.requests) == 2
+
+
+def test_batch_cost_is_half_the_standard_price():
+    from pipeline.briefing_writer import usage_cost
+
+    assert usage_cost(_Usage(), batch=True) == pytest.approx(usage_cost(_Usage()) / 2)
+
+
+def test_briefings_file_keeps_unchanged_and_drops_removed_stations(all_facts):
+    from pipeline.briefing_writer import briefings_file
+
+    keep, new = sorted(all_facts)[:2]
+    previous = {keep: {"text": "old", "source": "model", "facts_hash": "h"}, "gone.00": {"text": "x"}}
+    records = {new: {"text": "new", "source": "template"}}
+    out = briefings_file(records, all_facts, previous, "2026-11-02")
+    assert set(out["stations"]) == {keep, new}
+    assert out["meta"]["sources"] == {"model": 1, "model_retry": 0, "template": 1}

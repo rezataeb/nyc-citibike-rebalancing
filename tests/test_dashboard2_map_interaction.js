@@ -188,6 +188,18 @@ async function main() {
     'moving the fleet slider must not add or remove any map layer now that the route is gone'
   );
 
+  // ================================================================
+  // 7. The Scenario Planner's equity domain label counts the stations
+  // actually loaded. It was typed into the markup as "2,516" and went
+  // stale when the station-id fix brought the real count to 2,485.
+  // ================================================================
+  assert.ok(!html.includes('2,516 stations</div>'), 'the station count must not be hard-coded in the markup');
+  assert.strictEqual(
+    sandbox._elements['scenario-domain-equity'].textContent,
+    `share of all ${Object.keys(FAKE_FLOWS.stations).length} stations`,
+    'the equity domain label should state the loaded station count'
+  );
+
   console.log('dashboard2 map-interaction smoke test passed (Session 49: no clustering, no drawn route, click tolerance, over-plot fade).');
 }
 

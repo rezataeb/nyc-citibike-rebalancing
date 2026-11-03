@@ -5,6 +5,7 @@
 
 **Live app:** https://nyc-citibike-rebalancing.vercel.app  
 **Demo:** https://nyc-citibike-rebalancing.netlify.app  
+**Video tour (1 min):** https://nyc-citibike-rebalancing.vercel.app/video.html  
 **Report (PDF):** [report/Citi_Bike_Rebalancing_Report.pdf](report/Citi_Bike_Rebalancing_Report.pdf)  
 **Early data exploration, Jul 2025–Jun 2026 window (PDF):** [notebooks/session_7_5_eda_report.pdf](notebooks/session_7_5_eda_report.pdf) ([notebook](notebooks/session_7_5_eda_report.ipynb)) -- predates the current Sep 2025–Aug 2026 window, so its numbers differ  
 **Repo:** https://github.com/rezataeb/nyc-citibike-rebalancing

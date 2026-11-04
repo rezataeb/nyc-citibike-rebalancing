@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Citi Bike Rebalancing Explorer — Product Reference</title>
+<link rel="stylesheet" href="report.css">
+<style>
+  /* Reference doc: denser than the report, five pages at most. */
+  body { font-size: 10pt; }
+  h2 { margin-top: 1.1em; }
+  table { margin: 0.5em 0 0.8em; }
+  td, th { padding-top: 0.3em; padding-bottom: 0.3em; }
+  .ref-cover { margin-bottom: 1em; }
+  .ref-cover h1 { font-size: 22pt; margin: 0.2em 0 0.3em; }
+  ol.pipeline > li { margin-bottom: 0.35em; }
+</style>
+</head>
+<body>
+
+<section class="ref-cover">
+  <div class="eyebrow">Citi Bike Rebalancing Explorer · Product Reference</div>
+  <h1>What it is, how it works, and where it stops</h1>
+  <div class="meta">
+    <div><b>Live app:</b> nyc-citibike-rebalancing.vercel.app · <b>Code and data:</b> github.com/rezataeb/nyc-citibike-rebalancing</div>
+    <div><b>Data:</b> trips {{trip_first_month}} – {{trip_last_month}}; station availability {{rel_start}} – {{rel_end}}.
+      Independent project, public data only. Not an official NYC DOT or Lyft product.</div>
+    <div><b>About the numbers:</b> every figure here is read from the committed data files when this page is built
+      (<code>python3 -m report.build_report</code>), not typed in.</div>
+  </div>
+</section>
+
+<section id="goal">
+  <h2>1. Main goal</h2>
+  <p>An empty or full bike-share station is a barrier to choosing bike share, not only an operations problem.
+    The tool shows <strong>where and when</strong> Citi Bike stations empty or fill, <strong>how reliable</strong> they really were,
+    <strong>who lives near</strong> the worst ones (NYCHA housing, schools, subway gaps), and <strong>what a truck fleet</strong> could
+    realistically fix. It runs in the browser on precomputed files, at $0 to host and $0 per visit.</p>
+</section>
+
+<section id="users">
+  <h2>2. Users</h2>
+  <table>
+    <tr><th>User</th><th>The question they bring</th><th>Where they find the answer</th></tr>
+    <tr><td>DOT planners and analysts</td><td>Where does imbalance concentrate, and who does it affect?</td>
+      <td>Historical Flow map, Equity context, Reliability</td></tr>
+    <tr><td>Operations and oversight staff</td><td>Where should a truck go first? What can a fleet cover?</td>
+      <td>Priority Truck Stops, fleet simulator</td></tr>
+    <tr><td>Council and community board staff</td><td>How does the station on my block behave?</td>
+      <td>Ask the data: a plain-English briefing per station</td></tr>
+    <tr><td>Riders and the public</td><td>Is my station usually empty at 8 AM? Is it empty right now?</td>
+      <td>Station card, Live Docks</td></tr>
+  </table>
+</section>
+
+<section id="features">
+  <h2>3. Main features</h2>
+  <dl>
+    <dt>Historical Flow</dt>
+    <dd>Net flow (arrivals minus departures) for {{n_stations}} stations, by hour, weekday or weekend, season and month.
+      An hour slider replays the day; a ribbon totals the bikes out of place.</dd>
+    <dt>Live Docks</dt>
+    <dd>Bikes and open docks right now, from the public GBFS feed, refreshed every 60 seconds. An amber ring marks
+      a station that is empty or full while its neighbors within 500 m are too (the project's own approximation of the
+      contract's adjacency rule, not a penalty calculation).</dd>
+    <dt>Reliability</dt>
+    <dd>How often each station had 0 bikes or 0 docks in the logged snapshots, with its rank among the
+      {{rel_n_rankable}} logged stations, and what station size is associated with.</dd>
+    <dt>Priority Truck Stops and the fleet simulator</dt>
+    <dd>A ranked morning route (pick up here, drop off there), with an optional equity weight; a slider runs 1 to
+      {{fleet_max_trucks}} trucks.</dd>
+    <dt>Scenario Planner</dt>
+    <dd>Weather presets (steady rain, snow, ideal riding weather, a hot day) projected from past weather effects and labeled PROJECTED; equity distance
+      sliders; the fleet slider. Each reads a precomputed file next to the baseline.</dd>
+    <dt>Ask the data (AI)</dt>
+    <dd>Type a station for a two-to-three sentence briefing, written in advance by {{brief_model}} from that station's own
+      record ({{brief_n}} stations). Ready-made questions follow the New York clock ("Where do bikes run out next hour?",
+      "Where do docks fill up next hour?", "Which stations are empty right now?"); these are computed by code, not AI.</dd>
+  </dl>
+</section>
+
+<section id="data">
+  <h2>4. Dataset</h2>
+  <table>
+    <tr><th>Layer</th><th>Source</th><th>Coverage</th></tr>
+    <tr><td>Trips</td><td>Citi Bike S3 trip archives</td><td>{{trip_n_months}} months ({{trip_first_month}} – {{trip_last_month}}): the baseline year;
+      {{n_stations}} stations, {{n_stations_full}} with trips every month</td></tr>
+    <tr><td>Station status</td><td>Citi Bike GBFS feed</td><td>{{rel_snapshots}} snapshots by an hourly GitHub Action, {{rel_start}} – {{rel_end}};
+      {{rel_n_obs}} station observations. Also read live.</td></tr>
+    <tr><td>NYCHA, schools</td><td>NYC Open Data</td><td>{{nycha_records}} developments; {{school_records}} schools (2019–2020 locations)</td></tr>
+    <tr><td>Subway</td><td>NY State Open Data</td><td>{{subway_records}} station records</td></tr>
+    <tr><td>Weather</td><td>Open-Meteo archive</td><td>Daily temperature and precipitation, 18 zones on a 6 km grid</td></tr>
+  </table>
+  <p><strong>Baseline year, not a deadline.</strong> Twelve months hold one of each calendar month, so "a typical November
+    weekday at 9 AM" has an answer on any date. The window is set in one file (<code>pipeline/window.py</code>) and one
+    command rebuilds everything; the availability window is frozen at its end date, so later log files never change a
+    published rate.</p>
+</section>
+
+<section id="pipeline">
+  <h2>5. From raw data to the screen</h2>
+  <ol class="pipeline">
+    <li><strong>Acquire.</strong> Download the monthly trip archives; log the GBFS feed every hour to a separate
+      <code>data-snapshots</code> branch; fetch the Open Data layers and the weather archive once.</li>
+    <li><strong>Clean.</strong> Drop trips under 60 seconds or over 4 hours. Merge station ids that were split across
+      months (for example <code>X.10</code> and <code>X.1</code>) and drop rows outside the window. Exclude offline
+      stations from every failure denominator.</li>
+    <li><strong>Aggregate.</strong> Count arrivals and departures per station, day and hour; average into weekday and weekend
+      curves per season and month (<code>flows.json</code>). Hours without trips count as zero.</li>
+    <li><strong>Enrich.</strong> Distance from each station to the nearest NYCHA development, school and subway station;
+      flag 300 m (NYCHA, school) and 800 m (subway gap).</li>
+    <li><strong>Model.</strong> Cluster station types; fit weather effects; compare forecasts by walk-forward and
+      forward-only tests; fit capacity against reliability (Section 6).</li>
+    <li><strong>Predict and simulate.</strong> Weather scenarios from the fitted effects; ten truck-fleet scenarios from the
+      morning deficit and surplus.</li>
+    <li><strong>Explain.</strong> Build a facts record per station; the model writes a briefing from it; code checks every number
+      and claim, retries once, then falls back to a template.</li>
+    <li><strong>Check and publish.</strong> Ground-truth spot checks (a Financial District station must fill in the morning,
+      Thanksgiving must dip), the test suite, then a static deploy. No backend, no database.</li>
+  </ol>
+</section>
+
+<section id="models">
+  <h2>6. Models behind it</h2>
+  <table>
+    <tr><th>Model</th><th>Method</th><th>Result</th></tr>
+    <tr><td>Station typology</td><td>K-means on each station's weekday hourly shape; k chosen by silhouette</td>
+      <td>k = {{typology_k}} (silhouette {{typology_silhouette}}): {{n_commuter_core}} commuter core, {{n_residential_feeder}} residential feeder;
+        {{n_low_signal}} too quiet to cluster</td></tr>
+    <tr><td>Demand forecast</td><td>Seasonal naive vs. spline GAM vs. gradient boosting with an extrapolation guard;
+      {{n_folds}}-fold walk-forward test, Wilcoxon signed-rank</td>
+      <td>Naive best: MAE {{mae_naive}} vs. {{mae_guarded}} guarded (p = {{p_guarded_vs_naive}}); naive better in {{n_naive_wins}} of {{n_folds}} months</td></tr>
+    <tr><td>Forward-only benchmark</td><td>Profile, last week, four-week mean, Holt-Winters (weekly season), gradient boosting with lags
+      and weather; {{bm_n_weeks}} weekly folds, {{bm_n_stations}} stations, zero-filled</td>
+      <td>Profile best hourly and daily; for weekday 6–9 AM totals Holt-Winters is {{bm_am_peak_holt_winters_skill}}
+        ({{bm_am_peak_holt_winters_wins}} of {{bm_n_weeks}} weeks)</td></tr>
+    <tr><td>Weather effects</td><td>Elasticities of daily flow to temperature and precipitation</td>
+      <td>Drive the four weather presets; a heat-wave preset was left out (the fit does not reach that far)</td></tr>
+    <tr><td>Reliability</td><td>Share of online observations with 0 bikes or 0 docks</td>
+      <td>{{rel_unusable_rate}} unusable; full outnumbers empty {{rel_full_to_empty}} to 1; median station {{rel_median_station_rate}}</td></tr>
+    <tr><td>Capacity vs. reliability</td><td>OLS: unusable rate ~ capacity + log(1 + demand), {{cap_n_stations}} stations</td>
+      <td>40+ docks about {{cap_gap_points}} points lower than under 20 (a pattern, not proof)</td></tr>
+    <tr><td>Fleet simulator</td><td>Greedy routing; {{fleet_capacity}} bikes per truck, at most {{fleet_max_stops}} stops</td>
+      <td>{{fleet_max_trucks}} trucks fully rebalance {{fleet_max_serviced}} of {{fleet_n_deficit_flagged}} deficit stations ({{fleet_max_share}}); the stop cap binds</td></tr>
+    <tr><td>Station briefings</td><td>{{brief_model}} via the Batch API, one facts record per call; code checker; template fallback</td>
+      <td>{{brief_n}} briefings; {{brief_ai_share}} AI-written, {{brief_n_template}} from the template</td></tr>
+  </table>
+</section>
+
+<section id="decisions">
+  <h2>7. Main decisions, and why</h2>
+  <ul>
+    <li><strong>Baseline first.</strong> Every model is compared with a plain baseline, and the baseline won, so the map shows
+      historical patterns as the main view and labels the comparison openly.</li>
+    <li><strong>Honest tests.</strong> Walk-forward folds, not one split; a second benchmark that is forward-only and counts
+      zero hours, because the first could learn from later months.</li>
+    <li><strong>Precompute, then serve static files.</strong> No model runs in the browser and nothing needs a server, so hosting
+      is free and every number can be traced to a file in the repo.</li>
+    <li><strong>The pipeline computes; the language model only explains.</strong> Briefings are written once, checked by code
+      (a number not in the record is rejected), and shipped as JSON. No API key in the browser, no cost per visit.
+      Ranked answers (the ready-made questions) are computed by code because a ranking must be exact.</li>
+    <li><strong>One window, set in one place.</strong> A test blocks dates typed into the pages; every label is built from the data.</li>
+    <li><strong>Label what is not measured.</strong> PROJECTED on weather scenarios; "a pattern, not proof" on capacity; the 500 m
+      adjacency is called the project's own choice.</li>
+    <li><strong>Scope kept small on purpose.</strong> No map-wide equity filter (equity stays per station); a dock-capacity
+      sandbox was closed because public data never recorded capacity over time.</li>
+  </ul>
+</section>
+
+<section id="limits">
+  <h2>8. Limitations</h2>
+  <ul>
+    <li><strong>Sampling.</strong> Availability is logged about hourly (median gap {{rel_median_gap_min}} minutes) with a
+      {{rel_max_gap_days}}-day gap ({{rel_gap_start}} – {{rel_gap_end}}). Rates are estimates; outage durations and the contract's
+      60/120-minute thresholds cannot be measured.</li>
+    <li><strong>Short availability window.</strong> {{rel_days}} days, summer into fall; no seasonal comparison yet.</li>
+    <li><strong>Correlation only.</strong> The capacity result compares different stations; borough and zone are not controlled for.</li>
+    <li><strong>Projections.</strong> Weather scenarios extrapolate past effects; the truck route starts at a stand-in depot and
+      uses a fixed stop cap, not a time or distance budget.</li>
+    <li><strong>Forecasting.</strong> The better morning-peak forecast (Holt-Winters) is tested but not yet shown in the dashboard.</li>
+    <li><strong>AI briefings.</strong> They restate a station's own numbers; they do not explain causes. The school layer dates
+      from 2019–2020.</li>
+  </ul>
+</section>
+
+<div class="footnote">Public data: Citi Bike GBFS and trip data, NYC Open Data, NY State Open Data, Open-Meteo.
+  Rebuild with <code>python3 -m report.build_report</code>. Full detail: the project report (same folder).</div>
+
+</body>
+</html>

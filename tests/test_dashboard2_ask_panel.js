@@ -120,7 +120,7 @@ async function testBackLinkReturnsToTheList() {
 async function testUnsupportedQuestionIsHonest() {
   const { dash, sandbox } = await load();
   assert.strictEqual(dash.askSubmit('What will the weather be tomorrow?'), 'unsupported');
-  assert.ok(el(sandbox, 'ask-body').textContent.includes('Open-ended questions are coming next'));
+  assert.ok(el(sandbox, 'ask-body').textContent.includes('ready-made questions above'));
 }
 
 async function testMissingReliabilityDegradesTheListsOnly() {

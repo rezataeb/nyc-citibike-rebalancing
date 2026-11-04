@@ -63,6 +63,18 @@ STEPS = [
         "one live API call, seconds -- always run, never skipped (see module docstring above on why this can't be made historically reproducible)",
     ),
     (
+        "reliability",
+        [],
+        "Unusable rates from the GBFS snapshot log, frozen at pipeline/window.py's AVAILABILITY_END",
+        "seconds to a minute (streams the log)",
+    ),
+    (
+        "reliability_capacity",
+        [],
+        "Demand-controlled capacity vs. reliability fit (reads reliability.json + live capacity)",
+        "seconds",
+    ),
+    (
         "elasticities",
         [],
         "Fit capacity/temp/precip elasticities against real daily flow + real weather",

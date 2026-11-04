@@ -508,6 +508,8 @@
   #ask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .ask-chip { font: inherit; font-size: 11.5px; padding: 5px 10px; border-radius: 14px; border: 1px solid #d8d7d3; background: #f3f2f0; color: #3a3937; cursor: pointer; }
   .ask-chip:hover, .ask-chip:focus-visible { background: #ebe9e5; color: #0b0b0b; }
+  .ask-chip--timed { border-color: #c9c3b8; background: #fbfaf8; }
+  .ask-chip.hidden { display: none; }
   #ask-answer { margin-top: 12px; padding: 2px 0 2px 12px; border-left: 3px solid #1c3350; }
   #ask-question { font-size: 11px; color: #666057; margin-bottom: 4px; }
   #ask-body { font-size: 13.5px; line-height: 1.5; color: #0b0b0b; }
@@ -1496,6 +1498,9 @@
         </form>
         <ul id="ask-suggestions" role="listbox" aria-label="Matching stations"></ul>
         <div id="ask-chips">
+          <button type="button" class="ask-chip ask-chip--timed" id="ask-chip-next-drain"></button>
+          <button type="button" class="ask-chip ask-chip--timed" id="ask-chip-next-fill"></button>
+          <button type="button" class="ask-chip ask-chip--timed" id="ask-chip-live-empty"></button>
           <button type="button" class="ask-chip" id="ask-chip-unusable">Most often unusable</button>
           <button type="button" class="ask-chip" id="ask-chip-nycha">Most unusable near NYCHA</button>
           <button type="button" class="ask-chip" id="ask-chip-gap">Most unusable beyond the subway gap</button>
@@ -2337,6 +2342,13 @@ function parsePeriod(period) {
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
+// The trip window as text ("Oct 2025 – Sep 2026"), from the loaded data.
+function tripWindowLabel() {
+  const months = state.tripMonths;
+  if (!months.length) return 'trip-data';
+  return `${formatPeriodLabel('month:' + months[0])} – ${formatPeriodLabel('month:' + months[months.length - 1])}`;
+}
+
 function formatPeriodLabel(period) {
   if (period === 'all') return 'all-period average';
   const { kind, key } = parsePeriod(period);
@@ -2493,6 +2505,7 @@ function defaultScenarioState() {
 // variables) so the Node smoke test can inspect it via the test hook below.
 const state = {
   stations: null,   // raw stations object from flows.json, once loaded
+  tripMonths: [],   // flows.json granularity.months: the trip window, never typed into the page
   markers: {},      // station_id -> Leaflet circleMarker, kept for in-place updates
   domainMax: null,
   currentHour: DEFAULT_HOUR,
@@ -3105,7 +3118,8 @@ function renderDistribution() {
   // "distribution" is redundant with the card's own stacked bar right
   // underneath the title.
   document.getElementById('distribution-title').textContent = live ? 'Dock Fill' : 'Station Balance';
-  document.getElementById('distribution-total').textContent = `${total.toLocaleString()} stations`;
+  // Live counts only stations with a usable live reading, so it says so (it differs from the map's station count).
+  document.getElementById('distribution-total').textContent = live ? `${total.toLocaleString()} with a live reading` : `${total.toLocaleString()} stations`;
 
   // Both the bar segments and the key entries are clickable (delegated
   // listeners on their parents, wired once at init -- see
@@ -3164,7 +3178,7 @@ function renderDistribution() {
   // disclosure now, always reachable regardless of mode -- its CONTENT
   // still varies, since the dock-fill/reliability paragraph only makes
   // sense in live mode.
-  const weatherMethodNote = `A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real Sep 2025–Aug 2026 year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading — each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.`;
+  const weatherMethodNote = `A real daily-observation regression (temp/precip vs. real flow magnitude) fit across the full real ${tripWindowLabel()} year. Weather is read from 18 fixed geographic zones (a 6km grid over the real station footprint, Open-Meteo per zone), not one city-wide reading — each station uses its own zone's weather. Stations without elasticity data (low signal, excluded from clustering) are shown unadjusted.`;
   if (live) {
     note.textContent = '';
     const fill = computeFillDistribution();
@@ -3234,6 +3248,7 @@ function applyLiveFeedPayload(payload) {
   state.liveSource = payload.source || 'snapshot';
   liveStandardCache = null;
   renderHour(state.currentHour); // one hook: repaints markers, ribbon, distribution, legend and detail together
+  updateTimedChips(); // "right now" follows the feed (shown for the feed, hidden for the snapshot)
 }
 
 function refreshLiveFeed() {
@@ -4960,7 +4975,7 @@ function setMode(mode) {
 const ASK_SUGGESTION_LIMIT = 6;
 const ASK_LIST_LENGTH = 10;
 const ASK_LEAD_IN = /^(tell me about|what about|how is|how s|show me|about)\s+/; // not "station": "station a" must stay a name
-const ask = { lastList: null };
+const ask = { lastList: null, now: null }; // now: tests pin the clock (ms); null = the real clock
 
 // Lowercase, "&" read as "and", punctuation dropped -- so "w 21 st and 6
 // ave?" and "W 21 St & 6 Ave" compare equal.
@@ -5022,6 +5037,124 @@ function rankUnusable(reliability, stations, pool, keep, n = ASK_LIST_LENGTH) {
     .sort((a, b) => b[1].unusable_rate - a[1].unusable_rate || (a[0] < b[0] ? -1 : 1))
     .slice(0, n)
     .map(([id, r]) => ({ id, name: stations[id].name, pct: r.unusable_rate * 100 }));
+}
+
+// Ready-made questions that follow the viewer's clock (user, 2026-11-03).
+// Each is answered by computation in the browser, never by a model, and each
+// only appears when the data can back it at this moment:
+//   next-drain / next-fill  the coming hour in New York, read from the same
+//     calendar month and day type in the data year -- a typical day, so it
+//     works for any date, months after the data ends
+//   live-empty  stations with no bikes right now, from the live feed (hidden
+//     when the page fell back to the saved snapshot, which is not "now")
+const ASK_TIMED_LENGTH = 8;
+
+const askNow = () => (ask.now == null ? new Date() : new Date(ask.now));
+
+// New York wall-clock hour, day type and calendar month of a moment.
+function nycClock(moment) {
+  const parts = {};
+  new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23', weekday: 'short', month: 'numeric' })
+    .formatToParts(moment).forEach(p => { parts[p.type] = p.value; });
+  return { hour: Number(parts.hour) % 24, dayType: parts.weekday === 'Sat' || parts.weekday === 'Sun' ? 'weekend' : 'weekday', month: Number(parts.month) };
+}
+
+// "9–10 AM", "11 AM–12 PM", "11 PM–12 AM".
+function hourRangeLabel(hour) {
+  const fmt = h => ({ n: h % 12 || 12, ap: h < 12 ? 'AM' : 'PM' });
+  const a = fmt(hour), b = fmt((hour + 1) % 24);
+  return a.ap === b.ap ? `${a.n}–${b.n} ${b.ap}` : `${a.n} ${a.ap}–${b.n} ${b.ap}`;
+}
+
+// The data-year month with the same calendar month ('2025-11' for November), or null.
+function monthKeyFor(month, tripMonths) {
+  return tripMonths.find(m => Number(m.slice(5, 7)) === month) || null;
+}
+
+// Stations whose typical net flow in that hour points the asked way, strongest first.
+// sign -1: losing bikes (drains); +1: gaining bikes (fills).
+function rankTypicalHour(stations, monthKey, dayType, hour, sign, n = ASK_TIMED_LENGTH) {
+  return Object.entries(stations)
+    .map(([id, s]) => ({ id, name: s.name, net: s.months && s.months[monthKey] && s.months[monthKey][dayType] ? s.months[monthKey][dayType][hour] : null }))
+    .filter(r => r.net != null && r.net * sign > 0)
+    .sort((a, b) => b.net * sign - a.net * sign || (a.id < b.id ? -1 : 1))
+    .slice(0, n);
+}
+
+// The coming hour: the New York hour starting at the next full hour, with its own day type and month.
+function nextHourContext(now = askNow()) {
+  const next = nycClock(new Date(now.getTime() + 3600e3));
+  const monthKey = monthKeyFor(next.month, state.tripMonths);
+  return { ...next, monthKey };
+}
+
+const ASK_TIMED = {
+  'next-drain': {
+    label: () => 'Where do bikes run out next hour?',
+    available: () => Boolean(state.stations && nextHourContext().monthKey),
+    sign: -1, verb: 'lose',
+  },
+  'next-fill': {
+    label: () => 'Where do bikes pile up next hour?',
+    available: () => Boolean(state.stations && nextHourContext().monthKey),
+    sign: 1, verb: 'gain',
+  },
+  'live-empty': {
+    label: () => 'Which stations are empty right now?',
+    available: () => Boolean(state.liveSource === 'feed' && state.liveStations && state.stations),
+  },
+};
+
+function renderAskTypicalHour(key) {
+  const q = ASK_TIMED[key];
+  const ctx = nextHourContext();
+  const title = `Usually ${q.verb} the most bikes ${hourRangeLabel(ctx.hour)} on ${MONTH_NAMES[ctx.month - 1]} ${ctx.dayType}s`;
+  const rows = rankTypicalHour(state.stations, ctx.monthKey, ctx.dayType, ctx.hour, q.sign);
+  if (!rows.length) {
+    showAskAnswer(title, 'No station has data for that hour in this month.', '');
+    return;
+  }
+  const value = row => `${row.net > 0 ? '+' : '−'}${Math.abs(row.net).toFixed(1)}`;
+  showAskAnswer(title, buildAskStationList(rows, value),
+    `Average net bikes in that hour on ${ctx.dayType}s in ${formatPeriodLabel('month:' + ctx.monthKey)}, the same month in the data year (${tripWindowLabel()}). A typical day, not a live reading. Computed in your browser. Click a station for its briefing.`);
+}
+
+function renderAskLiveEmpty() {
+  const now = nycClock(askNow());
+  const monthKey = monthKeyFor(now.month, state.tripMonths);
+  const empty = Object.keys(state.liveStations).filter(id => state.stations[id] && hasLiveData(id) && state.liveStations[id].bikes_available === 0);
+  const usual = id => {
+    const m = monthKey && state.stations[id].months && state.stations[id].months[monthKey];
+    return m && m[now.dayType] ? m[now.dayType][now.hour] : 0;
+  };
+  const rows = empty.map(id => ({ id, name: state.stations[id].name, net: usual(id) }))
+    .sort((a, b) => a.net - b.net || (a.id < b.id ? -1 : 1))
+    .slice(0, ASK_TIMED_LENGTH);
+  const title = `${empty.length.toLocaleString()} station${empty.length === 1 ? ' has' : 's have'} no bikes right now`;
+  if (!rows.length) {
+    showAskAnswer(title, 'Every station with a live reading has at least one bike.', '');
+    return;
+  }
+  const asOf = state.liveAsOf ? new Date(state.liveAsOf).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }) : 'just now';
+  showAskAnswer(title, buildAskStationList(rows),
+    `Live feed, ${asOf} New York time. Listed first: the empty stations that usually lose the most bikes at this hour. Click a station for its briefing.`);
+}
+
+function renderAskTimed(key) {
+  ask.lastList = null;
+  setAskBack(null);
+  if (key === 'live-empty') renderAskLiveEmpty();
+  else renderAskTypicalHour(key);
+}
+
+// Labels and visibility follow the clock and what loaded; refreshed every minute.
+function updateTimedChips() {
+  for (const [key, q] of Object.entries(ASK_TIMED)) {
+    const chip = document.getElementById(`ask-chip-${key}`);
+    const show = q.available();
+    chip.classList.toggle('hidden', !show);
+    chip.textContent = show ? q.label() : '';
+  }
 }
 
 // The provenance line under a briefing -- who wrote it and which data windows.
@@ -5180,7 +5313,7 @@ function askSubmit(text) {
     return 'choose';
   }
   showAskAnswer(`“${text.trim()}”`,
-    'For now I answer two kinds of question: about one station (type its name, or click it on the map) and the three lists above. Open-ended questions are coming next.', '');
+    'I answer questions about one station (type its name, or click it on the map), plus the ready-made questions above. They follow the time of day in New York.', '');
   return 'unsupported';
 }
 
@@ -5212,6 +5345,11 @@ function initAskPanel() {
   for (const key of Object.keys(ASK_LISTS)) {
     document.getElementById(`ask-chip-${key}`).addEventListener('click', () => renderAskList(key));
   }
+  for (const key of Object.keys(ASK_TIMED)) {
+    document.getElementById(`ask-chip-${key}`).addEventListener('click', () => renderAskTimed(key));
+  }
+  updateTimedChips(); // hidden until the data that backs them has loaded
+  setInterval(updateTimedChips, 60e3);
   document.getElementById('ask-back').addEventListener('click', () => renderAskList(ask.lastList));
 }
 
@@ -5941,11 +6079,13 @@ const liveReady = fetchLiveFeed()
 const ready = Promise.all([flowsReady, liveReady, fleetScenariosReady, elasticitiesReady, scenarioPresetsReady, modelPerformanceReady, reliabilityReady, reliabilityCapacityReady])
   .then(([flowsResult, liveResult, fleetScenariosPayload, elasticitiesPayload, scenarioPresetsPayload, modelPerformancePayload, reliabilityPayload, reliabilityCapacityPayload]) => {
     state.stations = flowsResult.payload.stations;
+    state.tripMonths = flowsResult.payload.granularity.months;
     state.equityJoinMeta = flowsResult.payload.equity_join || null;
     state.liveAvailable = liveResult.ok;
     state.liveStations = liveResult.ok ? liveResult.payload.stations : {};
     state.liveAsOf = liveResult.ok ? liveResult.payload.last_updated : null;
     state.liveSource = liveResult.ok ? (liveResult.payload.source || 'snapshot') : null;
+    updateTimedChips(); // the ready-made questions appear once the data backing them is in
     const ids = Object.keys(state.stations);
 
     // Bounding box derived from the real station coordinates in flows.json,
@@ -6529,6 +6669,8 @@ if (typeof globalThis !== 'undefined') {
     resetToBaseline, buildShareableUrl, parsePresetInput,
     normalizeName, normalizeStationQuery, matchStations, listQuestionFor, rankUnusable, briefingSourceLine,
     renderAskStation, renderAskList, askSubmit, askAboutStation, initAskPanel, ASK_LISTS,
+    nycClock, hourRangeLabel, monthKeyFor, rankTypicalHour, nextHourContext, renderAskTimed, updateTimedChips, ASK_TIMED, tripWindowLabel,
+    setAskNow: ms => { ask.now = ms; },
     getState: () => state,
     ready, briefingsReady,
   };

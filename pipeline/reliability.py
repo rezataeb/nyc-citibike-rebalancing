@@ -53,6 +53,8 @@ import statistics
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pipeline.window import AVAILABILITY_END
+
 LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "gbfs_log"
 LOG_PATH = LOG_DIR / "snapshots.csv"  # the frozen pre-Session-71 file -- still read, via LOG_DIR's glob below
 RELIABILITY_PATH = Path(__file__).resolve().parent.parent / "data" / "reliability.json"
@@ -98,13 +100,17 @@ def _iter_log_paths(log_path: Path) -> list[Path]:
     return [log_path]
 
 
-def compute_reliability(log_path: Path = LOG_DIR) -> dict:
+def compute_reliability(log_path: Path = LOG_DIR, until: str | None = AVAILABILITY_END) -> dict:
     """Read the snapshot log (or, as of Session 71, every rotated snapshot
     log file in a directory) and return the reliability payload.
 
     Streams each CSV rather than loading it into a DataFrame -- the combined
     history is millions of rows and every quantity here is a running count,
     so there is nothing a DataFrame would buy beyond memory.
+
+    `until` (an inclusive UTC date, default pipeline/window.py's
+    AVAILABILITY_END) freezes the window: snapshots after it are skipped, so
+    later log files never silently change a published rate. None reads all.
     """
     timestamps: set[str] = set()
     per_station: dict[str, dict[str, int]] = {}
@@ -117,6 +123,8 @@ def compute_reliability(log_path: Path = LOG_DIR) -> dict:
     for path in _iter_log_paths(log_path):
         with path.open() as handle:
             for row in csv.DictReader(handle):
+                if until is not None and row["timestamp"][:10] > until:
+                    continue
                 timestamps.add(row["timestamp"])
                 station_id = row["station_id"]
 
@@ -204,8 +212,10 @@ if __name__ == "__main__":
         help="directory of snapshots*.csv files (default: data/gbfs_log). Point it at a "
              "folder that also holds the data-snapshots branch's daily files to use the full log.",
     )
+    parser.add_argument("--until", default=AVAILABILITY_END,
+                        help=f"last UTC date to include (default {AVAILABILITY_END}, from pipeline/window.py)")
     args = parser.parse_args()
-    payload = compute_reliability(args.log_dir)
+    payload = compute_reliability(args.log_dir, args.until)
 
     RELIABILITY_PATH.parent.mkdir(parents=True, exist_ok=True)
     RELIABILITY_PATH.write_text(json.dumps(payload, indent=2))

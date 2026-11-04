@@ -78,7 +78,7 @@
     <a href="mailto:taeb.reza@gmail.com">taeb.reza@gmail.com</a>
     <a href="https://github.com/rezataeb/nyc-citibike-rebalancing" target="_blank" rel="noopener">GitHub</a>
   </div>
-  <p class="note">The video has no voice; captions repeat the on-screen text. Every number in it comes from the project's public data files.</p>
+  <p class="note">The video has no voice and no captions: it shows each feature being used. Every number in it comes from the project's public data files.</p>
 </main>
 <script>
 // A video's last slide shows its call to action, but an MP4 cannot hold
@@ -116,10 +116,7 @@ function initVideoPage() {
   document.getElementById('tour-title').textContent = cfg.title;
   document.getElementById('tour-sub').textContent = cfg.sub;
   video.poster = `media/${id}_poster.jpg`;
-  video.src = `media/${id}.mp4`;
-  const track = document.createElement('track');
-  Object.assign(track, { kind: 'captions', src: `media/${id}.vtt`, srclang: 'en', label: 'English' });
-  video.appendChild(track);
+  video.src = `media/${id}.mp4`; // no captions track: the videos carry no captions or subtitles (user rule)
   // Default state set in JS, not left to markup (CLAUDE.md standing rule).
   card.classList.add('hidden');
   card.classList.toggle('light', cfg.light);

@@ -35,11 +35,7 @@ from pipeline.flows import compute_daily_flow_components, compute_net_flow, expo
 from pipeline.qc import run_qc
 from pipeline.station_typology import apply_typology
 
-TARGET_MONTHS = [
-    "2025-09", "2025-10", "2025-11", "2025-12",
-    "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
-    "2026-07", "2026-08",
-]
+from pipeline.window import TARGET_MONTHS  # the 12-month window, set in one place (pipeline/window.py)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 FLOWS_PATH = DATA_DIR / "flows.json"

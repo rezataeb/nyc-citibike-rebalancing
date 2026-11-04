@@ -15,7 +15,7 @@
   <div class="meta">
     <div><b>Live app:</b> nyc-citibike-rebalancing.vercel.app</div>
     <div><b>Code and data:</b> github.com/rezataeb/nyc-citibike-rebalancing</div>
-    <div><b>Prepared:</b> October 2026 · Independent portfolio project · public data only.
+    <div><b>Prepared:</b> November 2026 · Independent project · public data only.
       Not an official NYC DOT or Lyft product.</div>
     <div><b>About the numbers:</b> every figure in this report is read from the project's
       committed data files at build time (<code>report/build_report.py</code>), not typed in by hand.</div>
@@ -38,7 +38,9 @@
     <li><strong>A simple baseline beat the machine-learning models.</strong> Over {{n_folds}} walk-forward
       test months, a seasonal-naive forecast had the lowest error (MAE {{mae_naive}} bikes/day, vs.
       {{mae_guarded}} for the guarded model). The dashboard is honest about this rather than
-      presenting the more complex model as better.</li>
+      presenting the more complex model as better. A stricter forward-only benchmark agrees hour by hour,
+      but for weekday morning-peak totals a recency-weighted forecast (Holt-Winters) is
+      {{bm_am_peak_holt_winters_skill}} better (Section 4.4).</li>
     <li><strong>Trucks alone cannot close the gap.</strong> In the fleet simulator, {{fleet_max_trucks}} trucks
       fully rebalanced {{fleet_max_serviced}} of {{fleet_n_deficit_flagged}} deficit stations ({{fleet_max_share}})
       under a fixed morning baseline.</li>
@@ -176,14 +178,41 @@
     for that hour and day type is hard to beat. The models only pulled ahead in the coldest months. The dashboard therefore shows historical patterns as the main view and labels the
     model comparison openly, instead of presenting a model forecast as the answer.</p>
 
-  <h3>4.4 What a truck fleet can cover</h3>
+  <h3>4.4 A stricter test: forward-only time-series forecasts</h3>
+  <p>The comparison above holds out one month at a time, so a held-out month can learn from later months,
+    and it scores only station-hours that had trips. A second benchmark
+    (<code>pipeline/forecast_benchmark.py</code>) removes both shortcuts. It uses the {{bm_n_stations}} stations
+    with trips in every month, counts hours without trips as zero, and makes each forecast at the start of a week
+    from earlier data only, for the whole week ahead ({{bm_n_weeks}} test weeks from {{bm_first_week}}). It compares
+    the same-hour profile (the naive baseline) with last week's values, the mean of the last four weeks,
+    Holt-Winters with a weekly season (alpha {{bm_hw_alpha}}, gamma {{bm_hw_gamma}}, tuned on earlier weeks only), and
+    a gradient-boosted model with lagged values and the day's actual weather.</p>
+  <table>
+    <tr><th>Method</th><th class="num">Hourly</th><th class="num">Weekday 6–9 AM total</th><th class="num">Daily total</th></tr>
+    <tr><td>Same-hour profile (naive)</td><td class="num">{{bm_hourly_profile_mae}}</td><td class="num">{{bm_am_peak_profile_mae}}</td><td class="num">{{bm_daily_profile_mae}}</td></tr>
+    <tr><td>Last week</td><td class="num">{{bm_hourly_last_week_mae}} ({{bm_hourly_last_week_skill}})</td><td class="num">{{bm_am_peak_last_week_mae}} ({{bm_am_peak_last_week_skill}})</td><td class="num">{{bm_daily_last_week_mae}} ({{bm_daily_last_week_skill}})</td></tr>
+    <tr><td>Mean of last four weeks</td><td class="num">{{bm_hourly_four_weeks_mae}} ({{bm_hourly_four_weeks_skill}})</td><td class="num">{{bm_am_peak_four_weeks_mae}} ({{bm_am_peak_four_weeks_skill}})</td><td class="num">{{bm_daily_four_weeks_mae}} ({{bm_daily_four_weeks_skill}})</td></tr>
+    <tr><td>Holt-Winters</td><td class="num">{{bm_hourly_holt_winters_mae}} ({{bm_hourly_holt_winters_skill}})</td><td class="num">{{bm_am_peak_holt_winters_mae}} ({{bm_am_peak_holt_winters_skill}})</td><td class="num">{{bm_daily_holt_winters_mae}} ({{bm_daily_holt_winters_skill}})</td></tr>
+    <tr><td>Gradient boosting + weather</td><td class="num">{{bm_hourly_gbm_mae}} ({{bm_hourly_gbm_skill}})</td><td class="num">{{bm_am_peak_gbm_mae}} ({{bm_am_peak_gbm_skill}})</td><td class="num">{{bm_daily_gbm_mae}} ({{bm_daily_gbm_skill}})</td></tr>
+    <caption>Mean absolute error in bikes (net flow), with the change against the profile; positive is better.</caption>
+  </table>
+  <p><strong>The naive baseline is still the right default, with one exception.</strong> Hour by hour and for daily
+    totals, nothing beats the profile by much: gradient boosting is {{bm_hourly_gbm_skill}} hourly (better in
+    {{bm_hourly_gbm_wins}} of {{bm_n_weeks}} weeks), and it is given the actual weather, which a real forecast would not
+    have, so that gain is an upper bound. Last week alone is the worst method everywhere. The exception is the
+    <strong>weekday morning-peak total</strong>, the number a rebalancing plan needs: Holt-Winters is
+    {{bm_am_peak_holt_winters_skill}} against the profile (better in {{bm_am_peak_holt_winters_wins}} of {{bm_n_weeks}} weeks), and even the
+    four-week mean is {{bm_am_peak_four_weeks_skill}}. Recent weeks carry information about the morning peak that a long average
+    blurs. The dashboard does not use this yet (Section 6).</p>
+
+  <h3>4.5 What a truck fleet can cover</h3>
   <p>The morning baseline flags {{fleet_n_deficit_flagged}} deficit stations and
     {{fleet_n_surplus_flagged}} surplus stations. One truck fully rebalances {{fleet_one_truck}} deficit
     stations; {{fleet_max_trucks}} trucks rebalance {{fleet_max_serviced}} ({{fleet_max_share}}).
     Every truck in every scenario hits the {{fleet_max_stops}}-stop cap, so the binding limit is stops per
     shift, not a lack of stations needing work.</p>
   <figure class="avoid-break">
-    <img src="figures/fleet_coverage.svg" alt="Bar chart: deficit stations fully rebalanced rises roughly linearly from 15 with one truck to 142 with ten trucks." style="width:100%">
+    <img src="figures/fleet_coverage.svg" alt="Bar chart: deficit stations fully rebalanced rises roughly linearly from {{fleet_one_truck}} with one truck to {{fleet_max_serviced}} with {{fleet_max_trucks}} trucks." style="width:100%">
     <figcaption>Deficit stations fully rebalanced, by fleet size (cumulative).</figcaption>
   </figure>
   <p>For a planner this points beyond trucks: where imbalance is structural and recurs every day,
@@ -292,10 +321,13 @@
   <h2>6. Future steps</h2>
   <p class="lead">Ordered by value to a DOT reviewer per unit of effort. None of these is built yet.</p>
   <ol class="steps">
-    <li><strong>Refresh reliability on a schedule.</strong> The logger keeps adding snapshots on the
-      <code>data-snapshots</code> branch, but <code>pipeline/reliability.py</code> only runs by hand. A weekly
-      job that re-runs it and <code>pipeline/reliability_capacity.py</code> would keep the dashboard's window
-      current, and by spring would allow a first seasonal comparison. Low effort, high value.</li>
+    <li><strong>Forecast the morning peak with recent weeks.</strong> The benchmark in 4.4 shows a recency-weighted
+      forecast is clearly better for weekday morning-peak totals. Showing that next to the historical pattern, labeled
+      as a forecast, would give a truck plan a better starting number. Low effort: the method is already written and tested.</li>
+    <li><strong>Roll the baseline year forward.</strong> The data window is set in one file
+      (<code>pipeline/window.py</code>) and one command rebuilds everything. Rolling it each spring and fall
+      would allow a first seasonal comparison of reliability, which the logger keeps collecting on the
+      <code>data-snapshots</code> branch.</li>
     <li><strong>Log the full <code>station_information</code> response on every poll.</strong> This is what
       the Comptroller's project does. It would start a real capacity history going forward, so the gap in 5.2
       cannot happen again for any other field.</li>
@@ -316,18 +348,21 @@
 
 <section id="ai-llm">
   <h2>7. How AI and LLMs could improve the tool</h2>
-  <p class="lead">The core rule would not change: the pipeline computes every number, and a language model
-    only explains, retrieves, or drafts around those numbers. Used that way, an LLM can make the tool
-    easier to use for people who will never open a JSON file. None of this is built yet.</p>
+  <p class="lead">The core rule: the pipeline computes every number, and a language model only explains,
+    retrieves, or drafts around those numbers. Used that way, an LLM makes the tool easier to use for people
+    who will never open a JSON file. <strong>The first application below is built and live</strong> (the
+    dashboard's "Ask the data" panel); the rest are not built yet.</p>
 
   <h3>7.1 Useful applications</h3>
   <dl>
-    <dt>Plain-language station briefings</dt>
-    <dd>For any station, generate a short summary from its own record: its flow pattern, typology,
-      reliability rate and rank, and nearby NYCHA, schools and subway. A council member's office or a
-      community board would read two or three plain sentences (for example, that a station fills up most
-      weekday mornings and how often it was found unusable) instead of a chart. Briefings would be generated once in the pipeline and saved as
-      JSON, so the site stays static and free to host.</dd>
+    <dt>Plain-language station briefings (built)</dt>
+    <dd>For any station, a short summary from its own record: its flow pattern, typology, reliability rate
+      and rank, and nearby NYCHA, schools and subway. A council member's office or a community board reads two
+      or three plain sentences instead of a chart. Briefings are written once in the pipeline by Claude Haiku
+      through the Batch API, checked by code (every number must match the station's record; a failed briefing
+      falls back to a template), and saved as JSON, so the site stays static and free to host. Next to them,
+      ready-made questions follow the New York clock ("Where do bikes run out next hour?", answered from the
+      same calendar month of the baseline year) and are computed by code, not written by the model.</dd>
     <dt>Questions in plain English</dt>
     <dd>A reviewer asks "Which commuter-core stations were full most often in August?" The model turns that
       into a structured query (filters, sort, limit) that ordinary code runs against the existing data files.
@@ -350,8 +385,8 @@
   <h3>7.2 Guardrails</h3>
   <ul>
     <li><strong>No invented numbers.</strong> Every number in generated text must appear in the input record.
-      An automated check would compare them and reject the text if any number is new, the same way this
-      report refuses to build with an unfilled placeholder.</li>
+      An automated check compares them and rejects the text if any number is new (built for the briefings),
+      the same way this report refuses to build with an unfilled placeholder.</li>
     <li><strong>Show the source.</strong> Every generated answer names the data file and window it came from.</li>
     <li><strong>Say "I don't know".</strong> When the data does not cover a question, for example outage
       duration (5.1), the system says so instead of guessing.</li>

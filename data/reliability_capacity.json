@@ -2,42 +2,42 @@
   "buildable": true,
   "window": {
     "start": "2026-07-13T18:22:42+00:00",
-    "end": "2026-10-27T23:32:26+00:00",
-    "days": 106,
-    "n_snapshots": 1208,
-    "median_gap_minutes": 64.0,
+    "end": "2026-10-31T22:13:25+00:00",
+    "days": 110,
+    "n_snapshots": 1222,
+    "median_gap_minutes": 64.7,
     "max_gap_minutes": 20883.5,
     "max_gap_start": "2026-08-30T05:49:10+00:00",
     "max_gap_end": "2026-09-13T17:52:39+00:00",
-    "n_days_with_snapshots": 94
+    "n_days_with_snapshots": 98
   },
-  "n_joined": 2397,
+  "n_joined": 2438,
   "min_observations": 20,
   "method": {
     "inputs": "reliability.py's per-station unusable rate; a live GBFS capacity fetch; flows.json's weekday-curve magnitude as a demand control",
     "model": "unusable_rate ~ capacity + log1p(demand), plain OLS",
     "controls": "demand only -- borough/zone is not available anywhere in this pipeline"
   },
-  "capacity_coefficient_per_dock": -0.0010385786653882947,
-  "capacity_coefficient_se": 0.00017491786788989525,
+  "capacity_coefficient_per_dock": -0.001102150072499869,
+  "capacity_coefficient_se": 0.0001760873583223027,
   "capacity_gap_docks": 20,
-  "reliability_gap_points": 2.0771573307765894,
+  "reliability_gap_points": 2.204300144999738,
   "band_summary": [
     {
       "label": "< 20 docks",
-      "n_stations": 570,
-      "mean_unusable_rate": 0.14893739907156925
+      "n_stations": 610,
+      "mean_unusable_rate": 0.15457464463067103
     },
     {
       "label": "20-39 docks",
-      "n_stations": 1375,
-      "mean_unusable_rate": 0.13375671850001586
+      "n_stations": 1376,
+      "mean_unusable_rate": 0.13431770959158282
     },
     {
       "label": "40+ docks",
       "n_stations": 452,
-      "mean_unusable_rate": 0.10034736418131229
+      "mean_unusable_rate": 0.10057903240478319
     }
   ],
-  "headline": "After accounting for demand, stations with 40+ docks are associated with unusable rates about 2.1 percentage points lower than stations with under 20 docks."
+  "headline": "After accounting for demand, stations with 40+ docks are associated with unusable rates about 2.2 percentage points lower than stations with under 20 docks."
 }

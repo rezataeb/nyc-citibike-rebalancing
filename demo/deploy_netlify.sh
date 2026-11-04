@@ -12,5 +12,5 @@ OUT=$(mktemp -d)
 sed 's/<body data-video="hiring">/<body data-video="dot">/' video.html > "$OUT/index.html"
 grep -q 'data-video="dot"' "$OUT/index.html"
 mkdir "$OUT/media"
-cp media/dot.mp4 media/dot.vtt media/dot_poster.jpg "$OUT/media/"
+cp media/dot.mp4 media/dot_poster.jpg "$OUT/media/"
 npx -y netlify-cli deploy --prod --dir "$OUT" --site "$SITE_ID" --message "Video tour page"

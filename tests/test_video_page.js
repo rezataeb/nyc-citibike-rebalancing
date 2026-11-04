@@ -61,7 +61,7 @@ function testVideoChoice() {
   const dot = load({ dataVideo: 'dot' }).elements;
   assert.strictEqual(dot.tour.src, 'media/dot.mp4');
   assert.strictEqual(dot.tour.poster, 'media/dot_poster.jpg');
-  assert.strictEqual(dot.tour.children[0].src, 'media/dot.vtt', 'captions track for the same video');
+  assert.strictEqual(dot.tour.children.length, 0, 'no captions track: the videos carry no captions (user rule)');
   assert.strictEqual(dot['tour-title'].textContent, 'A 90-second tour');
   assert.ok(dot.endcard.classList.contains('light'), 'DOT video (light slides) gets the light end card');
   assert.strictEqual(dot['endcard-title'].textContent, 'See where it hurts and who it hits.', 'card repeats that video’s last slide');

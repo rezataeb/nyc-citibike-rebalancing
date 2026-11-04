@@ -7,7 +7,7 @@
 **Demo:** https://nyc-citibike-rebalancing.netlify.app  
 **Video tour (1 min):** https://nyc-citibike-rebalancing.vercel.app/video.html  
 **Report (PDF):** [report/Citi_Bike_Rebalancing_Report.pdf](report/Citi_Bike_Rebalancing_Report.pdf)  
-**Early data exploration, Jul 2025–Jun 2026 window (PDF):** [notebooks/session_7_5_eda_report.pdf](notebooks/session_7_5_eda_report.pdf) ([notebook](notebooks/session_7_5_eda_report.ipynb)) -- predates the current Sep 2025–Aug 2026 window, so its numbers differ  
+**Early data exploration, Jul 2025–Jun 2026 window (PDF):** [notebooks/session_7_5_eda_report.pdf](notebooks/session_7_5_eda_report.pdf) ([notebook](notebooks/session_7_5_eda_report.ipynb)) -- predates the current Oct 2025–Sep 2026 window, so its numbers differ  
 **Repo:** https://github.com/rezataeb/nyc-citibike-rebalancing
 
 ![Dashboard: historical station balance map, KPI ribbon and priority truck stops](docs/dashboard-screenshot.png)
@@ -46,21 +46,36 @@ dashboard says so. It is not a penalty calculation.
   model in the browser.
 - **Reliability** -- how often each station was empty, full or offline in the
   GBFS log, and what station capacity predicts about it.
+- **Ask the data** -- type a station name for a short plain-English briefing,
+  written in advance by Claude Haiku from that station's own facts and checked
+  by code before it ships (every number must match the facts; failures fall
+  back to a template). Ready-made questions follow the New York clock --
+  "Where do bikes run out next hour?", "Where do docks fill up next hour?"
+  (ranked from the same calendar month of the baseline year) and "Which
+  stations are empty right now?" (live feed) -- and are computed, not
+  AI-written.
 
 ## What the data shows (and does not)
 
-- Across **2,889,257 station observations** (Jul 13 -- Oct 27, 2026),
-  stations were unusable (empty or full) **13.0%** of the time. Offline
+- Across **2,922,701 station observations** (Jul 13 -- Oct 31, 2026),
+  stations were unusable (empty or full) **13.1%** of the time. Offline
   stations are excluded from that denominator.
 - After accounting for demand, stations with 40+ docks are associated with
-  unusable rates about **2.1 percentage points lower** than stations with
-  under 20 docks (2,397 stations; a plain OLS fit). This is a pattern in
+  unusable rates about **2.2 percentage points lower** than stations with
+  under 20 docks (2,438 stations; a plain OLS fit). This is a pattern in
   observational data, not proof that adding docks causes better reliability.
+- **Forecasting: the plain baseline is hard to beat.** In the 12-fold
+  backtest, the seasonal-naive profile (MAE 1.92) beats the guarded model
+  (2.03) in 9 of 12 months. A separate forward-only benchmark
+  (`pipeline/forecast_benchmark.py`; 2,054 stations, 38 weekly folds) agrees
+  at the hourly and daily level, but for **weekday morning-peak totals**
+  (6--9 AM) a recency-weighted Holt-Winters forecast is **16.6% better** than
+  the profile (34 of 38 weeks). See `data/forecast_benchmark.json`.
 
 ## Limitations
 
-- The reliability log is **irregularly sampled**: 1,208 snapshots over 106
-  days, 94 of which have data, with a median gap of 64 minutes. The longest
+- The reliability log is **irregularly sampled**: 1,222 snapshots over 110
+  days, 98 of which have data, with a median gap of 65 minutes. The longest
   gap is 14.5 days (Aug 30 -- Sep 13, 2026), when the log hit GitHub's 100 MB
   file limit. Rates are estimates from that sample, not continuous
   measurements.
@@ -97,7 +112,7 @@ directly from the browser.
 | Layer | Source | Vintage / cadence | Used for |
 |---|---|---|---|
 | Station status | Citi Bike GBFS feed | Live, refreshed every 60 s in Live mode; logged hourly | Live Docks, reliability log |
-| Trips | Citi Bike S3 trip archives | Monthly files: Sep 2025 -- Aug 2026, plus Jun 2025 | Net flow by hour, season, month |
+| Trips | Citi Bike S3 trip archives | Monthly files: Oct 2025 -- Sep 2026 | Net flow by hour, season, month |
 | NYCHA developments | NYC Open Data `phvi-damg` (216 records) | Static snapshot | 300 m equity proximity |
 | Schools | NYC Open Data `wg9x-4ke6` (1,899 records) | 2019--2020 locations; the only coordinate-bearing school dataset on NYC Open Data when checked | 300 m equity proximity |
 | Subway stations | NY State Open Data `i9wp-a4ja` (2,120 records) | Static snapshot | 800 m subway-gap distance |
@@ -180,7 +195,23 @@ An hourly GitHub Actions job logs the GBFS feed. Those commits go to the
 `data/gbfs_log/snapshots.csv` and the `data-snapshots` branch's
 `snapshots_*.csv` files in one folder and pass it with `--log-dir <folder>`.
 The committed `reliability.json` was built that way from complete UTC days
-through Oct 27, 2026; then run `pipeline/reliability_capacity.py`.
+through Oct 31, 2026 (`AVAILABILITY_END` in `pipeline/window.py`; later log
+files are ignored, so the published rate stays fixed); then run
+`pipeline/reliability_capacity.py`.
+
+## Refreshing the data window
+
+The data is a **baseline year**: twelve months of trips, one of each calendar
+month, so "a typical November weekday at 9 AM" has an answer whatever today's
+date is. Nothing in the pages types a date; every label is built from the data
+files (a test enforces this). To roll the year forward, change the two values
+in `pipeline/window.py` (`WINDOW_END_MONTH`, `AVAILABILITY_END`), then run:
+
+```
+python3 -m pipeline.update_window      # downloads new months, drops old ones, repairs station ids
+python3 -m pipeline.reproduce_all --skip-download
+python3 -m pipeline.briefing_writer --full   # paid, about $0.15-0.40 via the Batch API
+```
 
 ## Reproducing the pipeline
 
@@ -192,7 +223,7 @@ dashboard shows. This section is for actually re-deriving them, to check
 that they hold up.
 
 ```
-python3 -m pipeline.reproduce_all --skip-download   # fast path, ~20-40 min
+python3 -m pipeline.reproduce_all --skip-download   # fast path, ~1.5 hours
 python3 -m pipeline.reproduce_all                    # full path, ~1-2 hours, several GB
 ```
 

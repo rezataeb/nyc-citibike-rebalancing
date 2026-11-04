@@ -162,6 +162,28 @@ def model_facts(perf: dict) -> dict[str, str]:
     }
 
 
+def benchmark_facts(bench: dict) -> dict[str, str]:
+    """Forward-only forecast benchmark, from forecast_benchmark.json.
+
+    For each scoring level: the profile's MAE, then each other method's MAE
+    and skill vs. the profile (positive = better). Also names the best
+    method per level, so the text can't claim a winner the file disagrees with.
+    """
+    facts = {
+        "bm_n_stations": fmt_int(bench["n_stations"]),
+        "bm_n_weeks": str(bench["n_test_weeks"]),
+        "bm_first_week": fmt_day(bench["first_test_week"]),
+        "bm_hw_alpha": f"{bench['holt_winters']['alpha']:g}",
+        "bm_hw_gamma": f"{bench['holt_winters']['gamma']:g}",
+    }
+    for level, rows in bench["results"].items():
+        for method, row in rows.items():
+            facts[f"bm_{level}_{method}_mae"] = f"{row['mae']:.2f}"
+            facts[f"bm_{level}_{method}_skill"] = f"{row['skill_vs_profile'] * 100:+.1f}%"
+            facts[f"bm_{level}_{method}_wins"] = str(row["weeks_better_than_profile"])
+    return facts
+
+
 def reliability_facts(rel: dict) -> dict[str, str]:
     """GBFS-log reliability window and rates, from reliability.json."""
     w, s, p = rel["window"], rel["system"], rel["per_station_summary"]
@@ -254,6 +276,7 @@ def collect_facts(data_dir: Path = DATA_DIR) -> dict[str, str]:
     facts.update(reliability_facts(load_json(data_dir / "reliability.json")))
     facts.update(capacity_facts(load_json(data_dir / "reliability_capacity.json")))
     facts.update(fleet_facts(load_json(data_dir / "fleet_scenarios.json")))
+    facts.update(benchmark_facts(load_json(data_dir / "forecast_benchmark.json")))
     return facts
 
 

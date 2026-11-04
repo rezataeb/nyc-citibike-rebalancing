@@ -10,6 +10,9 @@ from the same files. Chrome's own print-to-PDF engine then renders the
 filled page, so the PDF is exactly what Chrome's print preview shows -- no
 LaTeX, same approach as the earlier docs V2 doc set.
 
+Builds two PDFs from the same facts: the full report (report.html) and the
+five-page product reference (reference.html).
+
 Usage:
     python3 -m report.build_report
 """
@@ -184,6 +187,19 @@ def benchmark_facts(bench: dict) -> dict[str, str]:
     return facts
 
 
+def briefing_facts(briefings: dict) -> dict[str, str]:
+    """AI station briefings, from briefings.json meta: count, model, and how many fell back to the template."""
+    meta = briefings["meta"]
+    n, template = meta["n"], meta["sources"].get("template", 0)
+    names = {"claude-haiku-5-5": "Claude Haiku 5.5"}
+    return {
+        "brief_n": fmt_int(n),
+        "brief_model": names.get(meta["model"], meta["model"]),
+        "brief_n_template": fmt_int(template),
+        "brief_ai_share": fmt_pct((n - template) / n),
+    }
+
+
 def reliability_facts(rel: dict) -> dict[str, str]:
     """GBFS-log reliability window and rates, from reliability.json."""
     w, s, p = rel["window"], rel["system"], rel["per_station_summary"]
@@ -277,6 +293,7 @@ def collect_facts(data_dir: Path = DATA_DIR) -> dict[str, str]:
     facts.update(capacity_facts(load_json(data_dir / "reliability_capacity.json")))
     facts.update(fleet_facts(load_json(data_dir / "fleet_scenarios.json")))
     facts.update(benchmark_facts(load_json(data_dir / "forecast_benchmark.json")))
+    facts.update(briefing_facts(load_json(data_dir / "briefings.json")))
     return facts
 
 
@@ -433,13 +450,17 @@ def render_pdf(html_path: Path = HTML_PATH, pdf_path: Path = PDF_PATH) -> Path:
     return pdf_path
 
 
-def build(data_dir: Path = DATA_DIR, pdf_path: Path = PDF_PATH) -> Path:
+REFERENCE_HTML = REPORT_DIR / "reference.html"
+REFERENCE_PDF = REPORT_DIR / "Citi_Bike_Rebalancing_Reference.pdf"
+
+
+def build(data_dir: Path = DATA_DIR, pdf_path: Path = PDF_PATH, html_path: Path = HTML_PATH) -> Path:
     """Full build: facts -> filled HTML -> figures -> PDF.
 
-    The filled page is written next to report.html (so report.css and
+    The filled page is written next to the template (so report.css and
     figures/ resolve by the same relative paths) and removed afterwards.
     """
-    filled = fill_template(HTML_PATH.read_text(encoding="utf-8"), collect_facts(data_dir))
+    filled = fill_template(html_path.read_text(encoding="utf-8"), collect_facts(data_dir))
     build_figures(data_dir)
     filled_path = REPORT_DIR / "_filled.html"
     filled_path.write_text(filled, encoding="utf-8")
@@ -450,5 +471,5 @@ def build(data_dir: Path = DATA_DIR, pdf_path: Path = PDF_PATH) -> Path:
 
 
 if __name__ == "__main__":
-    out = build()
-    print(f"Wrote {out} ({out.stat().st_size:,} bytes)")
+    for out in (build(), build(pdf_path=REFERENCE_PDF, html_path=REFERENCE_HTML)):
+        print(f"Wrote {out} ({out.stat().st_size:,} bytes)")
